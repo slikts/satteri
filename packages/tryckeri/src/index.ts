@@ -11,7 +11,9 @@ export {
   hastBufferToHtmlStr,
   compileMdx,
   compileMdxFromBuffer,
-} from "./parse.js";
+  parseToHtml,
+  parseMdxToHtml,
+} from "../index.js";
 
 // HAST support
 export {

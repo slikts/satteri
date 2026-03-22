@@ -27,16 +27,16 @@ pub fn compile_mdx_from_buffer(buf: Buffer) -> Result<String> {
 
 /// Parse Markdown/MDX source and return a raw binary Arena buffer.
 #[napi]
-pub fn parse_to_buffer(source: String) -> Result<Buffer> {
+pub fn parse_to_buffer(source: String) -> Result<Uint8Array> {
     let arena = parser::parse(&source, &parser::ParseOptions::default());
-    Ok(Buffer::from(arena.to_raw_buffer()))
+    Ok(Uint8Array::new(arena.to_raw_buffer()))
 }
 
 /// Parse MDX source and return a raw binary Arena buffer (MDX mode).
 #[napi]
-pub fn parse_mdx_to_buffer(source: String) -> Result<Buffer> {
+pub fn parse_mdx_to_buffer(source: String) -> Result<Uint8Array> {
     let arena = parser::parse(&source, &parser::ParseOptions::mdx());
-    Ok(Buffer::from(arena.to_raw_buffer()))
+    Ok(Uint8Array::new(arena.to_raw_buffer()))
 }
 
 /// Parse Markdown source and return a HAST binary buffer.
@@ -87,13 +87,6 @@ pub fn mdast_buffer_to_hast_buffer(buf: Buffer) -> Result<Buffer> {
 #[napi]
 pub fn hast_buffer_to_html_str(buf: Buffer) -> Result<String> {
     tryckeri_hast::hast_buffer_to_html(&buf).map_err(|e| napi::Error::from_reason(format!("{e:?}")))
-}
-
-/// Parse Markdown source and return a raw binary Arena buffer as Uint8Array.
-#[napi]
-pub fn parse_to_uint8array(source: String) -> Result<Uint8Array> {
-    let arena = parser::parse(&source, &parser::ParseOptions::default());
-    Ok(Uint8Array::new(arena.to_raw_buffer()))
 }
 
 /// Return metadata about the ArenaNode struct size and buffer format version.

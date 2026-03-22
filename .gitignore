@@ -5,3 +5,7 @@ perf.data
 perf.data.old
 flamegraph.svg
 dist
+
+# napi-rs generated bindings
+packages/tryckeri/index.js
+packages/tryckeri/index.d.ts
