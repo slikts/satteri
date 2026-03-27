@@ -20,9 +20,31 @@ export const PROP_BOOL_FALSE = 2;
 export const PROP_SPACE_SEP = 3;
 export const PROP_COMMA_SEP = 4;
 
+// MDX JSX attribute kinds (must match node_types.rs)
+export const MDX_ATTR_BOOLEAN_PROP = 0;
+export const MDX_ATTR_LITERAL_PROP = 1;
+export const MDX_ATTR_EXPRESSION_PROP = 2;
+export const MDX_ATTR_SPREAD = 3;
+
 export interface HastProperty {
   name: string;
   value: string | boolean | string[];
+}
+
+export interface MdxJsxAttribute {
+  type: "mdxJsxAttribute";
+  name: string;
+  value: string | MdxJsxAttributeValueExpression | null;
+}
+
+export interface MdxJsxExpressionAttribute {
+  type: "mdxJsxExpressionAttribute";
+  value: string;
+}
+
+export interface MdxJsxAttributeValueExpression {
+  type: "mdxJsxAttributeValueExpression";
+  value: string;
 }
 
 // ArenaNode field offsets (same layout as MDAST — shared binary format)
@@ -222,6 +244,72 @@ export class HastReader {
     }
 
     return { tagName, properties };
+  }
+
+  /**
+   * Get MDX JSX element data: name and attributes.
+   *
+   * MDX JSX element type_data layout:
+   *   [name: StringRef(8B)][attr_count: u32(4B)][_pad: u32(4B)] = 16-byte header
+   *   then attr_count * 20 bytes:
+   *     [kind: u8(1B)][_pad: [u8;3](3B)][name: StringRef(8B)][value: StringRef(8B)]
+   */
+  getMdxJsxElementData(
+    nodeId: number,
+  ): { name: string | null; attributes: (MdxJsxAttribute | MdxJsxExpressionAttribute)[] } {
+    const data = this.getTypeData(nodeId);
+    if (data.length < 16) {
+      return { name: null, attributes: [] };
+    }
+
+    const nameRef = this.#readStringRef(data, 0);
+    const name = nameRef.len > 0 ? this.getString(nameRef.offset, nameRef.len) : null;
+
+    const view = new DataView(data.buffer, data.byteOffset + 8);
+    const attrCount = view.getUint32(0, true);
+
+    const attributes: (MdxJsxAttribute | MdxJsxExpressionAttribute)[] = [];
+    for (let i = 0; i < attrCount; i++) {
+      const base = 16 + i * 20;
+      const kind = data[base]!;
+      const attrNameRef = this.#readStringRef(data, base + 4);
+      const attrValueRef = this.#readStringRef(data, base + 12);
+
+      switch (kind) {
+        case MDX_ATTR_BOOLEAN_PROP:
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: null,
+          });
+          break;
+        case MDX_ATTR_LITERAL_PROP:
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: this.getString(attrValueRef.offset, attrValueRef.len),
+          });
+          break;
+        case MDX_ATTR_EXPRESSION_PROP:
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: {
+              type: "mdxJsxAttributeValueExpression",
+              value: this.getString(attrValueRef.offset, attrValueRef.len),
+            },
+          });
+          break;
+        case MDX_ATTR_SPREAD:
+          attributes.push({
+            type: "mdxJsxExpressionAttribute",
+            value: this.getString(attrValueRef.offset, attrValueRef.len),
+          });
+          break;
+      }
+    }
+
+    return { name, attributes };
   }
 
   /**

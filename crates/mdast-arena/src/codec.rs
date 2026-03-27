@@ -143,8 +143,19 @@ pub struct MathData {
     pub value: StringRef,
 }
 
-/// Data for MdxJsxFlowElement and MdxJsxTextElement.
+/// Header for MdxJsxFlowElement and MdxJsxTextElement type_data.
 /// `name.len == 0` means a fragment.
+///
+/// Full layout (variable-length):
+///   [name: StringRef(8B)][attr_count: u32(4B)][_pad: u32(4B)] = 16-byte header
+///   then attr_count * 20 bytes each:
+///     [kind: u8(1B)][_pad: [u8;3](3B)][attr_name: StringRef(8B)][attr_value: StringRef(8B)]
+///
+/// Attribute kinds (from jsx_attr_parser):
+///   0 = BooleanProp (name only, no value)
+///   1 = LiteralProp (name="literal")
+///   2 = ExpressionProp (name={expr})
+///   3 = Spread ({...expr})
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct MdxJsxElementData {
@@ -345,11 +356,52 @@ pub fn decode_footnote_definition_data(bytes: &[u8]) -> FootnoteDefinitionData {
 // MdxJsxElementData
 // ---------------------------------------------------------------------------
 
-pub fn encode_mdx_jsx_element_data(name: StringRef) -> Vec<u8> {
-    let d = MdxJsxElementData { name };
-    unsafe { struct_to_bytes(&d) }.to_vec()
+/// Encode MDX JSX element type_data with attributes.
+/// `attrs`: slice of (kind, attr_name, attr_value) tuples.
+pub fn encode_mdx_jsx_element_data(
+    name: StringRef,
+    attrs: &[(u8, StringRef, StringRef)],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16 + attrs.len() * 20);
+
+    // 16-byte header: name(8) + attr_count(4) + _pad(4)
+    out.extend_from_slice(unsafe { struct_to_bytes(&name) });
+    out.extend_from_slice(&(attrs.len() as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // _pad
+
+    // Attribute entries: 20 bytes each
+    for &(kind, attr_name, attr_value) in attrs {
+        out.push(kind);
+        out.extend_from_slice(&[0u8; 3]); // _pad
+        out.extend_from_slice(unsafe { struct_to_bytes(&attr_name) });
+        out.extend_from_slice(unsafe { struct_to_bytes(&attr_value) });
+    }
+
+    out
 }
 
+/// Decode just the element name from MDX JSX element type_data.
+pub fn decode_mdx_jsx_element_name(bytes: &[u8]) -> StringRef {
+    unsafe { bytes_to_struct(bytes) }
+}
+
+/// Decode the attribute count from MDX JSX element type_data.
+pub fn decode_mdx_jsx_attr_count(bytes: &[u8]) -> u32 {
+    assert!(bytes.len() >= 12);
+    u32::from_le_bytes(bytes[8..12].try_into().unwrap())
+}
+
+/// Decode an attribute entry by index from MDX JSX element type_data.
+/// Returns (kind, attr_name, attr_value).
+pub fn decode_mdx_jsx_attr(bytes: &[u8], index: u32) -> (u8, StringRef, StringRef) {
+    let base = 16 + index as usize * 20;
+    let kind = bytes[base];
+    let attr_name: StringRef = unsafe { bytes_to_struct(&bytes[base + 4..]) };
+    let attr_value: StringRef = unsafe { bytes_to_struct(&bytes[base + 12..]) };
+    (kind, attr_name, attr_value)
+}
+
+/// Legacy decode — returns just the header struct. Use decode_mdx_jsx_element_name instead.
 pub fn decode_mdx_jsx_element_data(bytes: &[u8]) -> MdxJsxElementData {
     unsafe { bytes_to_struct(bytes) }
 }

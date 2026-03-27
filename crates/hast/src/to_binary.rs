@@ -3,8 +3,9 @@
 use mdast_arena::{
     decode_code_data, decode_definition_data, decode_expression_data, decode_heading_data,
     decode_image_data, decode_link_data, decode_list_data, decode_list_item_data, decode_math_data,
-    decode_mdx_jsx_element_data, decode_reference_data, decode_string_ref_data, BufferError,
-    MdastArena, MdastBuilder, MdastView, NodeType, StringRef,
+    decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name,
+    decode_reference_data, decode_string_ref_data, BufferError, MdastArena, MdastBuilder,
+    MdastView, NodeType, StringRef,
 };
 
 use crate::codec::{encode_mdx_jsx_element_data, encode_text_data};
@@ -690,50 +691,42 @@ fn convert_mdx_jsx_element(
     defs: &[Definition],
     hast_type: u8,
 ) {
-    // Get element name from type_data
-    let data = view.get_type_data(node_id);
-    let name_str = if data.is_empty() {
-        ""
+    let mdast_data = view.get_type_data(node_id);
+
+    // Read name from MDAST binary
+    let name_ref_mdast = if mdast_data.len() >= 8 {
+        decode_mdx_jsx_element_name(mdast_data)
     } else {
-        let d = decode_mdx_jsx_element_data(data);
-        if d.name.len > 0 {
-            view.get_str(d.name)
-        } else {
-            ""
-        }
+        StringRef::empty()
     };
-
-    // Parse attributes from source text
-    let node = view.get_node(node_id);
-    let source = view.get_source();
-    let raw_text = &source[node.start_offset as usize..node.end_offset as usize];
-    let parsed_attrs = parse_jsx_attributes_from_tag(raw_text);
-
-    // Encode attributes into HAST binary format
+    let name_str = if name_ref_mdast.len > 0 {
+        view.get_str(name_ref_mdast)
+    } else {
+        ""
+    };
     let name_ref = builder.alloc_string(name_str);
-    let attr_tuples: Vec<(u8, StringRef, StringRef)> = parsed_attrs
-        .iter()
-        .map(|attr| match attr {
-            JsxAttr::BooleanProp(name) => {
-                let n = builder.alloc_string(name);
-                (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty())
-            }
-            JsxAttr::LiteralProp(name, value) => {
-                let n = builder.alloc_string(name);
-                let v = builder.alloc_string(value);
-                (MDX_ATTR_LITERAL_PROP, n, v)
-            }
-            JsxAttr::ExpressionProp(name, value) => {
-                let n = builder.alloc_string(name);
-                let v = builder.alloc_string(value);
-                (MDX_ATTR_EXPRESSION_PROP, n, v)
-            }
-            JsxAttr::Spread(value) => {
-                let v = builder.alloc_string(value);
-                (MDX_ATTR_SPREAD, StringRef::empty(), v)
-            }
-        })
-        .collect();
+
+    // Read attributes from MDAST binary (same layout as HAST)
+    let attr_count = if mdast_data.len() >= 12 {
+        decode_mdx_jsx_attr_count(mdast_data)
+    } else {
+        0
+    };
+    let mut attr_tuples = Vec::with_capacity(attr_count as usize);
+    for i in 0..attr_count {
+        let (kind, attr_name_ref, attr_value_ref) = decode_mdx_jsx_attr(mdast_data, i);
+        let n = if attr_name_ref.len > 0 {
+            builder.alloc_string(view.get_str(attr_name_ref))
+        } else {
+            StringRef::empty()
+        };
+        let v = if attr_value_ref.len > 0 {
+            builder.alloc_string(view.get_str(attr_value_ref))
+        } else {
+            StringRef::empty()
+        };
+        attr_tuples.push((kind, n, v));
+    }
 
     builder.open_node_raw(hast_type);
     let encoded = encode_mdx_jsx_element_data(name_ref, &attr_tuples);
@@ -749,196 +742,6 @@ fn convert_mdx_jsx_element(
 // ---------------------------------------------------------------------------
 
 /// Parsed JSX attribute — intermediate representation before binary encoding.
-enum JsxAttr {
-    BooleanProp(String),            // name (no value)
-    LiteralProp(String, String),    // name="literal"
-    ExpressionProp(String, String), // name={expr}
-    Spread(String),                 // {...expr}
-}
-
-/// Parse JSX attributes from the raw source text of an MDX JSX element.
-fn parse_jsx_attributes_from_tag(text: &str) -> Vec<JsxAttr> {
-    // Extract just the opening tag
-    let tag = extract_opening_tag(text);
-    let bytes = tag.as_bytes();
-    let len = bytes.len();
-
-    let mut attrs = Vec::new();
-    let mut i = 1; // skip '<'
-
-    // Skip optional '/'
-    if i < len && bytes[i] == b'/' {
-        i += 1;
-    }
-
-    // Skip whitespace
-    while i < len && bytes[i].is_ascii_whitespace() {
-        i += 1;
-    }
-
-    // Skip tag name
-    while i < len
-        && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'.' | b'-' | b':' | b'_'))
-    {
-        i += 1;
-    }
-
-    loop {
-        // Skip whitespace
-        while i < len && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i >= len {
-            break;
-        }
-        if bytes[i] == b'>' || (bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'>') {
-            break;
-        }
-
-        // Spread expression: {…expr}
-        if bytes[i] == b'{' {
-            i += 1; // skip '{'
-            let start = i;
-            let mut depth = 1i32;
-            while i < len && depth > 0 {
-                match bytes[i] {
-                    b'{' => depth += 1,
-                    b'}' => depth -= 1,
-                    b'\'' | b'"' | b'`' => {
-                        let q = bytes[i];
-                        i += 1;
-                        while i < len && bytes[i] != q {
-                            if bytes[i] == b'\\' {
-                                i += 1;
-                            }
-                            i += 1;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            let value = tag[start..i.saturating_sub(1)].trim().to_string();
-            attrs.push(JsxAttr::Spread(value));
-            continue;
-        }
-
-        // Named attribute
-        let name_start = i;
-        while i < len
-            && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'-' | b':' | b'_'))
-        {
-            i += 1;
-        }
-        if i == name_start {
-            i += 1;
-            continue;
-        }
-        let name = tag[name_start..i].to_string();
-
-        // Skip whitespace
-        while i < len && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-
-        if i < len && bytes[i] == b'=' {
-            i += 1;
-            while i < len && bytes[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            if i >= len {
-                attrs.push(JsxAttr::BooleanProp(name));
-                continue;
-            }
-            if bytes[i] == b'"' || bytes[i] == b'\'' {
-                // String literal
-                let q = bytes[i];
-                i += 1;
-                let val_start = i;
-                while i < len && bytes[i] != q {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
-                let value = tag[val_start..i].to_string();
-                if i < len {
-                    i += 1;
-                }
-                attrs.push(JsxAttr::LiteralProp(name, value));
-            } else if bytes[i] == b'{' {
-                // Expression value
-                i += 1;
-                let val_start = i;
-                let mut depth = 1i32;
-                while i < len && depth > 0 {
-                    match bytes[i] {
-                        b'{' => depth += 1,
-                        b'}' => depth -= 1,
-                        b'\'' | b'"' | b'`' => {
-                            let q = bytes[i];
-                            i += 1;
-                            while i < len && bytes[i] != q {
-                                if bytes[i] == b'\\' {
-                                    i += 1;
-                                }
-                                i += 1;
-                            }
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-                let value = tag[val_start..i.saturating_sub(1)].to_string();
-                attrs.push(JsxAttr::ExpressionProp(name, value));
-            } else {
-                attrs.push(JsxAttr::BooleanProp(name));
-            }
-        } else {
-            attrs.push(JsxAttr::BooleanProp(name));
-        }
-    }
-
-    attrs
-}
-
-/// Extract the opening tag from JSX source, handling brace/string nesting.
-fn extract_opening_tag(text: &str) -> &str {
-    let mut depth = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_backtick = false;
-    let mut prev = '\0';
-
-    for (i, ch) in text.char_indices() {
-        if in_single_quote {
-            if ch == '\'' && prev != '\\' {
-                in_single_quote = false;
-            }
-        } else if in_double_quote {
-            if ch == '"' && prev != '\\' {
-                in_double_quote = false;
-            }
-        } else if in_backtick {
-            if ch == '`' && prev != '\\' {
-                in_backtick = false;
-            }
-        } else {
-            match ch {
-                '\'' => in_single_quote = true,
-                '"' => in_double_quote = true,
-                '`' => in_backtick = true,
-                '{' => depth += 1,
-                '}' => depth -= 1,
-                '>' if depth == 0 => return &text[..=i],
-                _ => {}
-            }
-        }
-        prev = ch;
-    }
-    text
-}
-
 // ---------------------------------------------------------------------------
 // Text extraction
 // ---------------------------------------------------------------------------

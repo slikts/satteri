@@ -40,7 +40,12 @@ export {
   PROP_SPACE_SEP,
   PROP_COMMA_SEP,
 } from "./hast-reader.js";
-export type { HastProperty } from "./hast-reader.js";
+export type {
+  HastProperty,
+  MdxJsxAttribute,
+  MdxJsxExpressionAttribute,
+  MdxJsxAttributeValueExpression,
+} from "./hast-reader.js";
 export { materializeHastNode, materializeHastTree } from "./hast-materializer.js";
 export type { HastNode } from "./hast-materializer.js";
 export { visitHast } from "./hast-visitor.js";
@@ -53,4 +58,12 @@ export type {
 export { compileMarkdownToHtml, compileMdxToJs } from "./compile.js";
 export type { CompileOptions } from "./compile.js";
 
-export type { MdastNode, Position, Point } from "./types.js";
+export type {
+  MdastNode,
+  Position,
+  Point,
+  MdxJsxAttributeNode,
+  MdxJsxExpressionAttributeNode,
+  MdxJsxAttributeValueExpressionNode,
+  MdxJsxAttributeUnion,
+} from "./types.js";

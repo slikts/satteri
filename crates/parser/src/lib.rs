@@ -8,6 +8,8 @@ use mdast_arena::{
     encode_image_data, encode_link_data, encode_list_data, encode_list_item_data, encode_math_data,
     encode_mdx_jsx_element_data, encode_string_ref_data, encode_table_data, ColumnAlign, LineIndex,
     MdastArena, MdastBuilder, NodeType, StringRef,
+    parse_jsx_attributes_from_tag, JsxAttr,
+    MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_SPREAD,
 };
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeWithOffset,
@@ -676,28 +678,12 @@ fn tag_to_node_type(
         Tag::Superscript | Tag::Subscript => (NodeType::Emphasis, None),
         Tag::ContainerBlock(_, _) => (NodeType::Blockquote, None),
         Tag::MdxJsxFlowElement(raw) => {
-            let name = extract_jsx_name(raw);
-            let name_ref = if name.is_empty() {
-                StringRef::empty()
-            } else {
-                builder.alloc_string(name)
-            };
-            (
-                NodeType::MdxJsxFlowElement,
-                Some(encode_mdx_jsx_element_data(name_ref)),
-            )
+            let data = encode_jsx_element(raw, builder);
+            (NodeType::MdxJsxFlowElement, Some(data))
         }
         Tag::MdxJsxTextElement(raw) => {
-            let name = extract_jsx_name(raw);
-            let name_ref = if name.is_empty() {
-                StringRef::empty()
-            } else {
-                builder.alloc_string(name)
-            };
-            (
-                NodeType::MdxJsxTextElement,
-                Some(encode_mdx_jsx_element_data(name_ref)),
-            )
+            let data = encode_jsx_element(raw, builder);
+            (NodeType::MdxJsxTextElement, Some(data))
         }
     }
 }
@@ -865,6 +851,43 @@ fn extract_jsx_name(raw: &str) -> &str {
     &s[..end]
 }
 
+/// Parse a raw JSX tag string, extract name + attributes, and encode as MDAST type_data.
+fn encode_jsx_element(raw: &str, builder: &mut MdastBuilder) -> Vec<u8> {
+    let name = extract_jsx_name(raw);
+    let name_ref = if name.is_empty() {
+        StringRef::empty()
+    } else {
+        builder.alloc_string(name)
+    };
+
+    let parsed_attrs = parse_jsx_attributes_from_tag(raw);
+    let attr_tuples: Vec<(u8, StringRef, StringRef)> = parsed_attrs
+        .iter()
+        .map(|attr| match attr {
+            JsxAttr::BooleanProp(n) => {
+                let n = builder.alloc_string(n);
+                (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty())
+            }
+            JsxAttr::LiteralProp(n, v) => {
+                let n = builder.alloc_string(n);
+                let v = builder.alloc_string(v);
+                (MDX_ATTR_LITERAL_PROP, n, v)
+            }
+            JsxAttr::ExpressionProp(n, v) => {
+                let n = builder.alloc_string(n);
+                let v = builder.alloc_string(v);
+                (MDX_ATTR_EXPRESSION_PROP, n, v)
+            }
+            JsxAttr::Spread(v) => {
+                let v = builder.alloc_string(v);
+                (MDX_ATTR_SPREAD, StringRef::empty(), v)
+            }
+        })
+        .collect();
+
+    encode_mdx_jsx_element_data(name_ref, &attr_tuples)
+}
+
 /// Try to create a StringRef that points into the source (zero-copy).
 /// Falls back to allocating a copy if the text doesn't match the source range.
 fn source_ref_or_alloc(
@@ -977,8 +1000,10 @@ mod tests {
             .map(|i| arena.get_node(i))
             .find(|n| n.node_type == NodeType::MdxJsxFlowElement as u8)
             .expect("should have an MDX JSX element");
-        let data = mdast_arena::decode_mdx_jsx_element_data(arena.get_type_data(jsx.id));
-        assert_eq!(arena.get_str(data.name), "Component");
+        let data = arena.get_type_data(jsx.id);
+        let name_ref = mdast_arena::decode_mdx_jsx_element_name(data);
+        assert_eq!(arena.get_str(name_ref), "Component");
+        assert_eq!(mdast_arena::decode_mdx_jsx_attr_count(data), 0);
     }
 
     #[test]

@@ -11,6 +11,8 @@ import {
   HAST_MDX_EXPRESSION,
   HAST_MDX_ESM,
   type HastProperty,
+  type MdxJsxAttribute,
+  type MdxJsxExpressionAttribute,
 } from "./hast-reader.js";
 import type { DataMap } from "./data-map.js";
 
@@ -22,6 +24,8 @@ export interface HastNode {
   properties?: Record<string, string | boolean | string[]>;
   children?: HastNode[];
   value?: string;
+  name?: string | null;
+  attributes?: (MdxJsxAttribute | MdxJsxExpressionAttribute)[];
   data: Record<string, unknown> | null;
 }
 
@@ -181,14 +185,9 @@ export function materializeHastNode(
 
     case HAST_MDX_JSX_ELEMENT:
     case HAST_MDX_JSX_TEXT_ELEMENT:
-      // MDX JSX elements have name and children (attributes are in type_data
-      // but we expose them as-is for now)
       Object.defineProperties(node, {
-        name: lazyProp("name", () => {
-          // Read element name from type_data (same layout as element tag)
-          const data = reader.getElementData(nodeId);
-          return data.tagName || null;
-        }),
+        name: lazyProp("name", () => reader.getMdxJsxElementData(nodeId).name),
+        attributes: lazyProp("attributes", () => reader.getMdxJsxElementData(nodeId).attributes),
       });
       Object.defineProperty(node, "children", {
         get(this: HastNode) {

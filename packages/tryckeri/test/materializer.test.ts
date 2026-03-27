@@ -1,8 +1,9 @@
-import { test, expect } from "vitest";
+import { test, expect, describe } from "vitest";
 import { MdastReader } from "../src/mdast-reader.js";
 import { DataMap } from "../src/data-map.js";
 import { materializeTree } from "../src/materializer.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
+import { parseMdxToBuffer } from "../index.js";
 
 function setup() {
   const buf = buildHelloWorldBuffer();
@@ -105,4 +106,116 @@ test("children are lazily evaluated (getter replaced by plain array after access
   const afterDesc = Object.getOwnPropertyDescriptor(root, "children");
   expect("get" in (afterDesc ?? {})).toBe(false);
   expect("value" in (afterDesc ?? {})).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// MDX JSX attribute tests
+// ---------------------------------------------------------------------------
+
+function mdxSetup(source: string) {
+  const buf = parseMdxToBuffer(source) as Uint8Array;
+  const reader = new MdastReader(buf);
+  const dataMap = new DataMap();
+  return { reader, dataMap, tree: materializeTree(reader, dataMap) };
+}
+
+function findNode(node: ReturnType<typeof materializeTree>, type: string): any {
+  if (node.type === type) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, type);
+    if (found) return found;
+  }
+  return null;
+}
+
+describe("MDX JSX attributes on MDAST nodes", () => {
+  test("self-closing element with no attributes", () => {
+    const { tree } = mdxSetup("<Component />\n");
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx).not.toBeNull();
+    expect(jsx.name).toBe("Component");
+    expect(jsx.attributes).toEqual([]);
+  });
+
+  test("element with string literal attribute", () => {
+    const { tree } = mdxSetup('<Component foo="bar" />\n');
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx.name).toBe("Component");
+    expect(jsx.attributes).toEqual([
+      { type: "mdxJsxAttribute", name: "foo", value: "bar" },
+    ]);
+  });
+
+  test("element with boolean attribute", () => {
+    const { tree } = mdxSetup("<Component disabled />\n");
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([
+      { type: "mdxJsxAttribute", name: "disabled", value: null },
+    ]);
+  });
+
+  test("element with expression attribute", () => {
+    const { tree } = mdxSetup("<Component count={42} />\n");
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([
+      {
+        type: "mdxJsxAttribute",
+        name: "count",
+        value: { type: "mdxJsxAttributeValueExpression", value: "42" },
+      },
+    ]);
+  });
+
+  test("element with spread attribute", () => {
+    const { tree } = mdxSetup("<Component {...props} />\n");
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([
+      { type: "mdxJsxExpressionAttribute", value: "...props" },
+    ]);
+  });
+
+  test("element with multiple mixed attributes", () => {
+    const { tree } = mdxSetup(
+      '<Component a="1" b={2} c {...d} />\n',
+    );
+    const jsx = findNode(tree, "mdxJsxFlowElement");
+    expect(jsx.attributes).toHaveLength(4);
+    expect(jsx.attributes[0]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "a",
+      value: "1",
+    });
+    expect(jsx.attributes[1]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "b",
+      value: { type: "mdxJsxAttributeValueExpression", value: "2" },
+    });
+    expect(jsx.attributes[2]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "c",
+      value: null,
+    });
+    expect(jsx.attributes[3]).toEqual({
+      type: "mdxJsxExpressionAttribute",
+      value: "...d",
+    });
+  });
+
+  test("inline JSX text element with attributes", () => {
+    const { tree } = mdxSetup('a <Comp x="y" /> b\n');
+    const jsx = findNode(tree, "mdxJsxTextElement");
+    expect(jsx).not.toBeNull();
+    expect(jsx.name).toBe("Comp");
+    expect(jsx.attributes).toEqual([
+      { type: "mdxJsxAttribute", name: "x", value: "y" },
+    ]);
+  });
+
+  test("fragment has null name and no attributes", () => {
+    const { tree } = mdxSetup("a <>hello</> b\n");
+    const jsx = findNode(tree, "mdxJsxTextElement");
+    expect(jsx).not.toBeNull();
+    expect(jsx.name).toBeNull();
+    expect(jsx.attributes).toEqual([]);
+  });
 });

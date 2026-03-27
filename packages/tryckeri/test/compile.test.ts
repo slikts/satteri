@@ -313,4 +313,95 @@ describe("compileMdxToJs", () => {
     expect(js).not.toContain("Gone");
     expect(js).toContain("Kept");
   });
+
+  test("MDAST plugin can read JSX attributes", () => {
+    const collected: unknown[] = [];
+    const readAttrs = defineMdastPlugin({
+      name: "read-attrs",
+      createOnce: () => ({
+        mdxJsxFlowElement(node: MdastNode) {
+          collected.push({
+            name: node.name,
+            attributes: node.attributes,
+          });
+        },
+      }),
+    });
+
+    compileMdxToJs('<Component foo="bar" disabled count={42} />', {
+      mdastPlugins: [readAttrs],
+    });
+
+    expect(collected).toHaveLength(1);
+    const el = collected[0] as { name: string; attributes: unknown[] };
+    expect(el.name).toBe("Component");
+    expect(el.attributes).toHaveLength(3);
+    expect(el.attributes[0]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "foo",
+      value: "bar",
+    });
+    expect(el.attributes[1]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "disabled",
+      value: null,
+    });
+    expect(el.attributes[2]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "count",
+      value: { type: "mdxJsxAttributeValueExpression", value: "42" },
+    });
+  });
+
+  test("MDAST plugin can replace JSX element with modified attributes", () => {
+    const addAttr = defineMdastPlugin({
+      name: "add-attr",
+      createOnce: () => ({
+        mdxJsxFlowElement(node: MdastNode) {
+          if (node.name === "Component") {
+            return {
+              type: "mdxJsxFlowElement",
+              name: "Component",
+              attributes: [
+                { type: "mdxJsxAttribute", name: "added", value: "yes" },
+              ],
+              children: [],
+            };
+          }
+        },
+      }),
+    });
+
+    const js = compileMdxToJs("<Component />\n", {
+      mdastPlugins: [addAttr],
+    });
+    // The compiled output should reference the "added" attribute
+    expect(js).toContain("added");
+    expect(js).toContain("yes");
+  });
+
+  test("MDAST plugin can replace JSX element removing all attributes", () => {
+    const stripAttrs = defineMdastPlugin({
+      name: "strip-attrs",
+      createOnce: () => ({
+        mdxJsxFlowElement(node: MdastNode) {
+          if (node.name === "Component") {
+            return {
+              type: "mdxJsxFlowElement",
+              name: "Component",
+              attributes: [],
+              children: [],
+            };
+          }
+        },
+      }),
+    });
+
+    const js = compileMdxToJs('<Component foo="bar" />\n', {
+      mdastPlugins: [stripAttrs],
+    });
+    expect(js).toContain("Component");
+    expect(js).not.toContain("foo");
+    expect(js).not.toContain("bar");
+  });
 });

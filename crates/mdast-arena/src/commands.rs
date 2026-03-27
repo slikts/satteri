@@ -26,6 +26,9 @@
 //!   0x12  SERDE_JSON       [len: u32][utf8...]
 
 use crate::codec::*;
+use crate::jsx_attr_parser::{
+    MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
+};
 use crate::node::{NodeType, StringRef};
 use crate::rebuild::Patch;
 use crate::{MdastArena, MdastBuilder};
@@ -96,6 +99,8 @@ pub struct JsNode {
     #[serde(rename = "referenceType")]
     pub reference_type: Option<String>,
     pub name: Option<String>,
+    #[serde(default)]
+    pub attributes: Option<Vec<JsNodeAttribute>>,
     // HAST-specific fields
     #[serde(rename = "tagName")]
     pub tag_name: Option<String>,
@@ -104,6 +109,20 @@ pub struct JsNode {
     /// Marker: when true, this node is a HAST node (not MDAST).
     #[serde(rename = "_hast", default)]
     pub is_hast: bool,
+}
+
+/// A single MDX JSX attribute from a JS node.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum JsNodeAttribute {
+    #[serde(rename = "mdxJsxAttribute")]
+    Attribute {
+        name: String,
+        /// null → boolean, string → literal, object with `value` → expression
+        value: Option<serde_json::Value>,
+    },
+    #[serde(rename = "mdxJsxExpressionAttribute")]
+    ExpressionAttribute { value: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -656,7 +675,8 @@ fn encode_js_node_data(
         }
         NodeType::MdxJsxFlowElement | NodeType::MdxJsxTextElement => {
             let name_ref = alloc_opt_str(builder, js_node.name.as_deref());
-            encode_mdx_jsx_element_data(name_ref)
+            let attr_tuples = encode_js_jsx_attrs(builder, js_node.attributes.as_deref());
+            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
         }
         NodeType::MdxFlowExpression | NodeType::MdxTextExpression | NodeType::MdxjsEsm => {
             let value_ref = alloc_opt_str(builder, js_node.value.as_deref());
@@ -665,6 +685,43 @@ fn encode_js_node_data(
         // Nodes with no type-specific data
         _ => Vec::new(),
     }
+}
+
+fn encode_js_jsx_attrs(
+    builder: &mut MdastBuilder,
+    attrs: Option<&[JsNodeAttribute]>,
+) -> Vec<(u8, StringRef, StringRef)> {
+    let Some(attrs) = attrs else {
+        return Vec::new();
+    };
+    attrs
+        .iter()
+        .map(|attr| match attr {
+            JsNodeAttribute::Attribute { name, value } => {
+                let n = builder.alloc_string(name);
+                match value {
+                    None => (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty()),
+                    Some(serde_json::Value::String(s)) => {
+                        let v = builder.alloc_string(s);
+                        (MDX_ATTR_LITERAL_PROP, n, v)
+                    }
+                    Some(serde_json::Value::Object(obj)) => {
+                        let expr = obj
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let v = builder.alloc_string(expr);
+                        (MDX_ATTR_EXPRESSION_PROP, n, v)
+                    }
+                    _ => (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty()),
+                }
+            }
+            JsNodeAttribute::ExpressionAttribute { value } => {
+                let v = builder.alloc_string(value);
+                (MDX_ATTR_SPREAD, StringRef::empty(), v)
+            }
+        })
+        .collect()
 }
 
 fn alloc_opt_str(builder: &mut MdastBuilder, s: Option<&str>) -> StringRef {
@@ -1104,6 +1161,7 @@ mod tests {
                 label: None,
                 reference_type: None,
                 name: None,
+                attributes: None,
                 tag_name: None,
                 properties: None,
                 is_hast: false,
@@ -1123,6 +1181,7 @@ mod tests {
             label: None,
             reference_type: None,
             name: None,
+            attributes: None,
             tag_name: None,
             properties: None,
             is_hast: false,

@@ -3,7 +3,7 @@ import { HastReader } from "../src/hast-reader.js";
 import { DataMap } from "../src/data-map.js";
 import { visitHast } from "../src/hast-visitor.js";
 import { materializeHastTree } from "../src/hast-materializer.js";
-import { parseToHastBuffer, hastBufferToHtmlStr, applyMutations } from "../index.js";
+import { parseToHastBuffer, hastBufferToHtmlStr, applyMutations, parseMdxToHastBuffer } from "../index.js";
 import type { HastNode } from "../src/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast-visitor.js";
 
@@ -248,5 +248,104 @@ describe("materializeHastTree", () => {
     const textNode = h1!.children![0];
     expect(textNode!.type).toBe("text");
     expect(textNode!.value).toBe("Hello");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MDX JSX attributes on HAST nodes
+// ---------------------------------------------------------------------------
+
+function findHastNode(node: HastNode, type: string): HastNode | null {
+  if (node.type === type) return node;
+  for (const child of node.children ?? []) {
+    const found = findHastNode(child, type);
+    if (found) return found;
+  }
+  return null;
+}
+
+describe("MDX JSX attributes on HAST nodes", () => {
+  test("self-closing element with no attributes", () => {
+    const buf = parseMdxToHastBuffer("<Component />\n");
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx).not.toBeNull();
+    expect(jsx!.name).toBe("Component");
+    expect(jsx!.attributes).toEqual([]);
+  });
+
+  test("element with string literal attribute", () => {
+    const buf = parseMdxToHastBuffer('<Component foo="bar" />\n');
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx!.name).toBe("Component");
+    expect(jsx!.attributes).toEqual([
+      { type: "mdxJsxAttribute", name: "foo", value: "bar" },
+    ]);
+  });
+
+  test("element with boolean attribute", () => {
+    const buf = parseMdxToHastBuffer("<Component disabled />\n");
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx!.attributes).toEqual([
+      { type: "mdxJsxAttribute", name: "disabled", value: null },
+    ]);
+  });
+
+  test("element with expression attribute", () => {
+    const buf = parseMdxToHastBuffer("<Component count={42} />\n");
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx!.attributes).toEqual([
+      {
+        type: "mdxJsxAttribute",
+        name: "count",
+        value: { type: "mdxJsxAttributeValueExpression", value: "42" },
+      },
+    ]);
+  });
+
+  test("element with spread attribute", () => {
+    const buf = parseMdxToHastBuffer("<Component {...props} />\n");
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx!.attributes).toEqual([
+      { type: "mdxJsxExpressionAttribute", value: "...props" },
+    ]);
+  });
+
+  test("element with multiple mixed attributes", () => {
+    const buf = parseMdxToHastBuffer(
+      '<Component a="1" b={2} c {...d} />\n',
+    );
+    const reader = new HastReader(buf);
+    const tree = materializeHastTree(reader, new DataMap());
+    const jsx = findHastNode(tree, "mdxJsxElement");
+    expect(jsx!.attributes).toHaveLength(4);
+    expect(jsx!.attributes![0]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "a",
+      value: "1",
+    });
+    expect(jsx!.attributes![1]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "b",
+      value: { type: "mdxJsxAttributeValueExpression", value: "2" },
+    });
+    expect(jsx!.attributes![2]).toEqual({
+      type: "mdxJsxAttribute",
+      name: "c",
+      value: null,
+    });
+    expect(jsx!.attributes![3]).toEqual({
+      type: "mdxJsxExpressionAttribute",
+      value: "...d",
+    });
   });
 });

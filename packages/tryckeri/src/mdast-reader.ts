@@ -1,4 +1,6 @@
-import type { ArenaNodeRaw, BufferHeader, StringRefRaw } from "./types.js";
+import type { ArenaNodeRaw, BufferHeader, StringRefRaw, MdxJsxAttributeUnion } from "./types.js";
+
+type MdxJsxAttribute = MdxJsxAttributeUnion;
 
 // Node type discriminant values (must match NodeType enum in node.rs)
 export const NodeType = Object.freeze({
@@ -416,12 +418,81 @@ export class MdastReader {
   }
 
   /**
-   * MdxJsxElementData #[repr(C)]: name StringRef (0..8). len===0 means fragment.
+   * MdxJsxElementData: name StringRef (0..8). len===0 means fragment.
    */
   getMdxJsxElementName(nodeId: number): string | null {
     const data = this.getTypeData(nodeId);
     const nameRef = this.readStringRef(data, 0);
     return nameRef.len > 0 ? this.getString(nameRef.offset, nameRef.len) : null;
+  }
+
+  /**
+   * MDX JSX element data: name + attributes.
+   *
+   * Layout:
+   *   [name: StringRef(8B)][attr_count: u32(4B)][_pad: u32(4B)] = 16-byte header
+   *   then attr_count * 20 bytes:
+   *     [kind: u8(1B)][_pad: [u8;3](3B)][name: StringRef(8B)][value: StringRef(8B)]
+   *
+   * Attribute kinds: 0=boolean, 1=literal, 2=expression, 3=spread
+   */
+  getMdxJsxElementData(nodeId: number): {
+    name: string | null;
+    attributes: MdxJsxAttribute[];
+  } {
+    const data = this.getTypeData(nodeId);
+    if (data.length < 16) {
+      return { name: this.getMdxJsxElementName(nodeId), attributes: [] };
+    }
+
+    const nameRef = this.readStringRef(data, 0);
+    const name = nameRef.len > 0 ? this.getString(nameRef.offset, nameRef.len) : null;
+
+    const view = new DataView(data.buffer, data.byteOffset + 8);
+    const attrCount = view.getUint32(0, true);
+
+    const attributes: MdxJsxAttribute[] = [];
+    for (let i = 0; i < attrCount; i++) {
+      const base = 16 + i * 20;
+      const kind = data[base]!;
+      const attrNameRef = this.readStringRef(data, base + 4);
+      const attrValueRef = this.readStringRef(data, base + 12);
+
+      switch (kind) {
+        case 0: // BooleanProp
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: null,
+          });
+          break;
+        case 1: // LiteralProp
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: this.getString(attrValueRef.offset, attrValueRef.len),
+          });
+          break;
+        case 2: // ExpressionProp
+          attributes.push({
+            type: "mdxJsxAttribute",
+            name: this.getString(attrNameRef.offset, attrNameRef.len),
+            value: {
+              type: "mdxJsxAttributeValueExpression",
+              value: this.getString(attrValueRef.offset, attrValueRef.len),
+            },
+          });
+          break;
+        case 3: // Spread
+          attributes.push({
+            type: "mdxJsxExpressionAttribute",
+            value: this.getString(attrValueRef.offset, attrValueRef.len),
+          });
+          break;
+      }
+    }
+
+    return { name, attributes };
   }
 
   /**

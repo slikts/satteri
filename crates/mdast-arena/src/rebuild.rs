@@ -283,8 +283,8 @@ fn remap_string_refs(data: &mut [u8], node_type: u8, base: u32) {
         17 | 18 | 20 => &[0, 8],
         // FootnoteDefinition: identifier(0), label(8)
         19 => &[0, 8],
-        // MdxJsxFlowElement, MdxJsxTextElement: name(0)
-        100 | 101 => &[0],
+        // MdxJsxFlowElement, MdxJsxTextElement: variable-length (handled below)
+        100 | 101 => &[],
         // MdxFlowExpression, MdxTextExpression, MdxjsEsm: value(0)
         102..=104 => &[0],
         // HAST_TEXT(2), HAST_COMMENT(3), HAST_RAW(5),
@@ -312,8 +312,8 @@ fn remap_string_refs(data: &mut [u8], node_type: u8, base: u32) {
             }
             return;
         }
-        // HAST_MDX_JSX_ELEMENT(10), HAST_MDX_JSX_TEXT_ELEMENT(11): name(0), then attrs
-        10 | 11 if data.len() >= 16 => {
+        // MDX JSX elements: MDAST(100,101) and HAST(10,11): name(0), then attrs
+        10 | 11 | 100 | 101 if data.len() >= 16 => {
             remap_one_ref(data, 0, base);
             let attr_count =
                 u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;

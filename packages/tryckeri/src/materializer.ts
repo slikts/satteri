@@ -178,7 +178,8 @@ function addTypeProperties(
     case 100: // mdxJsxFlowElement
     case 101: // mdxJsxTextElement
       Object.defineProperties(node, {
-        name: lazyProp("name", () => reader.getMdxJsxElementName(nodeId)),
+        name: lazyProp("name", () => reader.getMdxJsxElementData(nodeId).name),
+        attributes: lazyProp("attributes", () => reader.getMdxJsxElementData(nodeId).attributes),
       });
       break;
 

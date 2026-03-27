@@ -39,7 +39,26 @@ export interface MdastNode {
   referenceType?: string;
   align?: (string | null)[];
   name?: string | null;
+  attributes?: MdxJsxAttributeUnion[];
 }
+
+export interface MdxJsxAttributeNode {
+  type: "mdxJsxAttribute";
+  name: string;
+  value: string | MdxJsxAttributeValueExpressionNode | null;
+}
+
+export interface MdxJsxExpressionAttributeNode {
+  type: "mdxJsxExpressionAttribute";
+  value: string;
+}
+
+export interface MdxJsxAttributeValueExpressionNode {
+  type: "mdxJsxAttributeValueExpression";
+  value: string;
+}
+
+export type MdxJsxAttributeUnion = MdxJsxAttributeNode | MdxJsxExpressionAttributeNode;
 
 export interface StringRefRaw {
   offset: number;

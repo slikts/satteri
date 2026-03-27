@@ -2,7 +2,7 @@
 
 use mdast_arena::codec::{
     decode_code_data, decode_expression_data, decode_heading_data, decode_image_data,
-    decode_link_data, decode_list_data, decode_list_item_data, decode_mdx_jsx_element_data,
+    decode_link_data, decode_list_data, decode_list_item_data, decode_mdx_jsx_element_name,
     decode_string_ref_data,
 };
 use mdast_arena::MdastArena;
@@ -425,9 +425,9 @@ fn convert_mdx_jsx_element(
     let name = if data.is_empty() {
         ""
     } else {
-        let d = decode_mdx_jsx_element_data(data);
-        if d.name.len > 0 {
-            arena.get_str(d.name)
+        let name_ref = decode_mdx_jsx_element_name(data);
+        if name_ref.len > 0 {
+            arena.get_str(name_ref)
         } else {
             ""
         }
