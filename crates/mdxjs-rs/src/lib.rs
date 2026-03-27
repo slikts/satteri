@@ -30,7 +30,7 @@ use oxc_allocator::Allocator;
 use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
-pub use crate::configuration::{MdxConstructs, MdxParseOptions, Options};
+pub use crate::configuration::{MdxConstructs, MdxParseOptions, OptimizeStaticConfig, Options};
 pub use crate::mdx_plugin_recma_document::JsxRuntime;
 
 /// Turn MDX into JavaScript.
@@ -139,6 +139,7 @@ pub fn compile_hast_buffer_with_source(
         Some(&location),
         &mut explicit_jsxs,
         &allocator,
+        options.optimize_static.as_ref(),
     )?;
     mdx_plugin_recma_document(&mut program, options, Some(&location), &allocator)?;
     mdx_plugin_recma_jsx_rewrite(

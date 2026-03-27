@@ -563,21 +563,14 @@ fn encode_hast_js_node_data(js_node: &JsNode, raw_type: u8, builder: &mut MdastB
         }
 
         HAST_MDX_JSX_ELEMENT_TYPE | HAST_MDX_JSX_TEXT_ELEMENT_TYPE => {
-            // Same layout as element but with MDX attribute encoding
-            // For now, encode name only (attributes via source text parsing)
             let name = js_node
                 .name
                 .as_deref()
                 .or(js_node.tag_name.as_deref())
                 .unwrap_or("");
             let name_ref = builder.alloc_string(name);
-            // 16-byte header: name(8) + attr_count(4) + pad(4), no attrs
-            let mut out = Vec::with_capacity(16);
-            out.extend_from_slice(&name_ref.offset.to_le_bytes());
-            out.extend_from_slice(&name_ref.len.to_le_bytes());
-            out.extend_from_slice(&0u32.to_le_bytes()); // attr_count = 0
-            out.extend_from_slice(&0u32.to_le_bytes()); // pad
-            out
+            let attr_tuples = encode_js_jsx_attrs(builder, js_node.attributes.as_deref());
+            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
         }
 
         HAST_MDX_EXPRESSION_TYPE | HAST_MDX_ESM_TYPE => {

@@ -4,20 +4,62 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 // ---------------------------------------------------------------------------
+// MDX compilation options (JS-facing)
+// ---------------------------------------------------------------------------
+
+/// Static optimization config passed from JavaScript.
+#[napi(object)]
+pub struct JsOptimizeStaticConfig {
+    /// Component/element name to wrap collapsed HTML in (e.g. "Fragment", "div").
+    pub component: String,
+    /// Prop name for the HTML string (e.g. "set:html", "dangerouslySetInnerHTML").
+    pub prop: String,
+    /// If true, prop value is wrapped as `{ __html: "..." }` (React-style).
+    pub wrap_prop_value: Option<bool>,
+    /// Element tag names to exclude from collapsing.
+    pub ignore_elements: Option<Vec<String>>,
+}
+
+/// MDX compile options passed from JavaScript.
+#[napi(object)]
+pub struct JsMdxOptions {
+    /// Static subtree optimization. If provided, static subtrees are collapsed
+    /// into raw HTML strings using the specified component and prop.
+    pub optimize_static: Option<JsOptimizeStaticConfig>,
+}
+
+fn js_options_to_rust(opts: Option<JsMdxOptions>) -> mdxjs::Options {
+    let mut options = mdxjs::Options::default();
+    if let Some(js) = opts {
+        if let Some(config) = js.optimize_static {
+            options.optimize_static = Some(mdxjs::OptimizeStaticConfig {
+                component: config.component,
+                prop: config.prop,
+                wrap_prop_value: config.wrap_prop_value.unwrap_or(false),
+                ignore_elements: config.ignore_elements.unwrap_or_default(),
+            });
+        }
+    }
+    options
+}
+
+// ---------------------------------------------------------------------------
 // MDX compilation
 // ---------------------------------------------------------------------------
 
 /// Compile MDX source directly to JavaScript.
 #[napi]
-pub fn compile_mdx(source: String) -> Result<String> {
-    mdxjs::compile(&source, &mdxjs::Options::default())
+pub fn compile_mdx(source: String, options: Option<JsMdxOptions>) -> Result<String> {
+    let opts = js_options_to_rust(options);
+    mdxjs::compile(&source, &opts)
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 /// Compile a pre-parsed MDAST binary buffer to MDX JavaScript output.
 #[napi]
-pub fn compile_mdx_from_buffer(buf: Uint8Array) -> Result<String> {
-    mdxjs::compile_arena_bytes(&buf, &mdxjs::Options::default())
+pub fn compile_mdx_from_buffer(buf: Uint8Array, options: Option<JsMdxOptions>) -> Result<String> {
+    let opts = js_options_to_rust(options);
+    mdxjs::compile_arena_bytes(&buf, &opts)
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -94,8 +136,9 @@ pub fn hast_buffer_to_html_str(buf: Uint8Array) -> Result<String> {
 /// This is the split-pipeline entry point for MDX: after MDAST→HAST conversion
 /// and any HAST plugin mutations, this function does the final hast→JS step.
 #[napi]
-pub fn compile_hast_buffer_to_js(buf: Uint8Array) -> Result<String> {
-    mdxjs::compile_hast_buffer(&buf, &mdxjs::Options::default())
+pub fn compile_hast_buffer_to_js(buf: Uint8Array, options: Option<JsMdxOptions>) -> Result<String> {
+    let opts = js_options_to_rust(options);
+    mdxjs::compile_hast_buffer(&buf, &opts)
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

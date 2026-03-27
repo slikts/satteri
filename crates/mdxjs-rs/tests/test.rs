@@ -1,5 +1,5 @@
 extern crate mdxjs;
-use mdxjs::{JsxRuntime, Options, compile};
+use mdxjs::{JsxRuntime, OptimizeStaticConfig, Options, compile};
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -251,5 +251,180 @@ export default MDXContent;
         "should not support overwriting explicit JSX",
     );
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// optimize_static tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn optimize_static_default_off() -> Result<(), mdast_arena::mdx_types::Message> {
+    // With no optimize_static, output should contain _jsx("h1", ...) calls.
+    let result = compile("# Hello\n\nWorld", &Options::default())?;
+    assert!(
+        result.contains("\"h1\""),
+        "should have h1 element call: {result}"
+    );
+    assert!(
+        !result.contains("set:html"),
+        "should not have set:html without optimization: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_astro_style() -> Result<(), mdast_arena::mdx_types::Message> {
+    let result = compile(
+        "# Hello\n\nWorld",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+    )?;
+    // Should contain set:html with serialized HTML
+    assert!(
+        result.contains("set:html"),
+        "should have set:html attribute: {result}"
+    );
+    assert!(
+        result.contains("<h1>Hello</h1>"),
+        "should have collapsed h1 HTML: {result}"
+    );
+    assert!(
+        result.contains("<p>World</p>"),
+        "should have collapsed p HTML: {result}"
+    );
+    // Should NOT contain individual _jsx("h1", ...) calls
+    assert!(
+        !result.contains("\"h1\""),
+        "should not have h1 element call: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_react_style() -> Result<(), mdast_arena::mdx_types::Message> {
+    let result = compile(
+        "# Hello\n\nWorld",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig {
+                component: "div".into(),
+                prop: "dangerouslySetInnerHTML".into(),
+                wrap_prop_value: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )?;
+    assert!(
+        result.contains("dangerouslySetInnerHTML"),
+        "should have dangerouslySetInnerHTML: {result}"
+    );
+    assert!(
+        result.contains("__html"),
+        "should have __html wrapper: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_mixed_dynamic() -> Result<(), mdast_arena::mdx_types::Message> {
+    // Static content + dynamic MDX component — static parts should be collapsed,
+    // dynamic parts should remain as JSX.
+    let result = compile(
+        "# Hello\n\n<Component />\n\nWorld",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+    )?;
+    assert!(
+        result.contains("set:html"),
+        "should have set:html for static parts: {result}"
+    );
+    // Component should remain as a JSX call
+    assert!(
+        result.contains("Component"),
+        "should preserve Component reference: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_ignore_elements() -> Result<(), mdast_arena::mdx_types::Message> {
+    let result = compile(
+        "# Hello\n\nWorld",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig {
+                ignore_elements: vec!["h1".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    )?;
+    // h1 should NOT be collapsed (it's in ignore list), but p should be
+    assert!(
+        result.contains("set:html"),
+        "should have set:html for non-ignored elements: {result}"
+    );
+    // h1 should remain as a JSX component reference (not collapsed)
+    assert!(
+        result.contains("\"h1\""),
+        "should preserve h1 as JSX call: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_sibling_grouping() -> Result<(), mdast_arena::mdx_types::Message> {
+    // Multiple consecutive static elements should be grouped into one set:html
+    let result = compile(
+        "# A\n\n## B\n\n### C",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+    )?;
+    // All three headings should be in a single set:html
+    assert!(
+        result.contains("<h1>A</h1>"),
+        "should contain h1: {result}"
+    );
+    assert!(
+        result.contains("<h2>B</h2>"),
+        "should contain h2: {result}"
+    );
+    assert!(
+        result.contains("<h3>C</h3>"),
+        "should contain h3: {result}"
+    );
+    // Count occurrences of set:html — should be exactly 1 for fully static content
+    let count = result.matches("set:html").count();
+    assert_eq!(count, 1, "should have exactly one set:html group: {result}");
+    Ok(())
+}
+
+#[test]
+fn optimize_static_nested_dynamic_prevents_collapse() -> Result<(), mdast_arena::mdx_types::Message>
+{
+    // A paragraph with an inline expression cannot be collapsed
+    let result = compile(
+        "# Static\n\nHello {name} world",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+    )?;
+    // The h1 should be collapsed (static)
+    assert!(
+        result.contains("<h1>Static</h1>"),
+        "should collapse static h1: {result}"
+    );
+    // The paragraph with expression should NOT be collapsed
+    assert!(
+        result.contains("name"),
+        "should preserve expression: {result}"
+    );
     Ok(())
 }

@@ -60,9 +60,26 @@ function runHastPlugins(
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Configuration for static subtree collapsing during MDX compilation. */
+export interface OptimizeStaticConfig {
+  /** Component/element name to wrap collapsed HTML in (e.g. "Fragment", "div"). */
+  component: string;
+  /** Prop name for the HTML string (e.g. "set:html", "dangerouslySetInnerHTML"). */
+  prop: string;
+  /** If true, prop value is wrapped as `{ __html: "..." }` (React-style). Default: false. */
+  wrapPropValue?: boolean;
+  /** Element tag names to exclude from collapsing (e.g. ["h1", "p"]). */
+  ignoreElements?: string[];
+}
+
 export interface CompileOptions {
   mdastPlugins?: MdastPluginDefinition[];
   hastPlugins?: HastPluginDefinition[];
+  /**
+   * When set, fully-static subtrees are collapsed into raw HTML strings
+   * instead of nested `_jsx()` calls, reducing JS output size.
+   */
+  optimizeStatic?: OptimizeStaticConfig;
 }
 
 export function compileMarkdownToHtml(
@@ -92,7 +109,7 @@ export function compileMdxToJs(
   source: string,
   options: CompileOptions = {},
 ): string {
-  const { mdastPlugins = [], hastPlugins = [] } = options;
+  const { mdastPlugins = [], hastPlugins = [], optimizeStatic } = options;
 
   let mdastBuf: Uint8Array = parseMdxToBuffer(source);
 
@@ -108,5 +125,9 @@ export function compileMdxToJs(
   let hastBuf = mdastBufferToHastBuffer(mdastBuf);
   hastBuf = runHastPlugins(hastBuf, hastPlugins);
 
-  return compileHastBufferToJs(hastBuf);
+  const mdxOptions = optimizeStatic
+    ? { optimizeStatic }
+    : undefined;
+
+  return compileHastBufferToJs(hastBuf, mdxOptions);
 }

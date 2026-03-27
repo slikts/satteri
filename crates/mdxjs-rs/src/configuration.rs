@@ -2,6 +2,68 @@
 
 use crate::mdx_plugin_recma_document::JsxRuntime;
 
+/// Configuration for collapsing static HAST subtrees into raw HTML during
+/// MDX compilation.
+///
+/// When `optimize_static` is set on [`Options`], fully-static HAST subtrees
+/// (containing no MDX components, expressions, or dynamic content) are collapsed
+/// into a single raw HTML string instead of nested `_jsx()` calls.
+///
+/// # Examples
+///
+/// React-style (`dangerouslySetInnerHTML`):
+/// ```
+/// # use mdxjs::OptimizeStaticConfig;
+/// let config = OptimizeStaticConfig {
+///     component: "div".into(),
+///     prop: "dangerouslySetInnerHTML".into(),
+///     wrap_prop_value: true,
+///     ..Default::default()
+/// };
+/// ```
+///
+/// Astro-style (`set:html`):
+/// ```
+/// # use mdxjs::OptimizeStaticConfig;
+/// let config = OptimizeStaticConfig {
+///     component: "Fragment".into(),
+///     prop: "set:html".into(),
+///     ..Default::default()
+/// };
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serializable", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serializable", serde(rename_all = "camelCase", default))]
+pub struct OptimizeStaticConfig {
+    /// The component or element name to wrap collapsed HTML in
+    /// (e.g. `"Fragment"`, `"div"`, `"RawHtml"`).
+    pub component: String,
+
+    /// The prop/attribute name for the HTML string
+    /// (e.g. `"set:html"`, `"dangerouslySetInnerHTML"`, `"html"`).
+    pub prop: String,
+
+    /// If `true`, the prop value is wrapped as `{ __html: "..." }` (React-style).
+    /// If `false`, the prop value is a plain string literal.
+    pub wrap_prop_value: bool,
+
+    /// Element tag names to exclude from collapsing (e.g. `["h1", "p"]`).
+    /// These elements will remain as JSX calls even in static subtrees,
+    /// useful when they may be overridden by a component mapping at runtime.
+    pub ignore_elements: Vec<String>,
+}
+
+impl Default for OptimizeStaticConfig {
+    fn default() -> Self {
+        Self {
+            component: "Fragment".into(),
+            prop: "set:html".into(),
+            wrap_prop_value: false,
+            ignore_elements: vec![],
+        }
+    }
+}
+
 /// Like `Constructs` from `markdown-rs`.
 ///
 /// You can’t use:
@@ -238,6 +300,13 @@ pub struct Options {
     ///
     /// Used when `development: true` to improve error messages.
     pub filepath: Option<String>,
+
+    /// Static subtree optimization (default: `None` — disabled).
+    ///
+    /// When enabled, fully-static subtrees are collapsed into raw HTML strings
+    /// instead of nested `_jsx()` calls, reducing JS output size and runtime
+    /// overhead. See [`OptimizeStaticConfig`] for configuration.
+    pub optimize_static: Option<OptimizeStaticConfig>,
 }
 
 impl Default for Options {
@@ -255,6 +324,7 @@ impl Default for Options {
             pragma_frag: None,
             pragma_import_source: None,
             filepath: None,
+            optimize_static: None,
         }
     }
 }

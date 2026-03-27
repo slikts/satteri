@@ -36,7 +36,11 @@ pub fn hast_buffer_to_html(buf: &[u8]) -> Result<String, BufferError> {
     Ok(out)
 }
 
-fn render_node(node_id: u32, view: &MdastView, out: &mut String) {
+/// Render a single HAST binary node (and its children) to an HTML string.
+///
+/// This is also used by the MDX compiler's static optimization pass to
+/// serialize static subtrees into raw HTML.
+pub fn render_node(node_id: u32, view: &MdastView, out: &mut String) {
     let node = view.get_node(node_id);
     let raw_type = node.node_type;
 

@@ -404,4 +404,117 @@ describe("compileMdxToJs", () => {
     expect(js).not.toContain("foo");
     expect(js).not.toContain("bar");
   });
+
+  test("HAST plugin setProperty on MDX JSX element preserves existing attributes", () => {
+    const injectMeta = defineHastPlugin({
+      name: "inject-meta",
+      createOnce: () => ({
+        mdxJsxTextElement(node: HastNode, ctx: HastVisitorContext) {
+          ctx.setProperty(node, "client:component-path", "/absolute/path/B.jsx");
+          ctx.setProperty(node, "client:component-export", "default");
+          ctx.setProperty(node, "client:component-hydration", "");
+        },
+      }),
+    });
+
+    const js = compileMdxToJs(
+      'import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>',
+      { hastPlugins: [injectMeta] },
+    );
+
+    // Original attributes must be preserved
+    expect(js).toContain('"client:load": true');
+    expect(js).toContain('foo: "bar"');
+    // Injected attributes must appear
+    expect(js).toContain('"client:component-path": "/absolute/path/B.jsx"');
+    expect(js).toContain('"client:component-export": "default"');
+    expect(js).toContain('"client:component-hydration": ""');
+  });
+
+  test("HAST plugin setProperty on MDX JSX element — no-op plugin preserves all attributes", () => {
+    const noop = defineHastPlugin({
+      name: "noop",
+      createOnce: () => ({
+        mdxJsxTextElement() {
+          // do nothing
+        },
+      }),
+    });
+
+    const withPlugin = compileMdxToJs(
+      'import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>',
+      { hastPlugins: [noop] },
+    );
+    const without = compileMdxToJs(
+      'import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>',
+    );
+
+    expect(withPlugin).toBe(without);
+  });
+
+  test("HAST plugin setProperty overwrites existing MDX JSX attribute", () => {
+    const overwrite = defineHastPlugin({
+      name: "overwrite-attr",
+      createOnce: () => ({
+        mdxJsxTextElement(node: HastNode, ctx: HastVisitorContext) {
+          ctx.setProperty(node, "foo", "replaced");
+        },
+      }),
+    });
+
+    const js = compileMdxToJs(
+      'import B from "./B.jsx"\n\n<B foo="bar">hi</B>',
+      { hastPlugins: [overwrite] },
+    );
+
+    expect(js).toContain('foo: "replaced"');
+    expect(js).not.toContain('"bar"');
+  });
+
+  // ---------------------------------------------------------------------------
+  // optimizeStatic
+  // ---------------------------------------------------------------------------
+
+  test("optimizeStatic collapses static subtrees (Astro-style)", () => {
+    const js = compileMdxToJs("# Hello\n\nWorld", {
+      optimizeStatic: {
+        component: "Fragment",
+        prop: "set:html",
+      },
+    });
+    expect(js).toContain("set:html");
+    expect(js).toContain("<h1>Hello</h1>");
+    expect(js).toContain("<p>World</p>");
+    // Should NOT have individual element calls
+    expect(js).not.toMatch(/"h1"/);
+  });
+
+  test("optimizeStatic React-style with wrapPropValue", () => {
+    const js = compileMdxToJs("# Hello", {
+      optimizeStatic: {
+        component: "div",
+        prop: "dangerouslySetInnerHTML",
+        wrapPropValue: true,
+      },
+    });
+    expect(js).toContain("dangerouslySetInnerHTML");
+    expect(js).toContain("__html");
+  });
+
+  test("optimizeStatic preserves dynamic MDX components", () => {
+    const js = compileMdxToJs("# Static\n\n<Dynamic />\n\nAlso static", {
+      optimizeStatic: {
+        component: "Fragment",
+        prop: "set:html",
+      },
+    });
+    expect(js).toContain("set:html");
+    expect(js).toContain("Dynamic");
+  });
+
+  test("optimizeStatic off by default", () => {
+    const js = compileMdxToJs("# Hello\n\nWorld");
+    expect(js).not.toContain("set:html");
+    expect(js).toContain('"h1"');
+  });
 });

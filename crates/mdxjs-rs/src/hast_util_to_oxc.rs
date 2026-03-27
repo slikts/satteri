@@ -3,9 +3,11 @@
 //! Reads directly from the HAST binary format (`MdastView`) — no intermediate
 //! `hast::Node` tree is needed.
 
+use crate::configuration::OptimizeStaticConfig;
 use crate::oxc::{parse_esm_to_tree, parse_expression_to_tree, serialize};
 use crate::oxc_utils::{
     create_jsx_attr_name_from_str, create_jsx_name_from_str, inter_element_whitespace,
+    is_literal_name,
 };
 use core::str;
 use std::cell::Cell;
@@ -96,6 +98,7 @@ struct Context<'a> {
     location: Option<&'a Location>,
     allocator: &'a Allocator,
     view: &'a MdastView<'a>,
+    optimize_static: Option<&'a OptimizeStaticConfig>,
 }
 
 /// Compile a HAST binary buffer into OXC's ES AST.
@@ -105,6 +108,7 @@ pub fn hast_util_to_oxc<'a>(
     location: Option<&'a Location>,
     explicit_jsxs: &mut FxHashSet<Span>,
     allocator: &'a Allocator,
+    optimize_static: Option<&'a OptimizeStaticConfig>,
 ) -> Result<MdxProgram<'a>, message::Message> {
     let mut context = Context {
         space: Space::Html,
@@ -113,6 +117,7 @@ pub fn hast_util_to_oxc<'a>(
         location,
         allocator,
         view,
+        optimize_static,
     };
     let expr = match one(&mut context, 0, explicit_jsxs)? {
         Some(JSXChild::Fragment(x)) => Some(Expression::JSXFragment(x)),
@@ -186,6 +191,122 @@ fn one<'a>(
     }
 }
 
+/// Check if a HAST subtree is fully static (only HTML elements, text, comments, raw).
+///
+/// Returns `false` for any subtree containing MDX nodes (components, expressions, ESM)
+/// or elements whose tag name is in the ignore list.
+fn is_static_subtree(view: &MdastView, node_id: u32, config: &OptimizeStaticConfig) -> bool {
+    let node = view.get_node(node_id);
+    let raw_type = node.node_type;
+
+    match raw_type {
+        HAST_TEXT | HAST_RAW | HAST_COMMENT => true,
+        HAST_ELEMENT => {
+            let data = view.get_type_data(node_id);
+            if data.len() < 16 {
+                return false;
+            }
+            let tag_ref = decode_element_tag(data);
+            let tag = view.get_str(tag_ref);
+            // Must be a lowercase HTML tag and not in the ignore list
+            if !is_literal_name(tag) {
+                return false;
+            }
+            if config.ignore_elements.iter().any(|s| s == tag) {
+                return false;
+            }
+            // All children must also be static
+            view.get_children(node_id)
+                .iter()
+                .all(|&cid| is_static_subtree(view, cid, config))
+        }
+        // MDX nodes, root, or anything else → not static
+        _ => false,
+    }
+}
+
+/// Try to render a static subtree to an HTML string. Returns `None` if not static.
+/// Combines the check and serialization in a single pass for efficiency.
+fn try_render_static(
+    view: &MdastView,
+    node_id: u32,
+    config: &OptimizeStaticConfig,
+    out: &mut String,
+) -> bool {
+    if !is_static_subtree(view, node_id, config) {
+        return false;
+    }
+    tryckeri_hast::render_node(node_id, view, out);
+    true
+}
+
+/// Create a JSX node that injects raw HTML according to the optimization config.
+fn create_raw_html_jsx<'a>(
+    alloc: &'a Allocator,
+    html: &str,
+    config: &OptimizeStaticConfig,
+) -> JSXChild<'a> {
+    let html_str = StringLiteral {
+        node_id: Cell::new(NodeId::DUMMY),
+        span: SPAN,
+        value: Atom::from(alloc.alloc_str(html)),
+        raw: None,
+        lone_surrogates: false,
+    };
+
+    let prop_value = if config.wrap_prop_value {
+        // React-style: { __html: "..." }
+        use oxc_ast::ast::{ObjectProperty, ObjectPropertyKind, PropertyKey, PropertyKind};
+        let mut props = OxcVec::with_capacity_in(1, alloc);
+        props.push(ObjectPropertyKind::ObjectProperty(OxcBox::new_in(
+            ObjectProperty {
+                span: SPAN,
+                kind: PropertyKind::Init,
+                key: PropertyKey::StaticIdentifier(OxcBox::new_in(
+                    crate::oxc_utils::create_ident_name(alloc, "__html"),
+                    alloc,
+                )),
+                value: Expression::StringLiteral(OxcBox::new_in(html_str, alloc)),
+                method: false,
+                shorthand: false,
+                computed: false,
+                node_id: Cell::new(NodeId::DUMMY),
+            },
+            alloc,
+        )));
+        JSXAttributeValue::ExpressionContainer(OxcBox::new_in(
+            JSXExpressionContainer {
+                node_id: Cell::new(NodeId::DUMMY),
+                span: SPAN,
+                expression: JSXExpression::from(crate::oxc_utils::create_object_expression(
+                    alloc, props,
+                )),
+            },
+            alloc,
+        ))
+    } else {
+        // Plain string: prop="<html>"
+        JSXAttributeValue::StringLiteral(OxcBox::new_in(html_str, alloc))
+    };
+
+    let mut attrs = OxcVec::with_capacity_in(1, alloc);
+    attrs.push(JSXAttributeItem::Attribute(OxcBox::new_in(
+        JSXAttribute {
+            node_id: Cell::new(NodeId::DUMMY),
+            span: SPAN,
+            name: create_jsx_attr_name_from_str(alloc, &config.prop),
+            value: Some(prop_value),
+        },
+        alloc,
+    )));
+
+    let children = OxcVec::new_in(alloc);
+    JSXChild::Element(OxcBox::new_in(
+        create_element(alloc, &config.component, attrs, children, SPAN),
+        alloc,
+    ))
+}
+
 /// Transform children of `parent`.
 fn all<'a>(
     context: &mut Context<'a>,
@@ -193,14 +314,50 @@ fn all<'a>(
     explicit_jsxs: &mut FxHashSet<Span>,
 ) -> Result<OxcVec<'a, JSXChild<'a>>, message::Message> {
     let mut result = OxcVec::new_in(context.allocator);
-    // Index-based loop needed: `context` borrows `view`, so can't iterate by ref.
     let child_count = context.view.get_children(parent_id).len();
-    for i in 0..child_count {
-        let child_id = context.view.get_children(parent_id)[i];
-        if let Some(child) = one(context, child_id, explicit_jsxs)? {
-            result.push(child);
+
+    if let Some(config) = context.optimize_static {
+        // Optimization enabled: group consecutive static siblings into raw HTML.
+        let mut i = 0;
+        while i < child_count {
+            let child_id = context.view.get_children(parent_id)[i];
+
+            let mut html_buf = String::new();
+            if try_render_static(context.view, child_id, config, &mut html_buf) {
+                // Accumulate consecutive static siblings
+                i += 1;
+                while i < child_count {
+                    let next_id = context.view.get_children(parent_id)[i];
+                    if !try_render_static(context.view, next_id, config, &mut html_buf) {
+                        break;
+                    }
+                    i += 1;
+                }
+                if !html_buf.is_empty() {
+                    result.push(create_raw_html_jsx(
+                        context.allocator,
+                        &html_buf,
+                        config,
+                    ));
+                }
+            } else {
+                if let Some(child) = one(context, child_id, explicit_jsxs)? {
+                    result.push(child);
+                }
+                i += 1;
+            }
+        }
+    } else {
+        // No optimization: normal path.
+        // Index-based loop needed: `context` borrows `view`, so can't iterate by ref.
+        for i in 0..child_count {
+            let child_id = context.view.get_children(parent_id)[i];
+            if let Some(child) = one(context, child_id, explicit_jsxs)? {
+                result.push(child);
+            }
         }
     }
+
     Ok(result)
 }
 

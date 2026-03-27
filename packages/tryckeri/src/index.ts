@@ -56,7 +56,7 @@ export type {
 } from "./hast-visitor.js";
 
 export { compileMarkdownToHtml, compileMdxToJs } from "./compile.js";
-export type { CompileOptions } from "./compile.js";
+export type { CompileOptions, OptimizeStaticConfig } from "./compile.js";
 
 export type {
   MdastNode,

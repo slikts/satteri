@@ -34,9 +34,9 @@ function markHast(node: HastNode): Record<string, unknown> {
   if (node.tagName !== undefined) obj.tagName = node.tagName;
   if (node.properties !== undefined) obj.properties = node.properties;
   if (node.value !== undefined) obj.value = node.value;
-  // MDX JSX elements store name on the node
-  const anyNode = node as unknown as Record<string, unknown>;
-  if (anyNode.name !== undefined) obj.name = anyNode.name;
+  // MDX JSX elements store name and attributes on the node
+  if (node.name !== undefined) obj.name = node.name;
+  if (node.attributes !== undefined) obj.attributes = node.attributes;
   if (node.children) {
     obj.children = node.children.map(markHast);
   }
@@ -46,6 +46,8 @@ function markHast(node: HastNode): Record<string, unknown> {
 class HastVisitorContextImpl implements HastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: Diagnostic[] = [];
+  /** Track accumulated node state for multiple setProperty calls on the same node. */
+  readonly #pendingNodes: Map<number, HastNode> = new Map();
 
   removeNode(node: HastNode): void {
     this.#commandBuffer.removeNode(node._nodeId);
@@ -54,14 +56,35 @@ class HastVisitorContextImpl implements HastVisitorContext {
   replaceNode(node: HastNode, newNode: HastNode): void {
     // Encode as a REPLACE command with _hast marker for Rust deserialization
     this.#commandBuffer.replaceRawJson(node._nodeId, JSON.stringify(markHast(newNode)));
+    this.#pendingNodes.set(node._nodeId, newNode);
   }
 
   setProperty(node: HastNode, key: string, value: unknown): void {
-    // For HAST, setProperty modifies an element's HTML attributes.
-    // We implement this as a full replace of the node with updated properties.
-    const updated = { ...node };
-    if (!updated.properties) updated.properties = {};
-    updated.properties = { ...updated.properties, [key]: value as string | boolean | string[] };
+    // Use pending state if we've already modified this node in this visitor pass
+    const current = this.#pendingNodes.get(node._nodeId) ?? node;
+    const updated = { ...current };
+    if (current.type === "mdxJsxElement" || current.type === "mdxJsxTextElement") {
+      // MDX JSX nodes use `attributes`, not `properties`
+      const attrs = [...(updated.attributes ?? [])];
+      // Remove existing attribute with same name, if any
+      const idx = attrs.findIndex(
+        (a) => a.type === "mdxJsxAttribute" && a.name === key,
+      );
+      if (idx !== -1) attrs.splice(idx, 1);
+      // Add new attribute
+      const attrValue =
+        value === true || value === null || value === undefined
+          ? null
+          : typeof value === "string"
+            ? value
+            : String(value);
+      attrs.push({ type: "mdxJsxAttribute", name: key, value: attrValue });
+      updated.attributes = attrs;
+    } else {
+      // Regular HAST elements use `properties`
+      if (!updated.properties) updated.properties = {};
+      updated.properties = { ...updated.properties, [key]: value as string | boolean | string[] };
+    }
     this.replaceNode(node, updated as HastNode);
   }
 
