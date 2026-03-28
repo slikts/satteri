@@ -108,10 +108,9 @@ describe("MDAST plugins affecting HTML output", () => {
         ctx.removeNode(_node);
       },
     };
-    const html = markdownToHtmlWithMdastPlugins(
-      "Visit [example](https://example.com) today",
-      [{ instance: removeLinks, name: "remove-links" }],
-    );
+    const html = markdownToHtmlWithMdastPlugins("Visit [example](https://example.com) today", [
+      { instance: removeLinks, name: "remove-links" },
+    ]);
     expect(html).not.toContain("<a");
     expect(html).not.toContain("href");
     expect(html).not.toContain("example.com");
@@ -458,9 +457,7 @@ describe("combined MDAST + HAST plugin scenarios", () => {
       },
     };
     const mdastBuf = parseToBuffer("See [link](https://example.com) here");
-    const result = runPluginsOnBuffer(mdastBuf, [
-      { instance: removeLinks, name: "remove-links" },
-    ]);
+    const result = runPluginsOnBuffer(mdastBuf, [{ instance: removeLinks, name: "remove-links" }]);
     const hastBuf = mdastBufferToHastBuffer(
       result.buffer instanceof Uint8Array ? result.buffer : new Uint8Array(result.buffer),
     );

@@ -242,7 +242,10 @@ describe("materializeHastTree", () => {
     const { reader, dataMap } = setup();
     const tree = materializeHastTree(reader, dataMap);
     if (tree.type !== "root") throw new Error("expected root");
-    const h1 = tree.children.find((n): n is Extract<HastNode, { type: "element" }> => n.type === "element" && n.tagName === "h1");
+    const h1 = tree.children.find(
+      (n): n is Extract<HastNode, { type: "element" }> =>
+        n.type === "element" && n.tagName === "h1",
+    );
     expect(h1).toBeDefined();
     expect(h1!.type).toBe("element");
     expect(h1!.properties).toBeDefined();
@@ -252,7 +255,10 @@ describe("materializeHastTree", () => {
     const { reader, dataMap } = setup();
     const tree = materializeHastTree(reader, dataMap);
     if (tree.type !== "root") throw new Error("expected root");
-    const h1 = tree.children.find((n): n is Extract<HastNode, { type: "element" }> => n.type === "element" && n.tagName === "h1");
+    const h1 = tree.children.find(
+      (n): n is Extract<HastNode, { type: "element" }> =>
+        n.type === "element" && n.tagName === "h1",
+    );
     expect(h1).toBeDefined();
     const textNode = h1!.children[0]!;
     expect(textNode.type).toBe("text");

@@ -471,7 +471,8 @@ impl<'input> ParserInner<'input> {
                                 start,
                                 "Unexpected character `!` (U+0021) before name, expected a \
                                  character that can start a name, such as a letter, `$`, or `_` \
-                                 (note: to create a comment in MDX, use `{/* text */}`)".to_string(),
+                                 (note: to create a comment in MDX, use `{/* text */}`)"
+                                    .to_string(),
                             ));
                             self.tree[cur_ix].item.body = ItemBody::Text {
                                 backslash_escaped: false,
@@ -506,7 +507,8 @@ impl<'input> ParserInner<'input> {
                             self.mdx_errors.push((
                                 start,
                                 "Unexpected character after `<`, expected a valid JSX tag \
-                                 (note: to create a link in MDX, use `[text](url)`)".to_string(),
+                                 (note: to create a link in MDX, use `[text](url)`)"
+                                    .to_string(),
                             ));
                         }
 

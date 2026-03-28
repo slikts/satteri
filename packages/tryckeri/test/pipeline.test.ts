@@ -14,7 +14,9 @@ test("structuralMutationCount is 0 for a data-only plugin (heading-ids)", () => 
   const headingIdsPlugin = {
     heading(node: MdastNode) {
       if (node.type === "heading") {
-        node.data = { id: node.children?.[0]?.type === "text" ? node.children[0].value : "heading" };
+        node.data = {
+          id: node.children?.[0]?.type === "text" ? node.children[0].value : "heading",
+        };
       }
     },
   };
@@ -61,10 +63,7 @@ test("mutationCount tracks plugins that produce mutations", () => {
     },
   };
 
-  const result = runPluginsOnBuffer(buffer, [
-    makePlugin(plugin1, "p1"),
-    makePlugin(plugin2, "p2"),
-  ]);
+  const result = runPluginsOnBuffer(buffer, [makePlugin(plugin1, "p1"), makePlugin(plugin2, "p2")]);
 
   // Only plugin1 produces a mutation since the heading is gone by the time plugin2 runs
   expect(result.mutationCount).toBe(1);
@@ -98,10 +97,7 @@ test("DataMap entries are visible across plugin passes (plugin 1 sets, plugin 2 
     },
   };
 
-  const result = runPluginsOnBuffer(buffer, [
-    makePlugin(plugin1, "p1"),
-    makePlugin(plugin2, "p2"),
-  ]);
+  const result = runPluginsOnBuffer(buffer, [makePlugin(plugin1, "p1"), makePlugin(plugin2, "p2")]);
 
   expect(result.dataMap).toBeInstanceOf(DataMap);
   const nodeData = result.dataMap.get(1);
@@ -161,10 +157,7 @@ test("diagnostics are collected from all plugins", () => {
     },
   };
 
-  const result = runPluginsOnBuffer(buffer, [
-    makePlugin(plugin1, "p1"),
-    makePlugin(plugin2, "p2"),
-  ]);
+  const result = runPluginsOnBuffer(buffer, [makePlugin(plugin1, "p1"), makePlugin(plugin2, "p2")]);
 
   expect(result.diagnostics.length).toBe(2);
   expect(result.diagnostics.some((d) => d.message === "warning from plugin 1")).toBe(true);

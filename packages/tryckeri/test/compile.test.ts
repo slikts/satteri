@@ -444,9 +444,7 @@ describe("compileMdxToJs", () => {
       'import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>',
       { hastPlugins: [noop] },
     );
-    const without = compileMdxToJs(
-      'import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>',
-    );
+    const without = compileMdxToJs('import B from "./B.jsx"\n\n<B client:load foo="bar">hi</B>');
 
     expect(withPlugin).toBe(without);
   });
