@@ -6,9 +6,7 @@ perf.data.old
 flamegraph.svg
 dist
 
-# napi-rs generated bindings
-packages/tryckeri/index.js
-packages/tryckeri/index.d.ts
+# napi-rs generated platform packages
 packages/tryckeri/npm/
 packages/tryckeri/bench/docs.ts
 
