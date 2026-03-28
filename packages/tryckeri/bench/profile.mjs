@@ -59,7 +59,7 @@ console.log(`\n--- Totals ---\n`);
 console.log(`Rust-only (1+2+4):    ${(t1 + t2 + t4).toFixed(4)} ms`);
 console.log(`JS visitor (3):       ${t3.toFixed(4)} ms`);
 console.log(`Total with plugin:    ${(t1 + t2 + t3 + t4).toFixed(4)} ms`);
-console.log(`Plugin overhead:      ${(t3 / (t1 + t2 + t4) * 100).toFixed(0)}% of Rust time`);
+console.log(`Plugin overhead:      ${((t3 / (t1 + t2 + t4)) * 100).toFixed(0)}% of Rust time`);
 
 // Now measure visitor internals
 console.log(`\n--- Visitor internals ---\n`);

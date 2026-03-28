@@ -76,9 +76,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
       // MDX JSX nodes use `attributes`, not `properties`
       const attrs = [...((updated.attributes as MdxJsxAttributeUnion[] | undefined) ?? [])];
       // Remove existing attribute with same name, if any
-      const idx = attrs.findIndex(
-        (a) => a.type === "mdxJsxAttribute" && a.name === key,
-      );
+      const idx = attrs.findIndex((a) => a.type === "mdxJsxAttribute" && a.name === key);
       if (idx !== -1) attrs.splice(idx, 1);
       // Add new attribute
       const attrValue =
@@ -86,7 +84,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
           ? null
           : typeof value === "string"
             ? value
-            : String(value);
+            : `${value as string | number | boolean}`;
       attrs.push({ type: "mdxJsxAttribute", name: key, value: attrValue });
       updated.attributes = attrs;
     } else {
@@ -176,7 +174,12 @@ class LazyElementNode {
 Object.defineProperty(LazyElementNode.prototype, "tagName", {
   get(this: LazyElementNode) {
     const val = this._reader.getElementData(this._nodeId).tagName;
-    Object.defineProperty(this, "tagName", { value: val, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(this, "tagName", {
+      value: val,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
     return val;
   },
   configurable: true,
@@ -186,7 +189,12 @@ Object.defineProperty(LazyElementNode.prototype, "tagName", {
 Object.defineProperty(LazyElementNode.prototype, "properties", {
   get(this: LazyElementNode) {
     const val = propsToRecord(this._reader.getElementData(this._nodeId).properties);
-    Object.defineProperty(this, "properties", { value: val, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(this, "properties", {
+      value: val,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
     return val;
   },
   configurable: true,
@@ -197,7 +205,12 @@ Object.defineProperty(LazyElementNode.prototype, "children", {
   get(this: LazyElementNode) {
     const ids = this._reader.getChildIds(this._nodeId);
     const val = ids.map((id) => materializeHastNode(this._reader, id, this._dataMap));
-    Object.defineProperty(this, "children", { value: val, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(this, "children", {
+      value: val,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
     return val;
   },
   configurable: true,
@@ -234,7 +247,12 @@ class LazyTextNode {
 Object.defineProperty(LazyTextNode.prototype, "value", {
   get(this: LazyTextNode) {
     const val = this._reader.getTextValue(this._nodeId);
-    Object.defineProperty(this, "value", { value: val, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(this, "value", {
+      value: val,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
     return val;
   },
   configurable: true,

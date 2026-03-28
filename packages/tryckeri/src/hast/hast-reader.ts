@@ -245,9 +245,10 @@ export class HastReader {
    *   then attr_count * 20 bytes:
    *     [kind: u8(1B)][_pad: [u8;3](3B)][name: StringRef(8B)][value: StringRef(8B)]
    */
-  getMdxJsxElementData(
-    nodeId: number,
-  ): { name: string | null; attributes: (MdxJsxAttribute | MdxJsxExpressionAttribute)[] } {
+  getMdxJsxElementData(nodeId: number): {
+    name: string | null;
+    attributes: (MdxJsxAttribute | MdxJsxExpressionAttribute)[];
+  } {
     const data = this.getTypeData(nodeId);
     if (data.length < 16) {
       return { name: null, attributes: [] };

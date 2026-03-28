@@ -39,10 +39,7 @@ function initPlugins<T>(
 // HAST plugin runner
 // ---------------------------------------------------------------------------
 
-function runHastPlugins(
-  hastBuf: Uint8Array,
-  plugins: HastPluginDefinition[],
-): Uint8Array {
+function runHastPlugins(hastBuf: Uint8Array, plugins: HastPluginDefinition[]): Uint8Array {
   if (plugins.length === 0) return hastBuf;
 
   const instances = initPlugins(plugins);
@@ -87,10 +84,7 @@ export interface CompileOptions {
   optimizeStatic?: OptimizeStaticConfig;
 }
 
-export function compileMarkdownToHtml(
-  source: string,
-  options: CompileOptions = {},
-): string {
+export function compileMarkdownToHtml(source: string, options: CompileOptions = {}): string {
   const { mdastPlugins = [], hastPlugins = [] } = options;
 
   // Fast path: no plugins → single NAPI call, zero JS overhead
@@ -103,10 +97,7 @@ export function compileMarkdownToHtml(
   if (mdastPlugins.length > 0) {
     const instances = initPlugins(mdastPlugins);
     const result = runPluginsOnBuffer(mdastBuf, instances);
-    mdastBuf =
-      result.buffer instanceof Uint8Array
-        ? result.buffer
-        : new Uint8Array(result.buffer);
+    mdastBuf = result.buffer instanceof Uint8Array ? result.buffer : new Uint8Array(result.buffer);
   }
 
   let hastBuf = mdastBufferToHastBuffer(mdastBuf);
@@ -115,17 +106,12 @@ export function compileMarkdownToHtml(
   return hastBufferToHtmlStr(hastBuf);
 }
 
-export function compileMdxToJs(
-  source: string,
-  options: CompileOptions = {},
-): string {
+export function compileMdxToJs(source: string, options: CompileOptions = {}): string {
   const { mdastPlugins = [], hastPlugins = [], optimizeStatic } = options;
 
   // Fast path: no plugins → single NAPI call, zero JS overhead
   if (mdastPlugins.length === 0 && hastPlugins.length === 0) {
-    const mdxOptions = optimizeStatic
-      ? { optimizeStatic }
-      : undefined;
+    const mdxOptions = optimizeStatic ? { optimizeStatic } : undefined;
     return compileMdx(source, mdxOptions);
   }
 
@@ -134,18 +120,13 @@ export function compileMdxToJs(
   if (mdastPlugins.length > 0) {
     const instances = initPlugins(mdastPlugins);
     const result = runPluginsOnBuffer(mdastBuf, instances);
-    mdastBuf =
-      result.buffer instanceof Uint8Array
-        ? result.buffer
-        : new Uint8Array(result.buffer);
+    mdastBuf = result.buffer instanceof Uint8Array ? result.buffer : new Uint8Array(result.buffer);
   }
 
   let hastBuf = mdastBufferToHastBuffer(mdastBuf);
   hastBuf = runHastPlugins(hastBuf, hastPlugins);
 
-  const mdxOptions = optimizeStatic
-    ? { optimizeStatic }
-    : undefined;
+  const mdxOptions = optimizeStatic ? { optimizeStatic } : undefined;
 
   return compileHastBufferToJs(hastBuf, mdxOptions);
 }

@@ -29,7 +29,8 @@ test("root node children is a lazy getter initially", () => {
 test("accessing root.children returns 2 children (heading, paragraph)", () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
-  const children = root.children!;
+  if (root.type !== "root") throw new Error("expected root");
+  const children = root.children;
   expect(children.length).toBe(2);
   expect(children[0]!.type).toBe("heading");
   expect(children[1]!.type).toBe("paragraph");
@@ -38,32 +39,38 @@ test("accessing root.children returns 2 children (heading, paragraph)", () => {
 test("heading has depth === 1", () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
-  const heading = root.children![0]!;
+  if (root.type !== "root") throw new Error("expected root");
+  const heading = root.children[0]!;
+  if (heading.type !== "heading") throw new Error("expected heading");
   expect(heading.depth).toBe(1);
 });
 
 test('text child of heading has value === "Hello"', () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
-  const heading = root.children![0]!;
-  const textNode = heading.children![0]!;
+  if (root.type !== "root") throw new Error("expected root");
+  const heading = root.children[0]!;
+  if (heading.type !== "heading") throw new Error("expected heading");
+  const textNode = heading.children[0]!;
   expect(textNode.type).toBe("text");
-  expect(textNode.value).toBe("Hello");
+  if (textNode.type === "text") expect(textNode.value).toBe("Hello");
 });
 
 test('text child of paragraph has value === "World"', () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
-  const para = root.children![1]!;
-  const textNode = para.children![0]!;
+  if (root.type !== "root") throw new Error("expected root");
+  const para = root.children[1]!;
+  if (para.type !== "paragraph") throw new Error("expected paragraph");
+  const textNode = para.children[0]!;
   expect(textNode.type).toBe("text");
-  expect(textNode.value).toBe("World");
+  if (textNode.type === "text") expect(textNode.value).toBe("World");
 });
 
 test("position data is correct: root.position.start.line === 1", () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
-  expect(root.position.start.line).toBe(1);
+  expect(root.position!.start.line).toBe(1);
 });
 
 test("_nodeId is non-enumerable", () => {
@@ -96,6 +103,7 @@ test("reading node.data after setting returns the value", () => {
 test("children are lazily evaluated (getter replaced by plain array after access)", () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
+  if (root.type !== "root") throw new Error("expected root");
 
   const beforeDesc = Object.getOwnPropertyDescriptor(root, "children");
   expect(typeof beforeDesc?.get === "function").toBe(true);
@@ -121,9 +129,11 @@ function mdxSetup(source: string) {
 
 function findNode(node: ReturnType<typeof materializeTree>, type: string): any {
   if (node.type === type) return node;
-  for (const child of node.children ?? []) {
-    const found = findNode(child, type);
-    if (found) return found;
+  if ("children" in node && node.children) {
+    for (const child of node.children) {
+      const found = findNode(child as ReturnType<typeof materializeTree>, type);
+      if (found) return found;
+    }
   }
   return null;
 }
@@ -141,17 +151,13 @@ describe("MDX JSX attributes on MDAST nodes", () => {
     const { tree } = mdxSetup('<Component foo="bar" />\n');
     const jsx = findNode(tree, "mdxJsxFlowElement");
     expect(jsx.name).toBe("Component");
-    expect(jsx.attributes).toEqual([
-      { type: "mdxJsxAttribute", name: "foo", value: "bar" },
-    ]);
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "foo", value: "bar" }]);
   });
 
   test("element with boolean attribute", () => {
     const { tree } = mdxSetup("<Component disabled />\n");
     const jsx = findNode(tree, "mdxJsxFlowElement");
-    expect(jsx.attributes).toEqual([
-      { type: "mdxJsxAttribute", name: "disabled", value: null },
-    ]);
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "disabled", value: null }]);
   });
 
   test("element with expression attribute", () => {
@@ -169,15 +175,11 @@ describe("MDX JSX attributes on MDAST nodes", () => {
   test("element with spread attribute", () => {
     const { tree } = mdxSetup("<Component {...props} />\n");
     const jsx = findNode(tree, "mdxJsxFlowElement");
-    expect(jsx.attributes).toEqual([
-      { type: "mdxJsxExpressionAttribute", value: "...props" },
-    ]);
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxExpressionAttribute", value: "...props" }]);
   });
 
   test("element with multiple mixed attributes", () => {
-    const { tree } = mdxSetup(
-      '<Component a="1" b={2} c {...d} />\n',
-    );
+    const { tree } = mdxSetup('<Component a="1" b={2} c {...d} />\n');
     const jsx = findNode(tree, "mdxJsxFlowElement");
     expect(jsx.attributes).toHaveLength(4);
     expect(jsx.attributes[0]).toEqual({
@@ -206,9 +208,7 @@ describe("MDX JSX attributes on MDAST nodes", () => {
     const jsx = findNode(tree, "mdxJsxTextElement");
     expect(jsx).not.toBeNull();
     expect(jsx.name).toBe("Comp");
-    expect(jsx.attributes).toEqual([
-      { type: "mdxJsxAttribute", name: "x", value: "y" },
-    ]);
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "x", value: "y" }]);
   });
 
   test("fragment has null name and no attributes", () => {

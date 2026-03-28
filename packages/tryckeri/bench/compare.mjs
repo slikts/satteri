@@ -21,7 +21,9 @@ async function bench(name, fn) {
 
   const opsPerSec = (ITERATIONS / elapsed) * 1000;
   const meanMs = elapsed / ITERATIONS;
-  console.log(`${name.padEnd(55)} ${opsPerSec.toFixed(0).padStart(8)} ops/s   ${meanMs.toFixed(4).padStart(8)} ms/op`);
+  console.log(
+    `${name.padEnd(55)} ${opsPerSec.toFixed(0).padStart(8)} ops/s   ${meanMs.toFixed(4).padStart(8)} ms/op`,
+  );
 }
 
 console.log(`\n--- Benchmark (${ITERATIONS} iterations, ${WARMUP} warmup) ---\n`);
@@ -37,7 +39,6 @@ const noopPlugin = defineHastPlugin({
   }),
 });
 await bench("compileMarkdownToHtml — sync noop plugin", () =>
-  compileMarkdownToHtml(MARKDOWN, { hastPlugins: [noopPlugin] })
-);
+  compileMarkdownToHtml(MARKDOWN, { hastPlugins: [noopPlugin] }));
 
 console.log("");

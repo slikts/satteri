@@ -1,11 +1,11 @@
 {
-	"editor.defaultFormatter": "oxc.oxc-vscode",
-	"[rust]": {
-		"editor.defaultFormatter": "rust-lang.rust-analyzer"
-	},
-	"search.exclude": {
-		"**/target": true,
-		"**/node_modules": true,
-		"pnpm-lock.yaml": true
-	}
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "pnpm-lock.yaml": true
+  }
 }

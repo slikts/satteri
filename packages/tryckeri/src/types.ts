@@ -4,10 +4,7 @@
 // for AST node types. Extension types (toml, math, raw) are augmented here.
 
 import type { Position } from "unist";
-import type {
-  Literal as MdastLiteral,
-  Nodes as MdastStdNodes,
-} from "mdast";
+import type { Literal as MdastLiteral, Nodes as MdastStdNodes } from "mdast";
 import type { Nodes as HastStdNodes } from "hast";
 
 // Re-export standard position types from unist.
@@ -26,10 +23,7 @@ export type {
 export type { MdxFlowExpression, MdxTextExpression } from "mdast-util-mdx-expression";
 export type { MdxjsEsm } from "mdast-util-mdxjs-esm";
 
-import type {
-  MdxJsxAttribute,
-  MdxJsxExpressionAttribute,
-} from "mdast-util-mdx-jsx";
+import type { MdxJsxAttribute, MdxJsxExpressionAttribute } from "mdast-util-mdx-jsx";
 
 export type MdxJsxAttributeUnion = MdxJsxAttribute | MdxJsxExpressionAttribute;
 

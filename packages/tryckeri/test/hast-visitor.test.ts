@@ -3,7 +3,12 @@ import { HastReader } from "../src/hast/hast-reader.js";
 import { DataMap } from "../src/data-map.js";
 import { visitHast } from "../src/hast/hast-visitor.js";
 import { materializeHastTree } from "../src/hast/hast-materializer.js";
-import { parseToHastBuffer, hastBufferToHtmlStr, applyMutations, parseMdxToHastBuffer } from "../index.js";
+import {
+  parseToHastBuffer,
+  hastBufferToHtmlStr,
+  applyMutations,
+  parseMdxToHastBuffer,
+} from "../index.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 
@@ -27,22 +32,22 @@ function applyAndSerialize(uint8: Uint8Array, commandBuffer: Uint8Array): string
 // ---------------------------------------------------------------------------
 
 describe("visitHast — basic behaviour", () => {
-  test("visitor with no subscriptions produces no mutations, no diagnostics", async () => {
+  test("visitor with no subscriptions produces no mutations, no diagnostics", () => {
     const { reader, dataMap } = setup();
-    const result = await visitHast(reader, {}, dataMap);
+    const result = visitHast(reader, {}, dataMap);
     expect(result.commandBuffer.length).toBe(0);
     expect(result.diagnostics.length).toBe(0);
     expect(result.hasMutations).toBe(false);
   });
 
-  test("element() callback fires for each element node", async () => {
+  test("element() callback fires for each element node", () => {
     const { reader, dataMap } = setup();
     const tags: string[] = [];
-    await visitHast(
+    visitHast(
       reader,
       {
         element(node: HastNode) {
-          tags.push(node.tagName ?? "?");
+          tags.push(node.type === "element" ? node.tagName : "?");
         },
       },
       dataMap,
@@ -51,14 +56,14 @@ describe("visitHast — basic behaviour", () => {
     expect(tags).toContain("p");
   });
 
-  test("text() callback fires for each text node", async () => {
+  test("text() callback fires for each text node", () => {
     const { reader, dataMap } = setup();
     const texts: string[] = [];
-    await visitHast(
+    visitHast(
       reader,
       {
         text(node: HastNode) {
-          texts.push(node.value ?? "");
+          texts.push(node.type === "text" ? node.value : "");
         },
       },
       dataMap,
@@ -73,10 +78,10 @@ describe("visitHast — basic behaviour", () => {
 // ---------------------------------------------------------------------------
 
 describe("visitHast — lifecycle hooks", () => {
-  test("before() fires before visitor methods", async () => {
+  test("before() fires before visitor methods", () => {
     const { reader, dataMap } = setup();
     const order: string[] = [];
-    await visitHast(
+    visitHast(
       reader,
       {
         before() {
@@ -92,10 +97,10 @@ describe("visitHast — lifecycle hooks", () => {
     expect(order).toContain("element");
   });
 
-  test("after() fires after visitor methods", async () => {
+  test("after() fires after visitor methods", () => {
     const { reader, dataMap } = setup();
     const order: string[] = [];
-    await visitHast(
+    visitHast(
       reader,
       {
         element() {
@@ -110,10 +115,10 @@ describe("visitHast — lifecycle hooks", () => {
     expect(order[order.length - 1]).toBe("after");
   });
 
-  test("transformRoot() receives the full materialized root", async () => {
+  test("transformRoot() receives the full materialized root", () => {
     const { reader, dataMap } = setup();
     let rootType = "";
-    await visitHast(
+    visitHast(
       reader,
       {
         transformRoot(root: HastNode) {
@@ -131,19 +136,19 @@ describe("visitHast — lifecycle hooks", () => {
 // ---------------------------------------------------------------------------
 
 describe("visitHast — mutations", () => {
-  test("returning a node from element() creates a replace mutation", async () => {
+  test("returning a node from element() creates a replace mutation", () => {
     const { reader, dataMap, uint8 } = setup();
-    const result = await visitHast(
+    const result = visitHast(
       reader,
       {
         element(node: HastNode) {
-          if (node.tagName === "h1") {
+          if (node.type === "element" && node.tagName === "h1") {
             return {
-              type: "element",
+              type: "element" as const,
               tagName: "h2",
               properties: {},
               children: node.children ?? [],
-              data: null,
+              data: undefined,
               _nodeId: -1,
             };
           }
@@ -157,13 +162,13 @@ describe("visitHast — mutations", () => {
     expect(html).not.toContain("<h1>");
   });
 
-  test("context.removeNode() removes a node", async () => {
+  test("context.removeNode() removes a node", () => {
     const { reader, dataMap, uint8 } = setup();
-    const result = await visitHast(
+    const result = visitHast(
       reader,
       {
         element(node: HastNode, ctx: HastVisitorContext) {
-          if (node.tagName === "h1") {
+          if (node.type === "element" && node.tagName === "h1") {
             ctx.removeNode(node);
           }
         },
@@ -176,13 +181,13 @@ describe("visitHast — mutations", () => {
     expect(html).toContain("World");
   });
 
-  test("context.setProperty() modifies element attributes", async () => {
+  test("context.setProperty() modifies element attributes", () => {
     const { reader, dataMap, uint8 } = setup();
-    const result = await visitHast(
+    const result = visitHast(
       reader,
       {
         element(node: HastNode, ctx: HastVisitorContext) {
-          if (node.tagName === "h1") {
+          if (node.type === "element" && node.tagName === "h1") {
             ctx.setProperty(node, "id", "title");
           }
         },
@@ -200,13 +205,13 @@ describe("visitHast — mutations", () => {
 // ---------------------------------------------------------------------------
 
 describe("visitHast — diagnostics", () => {
-  test("context.report() collects diagnostics", async () => {
+  test("context.report() collects diagnostics", () => {
     const { reader, dataMap } = setup();
-    const result = await visitHast(
+    const result = visitHast(
       reader,
       {
         element(node: HastNode, ctx: HastVisitorContext) {
-          if (node.tagName === "h1") {
+          if (node.type === "element" && node.tagName === "h1") {
             ctx.report({ message: "heading found", node, severity: "info" });
           }
         },
@@ -228,14 +233,16 @@ describe("materializeHastTree", () => {
     const { reader, dataMap } = setup();
     const tree = materializeHastTree(reader, dataMap);
     expect(tree.type).toBe("root");
+    if (tree.type !== "root") throw new Error("expected root");
     expect(tree.children).toBeDefined();
-    expect(tree.children!.length).toBeGreaterThan(0);
+    expect(tree.children.length).toBeGreaterThan(0);
   });
 
   test("element nodes have tagName and properties", () => {
     const { reader, dataMap } = setup();
     const tree = materializeHastTree(reader, dataMap);
-    const h1 = tree.children!.find((n) => n.tagName === "h1");
+    if (tree.type !== "root") throw new Error("expected root");
+    const h1 = tree.children.find((n): n is Extract<HastNode, { type: "element" }> => n.type === "element" && n.tagName === "h1");
     expect(h1).toBeDefined();
     expect(h1!.type).toBe("element");
     expect(h1!.properties).toBeDefined();
@@ -244,10 +251,14 @@ describe("materializeHastTree", () => {
   test("text nodes have value", () => {
     const { reader, dataMap } = setup();
     const tree = materializeHastTree(reader, dataMap);
-    const h1 = tree.children!.find((n) => n.tagName === "h1");
-    const textNode = h1!.children![0];
-    expect(textNode!.type).toBe("text");
-    expect(textNode!.value).toBe("Hello");
+    if (tree.type !== "root") throw new Error("expected root");
+    const h1 = tree.children.find((n): n is Extract<HastNode, { type: "element" }> => n.type === "element" && n.tagName === "h1");
+    expect(h1).toBeDefined();
+    const textNode = h1!.children[0]!;
+    expect(textNode.type).toBe("text");
+    if (textNode.type === "text") {
+      expect(textNode.value).toBe("Hello");
+    }
   });
 });
 
@@ -257,9 +268,11 @@ describe("materializeHastTree", () => {
 
 function findHastNode(node: HastNode, type: string): HastNode | null {
   if (node.type === type) return node;
-  for (const child of node.children ?? []) {
-    const found = findHastNode(child, type);
-    if (found) return found;
+  if ("children" in node && node.children) {
+    for (const child of node.children) {
+      const found = findHastNode(child as HastNode, type);
+      if (found) return found;
+    }
   }
   return null;
 }
@@ -271,8 +284,9 @@ describe("MDX JSX attributes on HAST nodes", () => {
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     expect(jsx).not.toBeNull();
-    expect(jsx!.name).toBe("Component");
-    expect(jsx!.attributes).toEqual([]);
+    if (!jsx || jsx.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.name).toBe("Component");
+    expect(jsx.attributes).toEqual([]);
   });
 
   test("element with string literal attribute", () => {
@@ -280,10 +294,9 @@ describe("MDX JSX attributes on HAST nodes", () => {
     const reader = new HastReader(buf);
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
-    expect(jsx!.name).toBe("Component");
-    expect(jsx!.attributes).toEqual([
-      { type: "mdxJsxAttribute", name: "foo", value: "bar" },
-    ]);
+    if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.name).toBe("Component");
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "foo", value: "bar" }]);
   });
 
   test("element with boolean attribute", () => {
@@ -291,9 +304,8 @@ describe("MDX JSX attributes on HAST nodes", () => {
     const reader = new HastReader(buf);
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
-    expect(jsx!.attributes).toEqual([
-      { type: "mdxJsxAttribute", name: "disabled", value: null },
-    ]);
+    if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "disabled", value: null }]);
   });
 
   test("element with expression attribute", () => {
@@ -301,7 +313,8 @@ describe("MDX JSX attributes on HAST nodes", () => {
     const reader = new HastReader(buf);
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
-    expect(jsx!.attributes).toEqual([
+    if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([
       {
         type: "mdxJsxAttribute",
         name: "count",
@@ -315,35 +328,33 @@ describe("MDX JSX attributes on HAST nodes", () => {
     const reader = new HastReader(buf);
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
-    expect(jsx!.attributes).toEqual([
-      { type: "mdxJsxExpressionAttribute", value: "...props" },
-    ]);
+    if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.attributes).toEqual([{ type: "mdxJsxExpressionAttribute", value: "...props" }]);
   });
 
   test("element with multiple mixed attributes", () => {
-    const buf = parseMdxToHastBuffer(
-      '<Component a="1" b={2} c {...d} />\n',
-    );
+    const buf = parseMdxToHastBuffer('<Component a="1" b={2} c {...d} />\n');
     const reader = new HastReader(buf);
     const tree = materializeHastTree(reader, new DataMap());
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
-    expect(jsx!.attributes).toHaveLength(4);
-    expect(jsx!.attributes![0]).toEqual({
+    if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
+    expect(jsx.attributes).toHaveLength(4);
+    expect(jsx.attributes[0]).toEqual({
       type: "mdxJsxAttribute",
       name: "a",
       value: "1",
     });
-    expect(jsx!.attributes![1]).toEqual({
+    expect(jsx.attributes[1]).toEqual({
       type: "mdxJsxAttribute",
       name: "b",
       value: { type: "mdxJsxAttributeValueExpression", value: "2" },
     });
-    expect(jsx!.attributes![2]).toEqual({
+    expect(jsx.attributes[2]).toEqual({
       type: "mdxJsxAttribute",
       name: "c",
       value: null,
     });
-    expect(jsx!.attributes![3]).toEqual({
+    expect(jsx.attributes[3]).toEqual({
       type: "mdxJsxExpressionAttribute",
       value: "...d",
     });

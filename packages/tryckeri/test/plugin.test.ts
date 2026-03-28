@@ -42,7 +42,9 @@ describe("defineMdastPlugin", () => {
 
   it("throws if createOnce is not a function", () => {
     expect(() =>
-      defineMdastPlugin({ name: "x", createOnce: 42 } as unknown as Parameters<typeof defineMdastPlugin>[0]),
+      defineMdastPlugin({ name: "x", createOnce: 42 } as unknown as Parameters<
+        typeof defineMdastPlugin
+      >[0]),
     ).toThrow(/createOnce/);
   });
 

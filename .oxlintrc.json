@@ -1,7 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["target", "crates/**/*", "node_modules"],
-  "options": {
-    "typeAware": true
-  }
+  "ignorePatterns": [
+    "target",
+    "crates/**/*",
+    "node_modules",
+    "dist",
+    "tryckeri_napi.*",
+    "packages/tryckeri/",
+    "wasi-worker.mjs",
+    "wasi-worker-browser.mjs"
+  ]
 }

@@ -46,7 +46,10 @@ class Processor {
     this.#processorCtx = new ProcessorContext();
   }
 
-  #getPluginInstances(): { instance: ReturnType<MdastPluginDefinition["createOnce"]>; name: string }[] {
+  #getPluginInstances(): {
+    instance: ReturnType<MdastPluginDefinition["createOnce"]>;
+    name: string;
+  }[] {
     if (this.#initializedPlugins === null) {
       this.#initializedPlugins = this.#pluginDefs.map((def) => ({
         instance: def.createOnce(this.#processorCtx),

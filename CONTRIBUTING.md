@@ -30,7 +30,7 @@ We're also committed to fostering a welcoming and respectful community. Any issu
 
 ## Quality Guidelines
 
-- Prefer self-documenting code first, with expressive names and straightforward logic. Comments should explain *why* (intent, invariants, trade-offs), not *how*, and not have separators/dividers/other visual noise. Variable and function names should be clear and descriptive, not cryptic abbreviations.
+- Prefer self-documenting code first, with expressive names and straightforward logic. Comments should explain _why_ (intent, invariants, trade-offs), not _how_, and not have separators/dividers/other visual noise. Variable and function names should be clear and descriptive, not cryptic abbreviations.
 - Tests should assert observable behavior (inputs/outputs, effects), not internal implementation details. Keep tests deterministic and independent of global state.
 - For Rust: use typed error enums (derived with `thiserror` where applicable). Prefer `?` propagation when possible, and reserve `.expect()`/`.unwrap()` for cases where failure is a programmer bug. Explicit `use` imports for standard library types (e.g. `use std::collections::HashMap;`).
 - For TypeScript: strict types, no `any` shortcuts, and the same code style enforced by oxlint.

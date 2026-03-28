@@ -21,7 +21,7 @@
   "scripts": {
     "build:native": "napi build --manifest-path ../../crates/napi-binding/Cargo.toml --output-dir . --platform --release --esm",
     "build:native:debug": "napi build --manifest-path ../../crates/napi-binding/Cargo.toml --output-dir . --platform --esm",
-    "build:ts": "tsc",
+    "build:ts": "tsc --project tsconfig.build.json",
     "build": "pnpm build:native && pnpm build:ts",
     "prepublishOnly": "napi prepublish --skip-gh-release",
     "artifacts": "napi create-npm-dirs && napi artifacts && napi version",

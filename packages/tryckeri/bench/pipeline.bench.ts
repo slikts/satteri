@@ -9,8 +9,6 @@
  */
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import { bench, describe } from "vitest";
 import {
   parseToBuffer,
@@ -22,8 +20,6 @@ import {
   compileMdxFromBuffer,
 } from "../src/index.js";
 import { MdastReader } from "../src/mdast/mdast-reader.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const MARKDOWN = readFileSync(new URL("./markdown.md", import.meta.url), "utf8");
 const MDX = `import {Chart} from './chart.js'
@@ -127,23 +123,19 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// Async pipeline benchmarks (measure async overhead)
+// Sync pipeline benchmarks
 // ---------------------------------------------------------------------------
 
-import {
-  compileMarkdownToHtml,
-  compileMdxToJs,
-  defineHastPlugin,
-} from "../src/index.js";
+import { compileMarkdownToHtml, defineHastPlugin } from "../src/index.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 
-describe("async pipeline", () => {
-  bench("compileMarkdownToHtml — no plugins (async overhead)", async () => {
-    await compileMarkdownToHtml(MARKDOWN);
+describe("sync pipeline", () => {
+  bench("compileMarkdownToHtml — no plugins", () => {
+    compileMarkdownToHtml(MARKDOWN);
   });
 
-  bench("compileMarkdownToHtml — sync HAST plugin", async () => {
+  bench("compileMarkdownToHtml — sync HAST plugin", () => {
     const plugin = defineHastPlugin({
       name: "sync-noop",
       createOnce: () => ({
@@ -152,18 +144,18 @@ describe("async pipeline", () => {
         },
       }),
     });
-    await compileMarkdownToHtml(MARKDOWN, { hastPlugins: [plugin] });
+    compileMarkdownToHtml(MARKDOWN, { hastPlugins: [plugin] });
   });
 
-  bench("compileMarkdownToHtml — async HAST plugin", async () => {
+  bench("compileMarkdownToHtml — HAST plugin with callback", () => {
     const plugin = defineHastPlugin({
-      name: "async-noop",
+      name: "noop-with-sig",
       createOnce: () => ({
-        async element(_node: HastNode, _ctx: HastVisitorContext) {
-          // no-op async (returns a resolved promise)
+        element(_node: HastNode, _ctx: HastVisitorContext) {
+          // no-op
         },
       }),
     });
-    await compileMarkdownToHtml(MARKDOWN, { hastPlugins: [plugin] });
+    compileMarkdownToHtml(MARKDOWN, { hastPlugins: [plugin] });
   });
 });

@@ -1,4 +1,15 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["target", "crates/**/*", "node_modules"]
+  "ignorePatterns": [
+    "target",
+    "dist",
+    "crates/**/*",
+    "node_modules",
+    "tryckeri_napi.*",
+    "packages/tryckeri/browser.js",
+    "packages/tryckeri/index.js",
+    "packages/tryckeri/browser.d.ts",
+    "wasi-worker.mjs",
+    "wasi-worker-browser.mjs"
+  ]
 }

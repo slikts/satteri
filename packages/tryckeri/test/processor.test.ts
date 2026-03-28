@@ -4,16 +4,16 @@ import { createProcessor } from "../src/processor.js";
 import { defineMdastPlugin } from "../src/plugin.js";
 
 describe("createProcessor", () => {
-  it("createProcessor([]) works, processBuffer returns same buffer", async () => {
+  it("createProcessor([]) works, processBuffer returns same buffer", () => {
     const buf = buildHelloWorldBuffer();
     const processor = createProcessor({ plugins: [] });
-    const result = await processor.processBuffer(buf);
+    const result = processor.processBuffer(buf);
     expect(result.buffer).toBe(buf);
     expect(result.mutationCount).toBe(0);
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("multiple plugins run in order", async () => {
+  it("multiple plugins run in order", () => {
     const buf = buildHelloWorldBuffer();
     let headingCallCount = 0;
     const counterPlugin = defineMdastPlugin({
@@ -27,11 +27,11 @@ describe("createProcessor", () => {
       },
     });
     const processor = createProcessor({ plugins: [counterPlugin] });
-    await processor.processBuffer(buf);
+    processor.processBuffer(buf);
     expect(headingCallCount).toBe(1);
   });
 
-  it("createOnce is called once per processor, not once per processBuffer call", async () => {
+  it("createOnce is called once per processor, not once per processBuffer call", () => {
     const buf = buildHelloWorldBuffer();
     let createOnceCallCount = 0;
     const countingPlugin = defineMdastPlugin({
@@ -42,25 +42,26 @@ describe("createProcessor", () => {
       },
     });
     const processor = createProcessor({ plugins: [countingPlugin] });
-    await processor.processBuffer(buf);
-    await processor.processBuffer(buf);
+    processor.processBuffer(buf);
+    processor.processBuffer(buf);
     expect(createOnceCallCount).toBe(1);
   });
 
-  it('processBufferToTree returns a tree object with type === "root"', async () => {
+  it('processBufferToTree returns a tree object with type === "root"', () => {
     const buf = buildHelloWorldBuffer();
     const processor = createProcessor({ plugins: [] });
-    const result = await processor.processBufferToTree(buf);
+    const result = processor.processBufferToTree(buf);
     expect(result.tree).toBeTruthy();
     expect(result.tree.type).toBe("root");
   });
 
-  it("processBufferToTree tree has children", async () => {
+  it("processBufferToTree tree has children", () => {
     const buf = buildHelloWorldBuffer();
     const processor = createProcessor({ plugins: [] });
-    const result = await processor.processBufferToTree(buf);
+    const result = processor.processBufferToTree(buf);
+    if (result.tree.type !== "root") throw new Error("expected root");
     expect(Array.isArray(result.tree.children)).toBe(true);
-    expect(result.tree.children!.length).toBeGreaterThan(0);
+    expect(result.tree.children.length).toBeGreaterThan(0);
   });
 
   it("getDiagnostics returns array (empty when no processor-level reports)", () => {

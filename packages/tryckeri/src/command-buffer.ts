@@ -191,9 +191,7 @@ export class CommandBuffer {
       this.writeU32(encoded.length);
       this.writeBytes(encoded);
     } else {
-      throw new Error(
-        `Unsupported value type for setProperty: ${typeof value} (field "${key}")`,
-      );
+      throw new Error(`Unsupported value type for setProperty: ${typeof value} (field "${key}")`);
     }
   }
 
