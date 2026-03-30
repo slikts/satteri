@@ -171,7 +171,10 @@ fn mdx_compile_from_buffer(bencher: divan::Bencher) {
     let (arena, _) = tryckeri_parser::parse(MDX, &tryckeri_parser::ParseOptions::mdx());
     let mdast_buf = arena.to_raw_buffer();
 
-    bencher.bench(|| tryckeri_mdxjs::compile_arena_bytes(&mdast_buf, &tryckeri_mdxjs::Options::default()).unwrap());
+    bencher.bench(|| {
+        tryckeri_mdxjs::compile_arena_bytes(&mdast_buf, &tryckeri_mdxjs::Options::default())
+            .unwrap()
+    });
 }
 
 // ---- Step-by-step breakdown ----

@@ -8,11 +8,11 @@ use unicase::UniCase;
 
 use crate::{
     linklabel::{scan_link_label_rest, LinkLabel},
+    mdx::*,
     parse::{
         scan_containers, Allocations, FootnoteDef, HeadingAttributes, Item, ItemBody, LinkDef,
         LINK_MAX_NESTED_PARENS,
     },
-    mdx::*,
     scanners::*,
     strings::CowStr,
     tree::{Tree, TreeIndex},

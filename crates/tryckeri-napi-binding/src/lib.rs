@@ -58,7 +58,8 @@ pub fn compile_mdx(source: String, options: Option<JsMdxOptions>) -> Result<Stri
 #[napi]
 pub fn compile_mdx_from_buffer(buf: Uint8Array, options: Option<JsMdxOptions>) -> Result<String> {
     let opts = js_options_to_rust(options);
-    tryckeri_mdxjs::compile_arena_bytes(&buf, &opts).map_err(|e| napi::Error::from_reason(e.to_string()))
+    tryckeri_mdxjs::compile_arena_bytes(&buf, &opts)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +137,8 @@ pub fn hast_buffer_to_html_str(buf: Uint8Array) -> Result<String> {
 #[napi]
 pub fn compile_hast_buffer_to_js(buf: Uint8Array, options: Option<JsMdxOptions>) -> Result<String> {
     let opts = js_options_to_rust(options);
-    tryckeri_mdxjs::compile_hast_buffer(&buf, &opts).map_err(|e| napi::Error::from_reason(e.to_string()))
+    tryckeri_mdxjs::compile_hast_buffer(&buf, &opts)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +161,8 @@ pub fn apply_mutations(arena_buf: Uint8Array, command_buf: Uint8Array) -> Result
 
     // Provide the real parser as the markdown parsing callback
     let parse_markdown = |source: &str| -> tryckeri_mdast::MdastArena {
-        let (parsed, _errors) = tryckeri_parser::parse(source, &tryckeri_parser::ParseOptions::mdx());
+        let (parsed, _errors) =
+            tryckeri_parser::parse(source, &tryckeri_parser::ParseOptions::mdx());
         parsed
     };
 

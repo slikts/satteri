@@ -9,13 +9,13 @@
  *
  * Returns a new MDAST arena buffer with all mutations applied.
  */
-export declare function applyMutations(arenaBuf: Uint8Array, commandBuf: Uint8Array): Uint8Array
+export declare function applyMutations(arenaBuf: Uint8Array, commandBuf: Uint8Array): Uint8Array;
 
 /** Return metadata about the MdastNode struct size and buffer format version. */
 export interface BufferFormat {
-  nodeStructSize: number
-  version: number
-  magic: string
+  nodeStructSize: number;
+  version: number;
+  magic: string;
 }
 
 /**
@@ -23,18 +23,27 @@ export interface BufferFormat {
  * This is the split-pipeline entry point for MDX: after MDAST→HAST conversion
  * and any HAST plugin mutations, this function does the final hast→JS step.
  */
-export declare function compileHastBufferToJs(buf: Uint8Array, options?: JsMdxOptions | undefined | null): string
+export declare function compileHastBufferToJs(
+  buf: Uint8Array,
+  options?: JsMdxOptions | undefined | null,
+): string;
 
 /** Compile MDX source directly to JavaScript. */
-export declare function compileMdx(source: string, options?: JsMdxOptions | undefined | null): string
+export declare function compileMdx(
+  source: string,
+  options?: JsMdxOptions | undefined | null,
+): string;
 
 /** Compile a pre-parsed MDAST binary buffer to MDX JavaScript output. */
-export declare function compileMdxFromBuffer(buf: Uint8Array, options?: JsMdxOptions | undefined | null): string
+export declare function compileMdxFromBuffer(
+  buf: Uint8Array,
+  options?: JsMdxOptions | undefined | null,
+): string;
 
-export declare function getBufferFormat(): BufferFormat
+export declare function getBufferFormat(): BufferFormat;
 
 /** Convert a HAST binary buffer to an HTML string. */
-export declare function hastBufferToHtmlStr(buf: Uint8Array): string
+export declare function hastBufferToHtmlStr(buf: Uint8Array): string;
 
 /** MDX compile options passed from JavaScript. */
 export interface JsMdxOptions {
@@ -42,41 +51,41 @@ export interface JsMdxOptions {
    * Static subtree optimization. If provided, static subtrees are collapsed
    * into raw HTML strings using the specified component and prop.
    */
-  optimizeStatic?: JsOptimizeStaticConfig
+  optimizeStatic?: JsOptimizeStaticConfig;
 }
 
 /** Static optimization config passed from JavaScript. */
 export interface JsOptimizeStaticConfig {
   /** Component/element name to wrap collapsed HTML in (e.g. "Fragment", "div"). */
-  component: string
+  component: string;
   /** Prop name for the HTML string (e.g. "set:html", "dangerouslySetInnerHTML"). */
-  prop: string
+  prop: string;
   /** If true, prop value is wrapped as `{ __html: "..." }` (React-style). */
-  wrapPropValue?: boolean
+  wrapPropValue?: boolean;
   /** Element tag names to exclude from collapsing. */
-  ignoreElements?: Array<string>
+  ignoreElements?: Array<string>;
 }
 
 /**
  * Convert an existing MDAST binary buffer to a HAST binary buffer.
  * Works for both Markdown and MDX — MDX nodes are converted to MDX HAST types.
  */
-export declare function mdastBufferToHastBuffer(buf: Uint8Array): Uint8Array
+export declare function mdastBufferToHastBuffer(buf: Uint8Array): Uint8Array;
 
 /** Parse MDX source and return a raw binary MdastArena buffer (MDX mode). */
-export declare function parseMdxToBuffer(source: string): Uint8Array
+export declare function parseMdxToBuffer(source: string): Uint8Array;
 
 /** Parse MDX source and return a HAST binary buffer (MDX mode). */
-export declare function parseMdxToHastBuffer(source: string): Uint8Array
+export declare function parseMdxToHastBuffer(source: string): Uint8Array;
 
 /** Parse MDX source and return HTML string directly. */
-export declare function parseMdxToHtml(source: string): string
+export declare function parseMdxToHtml(source: string): string;
 
 /** Parse Markdown/MDX source and return a raw binary MdastArena buffer. */
-export declare function parseToBuffer(source: string): Uint8Array
+export declare function parseToBuffer(source: string): Uint8Array;
 
 /** Parse Markdown source and return a HAST binary buffer. */
-export declare function parseToHastBuffer(source: string): Uint8Array
+export declare function parseToHastBuffer(source: string): Uint8Array;
 
 /** Parse Markdown source and return HTML string directly. */
-export declare function parseToHtml(source: string): string
+export declare function parseToHtml(source: string): string;

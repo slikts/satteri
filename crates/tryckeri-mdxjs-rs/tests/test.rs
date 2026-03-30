@@ -1,6 +1,6 @@
 extern crate tryckeri_mdxjs;
-use tryckeri_mdxjs::{JsxRuntime, OptimizeStaticConfig, Options, compile};
 use pretty_assertions::assert_eq;
+use tryckeri_mdxjs::{JsxRuntime, OptimizeStaticConfig, Options, compile};
 
 #[test]
 fn simple() -> Result<(), tryckeri_mdast::mdx_types::Message> {
