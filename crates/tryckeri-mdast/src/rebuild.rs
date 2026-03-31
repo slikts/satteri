@@ -248,9 +248,9 @@ fn remap_string_refs(data: &mut [u8], node_type: u8, base: u32) {
         // MdxFlowExpression, MdxTextExpression, MdxjsEsm: value(0)
         102..=104 => &[0],
         // HAST_TEXT(2), HAST_COMMENT(3), HAST_RAW(5),
-        // HAST_MDX_EXPRESSION(12): single StringRef at 0
+        // HAST_MDX_FLOW_EXPRESSION(12), HAST_MDX_TEXT_EXPRESSION(14): single StringRef at 0
         // (HAST_MDX_ESM=13 is already covered by InlineCode=13 above)
-        2 | 3 | 5 | 12 => &[0],
+        2 | 3 | 5 | 12 | 14 => &[0],
         // Heading(depth u8), List, ListItem, Table, HAST_ROOT(0), HAST_DOCTYPE(4), etc.
         _ => &[],
     };

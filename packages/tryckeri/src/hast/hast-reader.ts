@@ -18,8 +18,9 @@ export const HAST_RAW = 5;
 // MDX-specific HAST node types
 export const HAST_MDX_JSX_ELEMENT = 10;
 export const HAST_MDX_JSX_TEXT_ELEMENT = 11;
-export const HAST_MDX_EXPRESSION = 12;
+export const HAST_MDX_FLOW_EXPRESSION = 12;
 export const HAST_MDX_ESM = 13;
+export const HAST_MDX_TEXT_EXPRESSION = 14;
 
 export const PROP_STRING = 0;
 export const PROP_BOOL_TRUE = 1;

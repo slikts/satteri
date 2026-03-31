@@ -93,7 +93,8 @@ fn serialize_node(node_id: u32, hast: &HastArena, out: &mut String) {
         // MDX nodes have no HTML representation.
         HastNodeType::MdxJsxElement
         | HastNodeType::MdxJsxTextElement
-        | HastNodeType::MdxExpression
+        | HastNodeType::MdxFlowExpression
+        | HastNodeType::MdxTextExpression
         | HastNodeType::MdxEsm => {}
     }
 }

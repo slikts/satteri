@@ -1,6 +1,6 @@
 {
   "name": "tryckeri",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "High-performance Markdown processing",
   "files": [
     "dist",
@@ -30,16 +30,18 @@
     "test": "vitest run",
     "bench": "vitest bench --run"
   },
-  "devDependencies": {
-    "@emnapi/runtime": "^1.9.1",
-    "@napi-rs/wasm-runtime": "^1.1.2",
+  "dependencies": {
     "@types/hast": "^3.0.4",
     "@types/mdast": "^4.0.4",
-    "@types/node": "^25.5.0",
     "@types/unist": "^3.0.3",
     "mdast-util-mdx-expression": "^2.0.1",
     "mdast-util-mdx-jsx": "^3.2.0",
-    "mdast-util-mdxjs-esm": "^2.0.1",
+    "mdast-util-mdxjs-esm": "^2.0.1"
+  },
+  "devDependencies": {
+    "@emnapi/runtime": "^1.9.1",
+    "@napi-rs/wasm-runtime": "^1.1.2",
+    "@types/node": "^25.5.0",
     "vitest": "^4"
   },
   "napi": {

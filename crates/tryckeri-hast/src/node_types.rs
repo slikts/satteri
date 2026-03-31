@@ -8,7 +8,8 @@ pub const HAST_RAW: u8 = 5;
 // MDX-specific HAST node types
 pub const HAST_MDX_JSX_ELEMENT: u8 = 10;
 pub const HAST_MDX_JSX_TEXT_ELEMENT: u8 = 11;
-pub const HAST_MDX_EXPRESSION: u8 = 12;
+pub const HAST_MDX_FLOW_EXPRESSION: u8 = 12;
+pub const HAST_MDX_TEXT_EXPRESSION: u8 = 14;
 pub const HAST_MDX_ESM: u8 = 13;
 
 pub const PROP_STRING: u8 = 0;

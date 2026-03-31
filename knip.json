@@ -7,9 +7,7 @@
       "project": ["src/**/*.ts"],
       "ignoreDependencies": [
         "@emnapi/runtime",
-        "@napi-rs/wasm-runtime",
-        "@types/hast",
-        "@types/mdast"
+        "@napi-rs/wasm-runtime"
       ]
     }
   },

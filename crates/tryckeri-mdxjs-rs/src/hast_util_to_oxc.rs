@@ -27,7 +27,7 @@ use tryckeri_hast::codec::{
     decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name, decode_text_data,
 };
 use tryckeri_hast::node_types::{
-    HAST_COMMENT, HAST_ELEMENT, HAST_MDX_ESM, HAST_MDX_EXPRESSION, HAST_MDX_JSX_ELEMENT,
+    HAST_COMMENT, HAST_ELEMENT, HAST_MDX_ESM, HAST_MDX_FLOW_EXPRESSION, HAST_MDX_TEXT_EXPRESSION, HAST_MDX_JSX_ELEMENT,
     HAST_MDX_JSX_TEXT_ELEMENT, HAST_RAW, HAST_ROOT, HAST_TEXT, MDX_ATTR_BOOLEAN_PROP,
     MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD, PROP_BOOL_TRUE,
     PROP_COMMA_SEP, PROP_SPACE_SEP, PROP_STRING,
@@ -185,7 +185,7 @@ fn one<'a>(
         HAST_MDX_JSX_ELEMENT | HAST_MDX_JSX_TEXT_ELEMENT => {
             transform_mdx_jsx_element(context, node_id, explicit_jsxs)
         }
-        HAST_MDX_EXPRESSION => transform_mdx_expression(context, node_id),
+        HAST_MDX_FLOW_EXPRESSION | HAST_MDX_TEXT_EXPRESSION => transform_mdx_expression(context, node_id),
         HAST_MDX_ESM => transform_mdxjs_esm(context, node_id),
         _ => Ok(None),
     }

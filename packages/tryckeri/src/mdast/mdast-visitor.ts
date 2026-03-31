@@ -1,6 +1,16 @@
 import { materializeNode, TYPE_NAMES } from "./mdast-materializer.js";
 import { CommandBuffer, classifyReturn } from "../command-buffer.js";
-import type { MdastNode, MdastNodeInternal } from "../types.js";
+import type { MdastNode, MdastNodeInternal, Toml, MathNode, InlineMath } from "../types.js";
+import type {
+  Blockquote, Break, Code, Definition, Delete, Emphasis,
+  FootnoteDefinition, FootnoteReference, Heading, Html, Image,
+  ImageReference, InlineCode, Link, LinkReference, List, ListItem,
+  Paragraph, Root, Strong, Table, TableRow, TableCell, Text,
+  ThematicBreak, Yaml,
+} from "mdast";
+import type { MdxJsxFlowElement, MdxJsxTextElement } from "mdast-util-mdx-jsx";
+import type { MdxFlowExpression, MdxTextExpression } from "mdast-util-mdx-expression";
+import type { MdxjsEsm } from "mdast-util-mdxjs-esm";
 import type { MdastReader } from "./mdast-reader.js";
 import type { DataMap } from "../data-map.js";
 
@@ -152,11 +162,47 @@ export class MdastVisitorContext {
   }
 }
 
+type MdastVisitorFn<N extends MdastNode = MdastNode> =
+  (node: N, context: MdastVisitorContext) => MdastNode | { raw: string } | { rawHtml: string } | undefined | null | void;
+
 export interface MdastPluginInstance {
   before?(context: MdastVisitorContext): void;
   after?(context: MdastVisitorContext): void;
-  transformRoot?(root: MdastNode, context: MdastVisitorContext): MdastNode | undefined | null;
-  [nodeTypeName: string]: unknown;
+  transformRoot?(root: Root, context: MdastVisitorContext): MdastNode | undefined | null;
+  root?: MdastVisitorFn<Root>;
+  paragraph?: MdastVisitorFn<Paragraph>;
+  heading?: MdastVisitorFn<Heading>;
+  thematicBreak?: MdastVisitorFn<ThematicBreak>;
+  blockquote?: MdastVisitorFn<Blockquote>;
+  list?: MdastVisitorFn<List>;
+  listItem?: MdastVisitorFn<ListItem>;
+  html?: MdastVisitorFn<Html>;
+  code?: MdastVisitorFn<Code>;
+  definition?: MdastVisitorFn<Definition>;
+  text?: MdastVisitorFn<Text>;
+  emphasis?: MdastVisitorFn<Emphasis>;
+  strong?: MdastVisitorFn<Strong>;
+  inlineCode?: MdastVisitorFn<InlineCode>;
+  break?: MdastVisitorFn<Break>;
+  link?: MdastVisitorFn<Link>;
+  image?: MdastVisitorFn<Image>;
+  linkReference?: MdastVisitorFn<LinkReference>;
+  imageReference?: MdastVisitorFn<ImageReference>;
+  footnoteDefinition?: MdastVisitorFn<FootnoteDefinition>;
+  footnoteReference?: MdastVisitorFn<FootnoteReference>;
+  table?: MdastVisitorFn<Table>;
+  tableRow?: MdastVisitorFn<TableRow>;
+  tableCell?: MdastVisitorFn<TableCell>;
+  delete?: MdastVisitorFn<Delete>;
+  yaml?: MdastVisitorFn<Yaml>;
+  toml?: MdastVisitorFn<Toml>;
+  math?: MdastVisitorFn<MathNode>;
+  inlineMath?: MdastVisitorFn<InlineMath>;
+  mdxJsxFlowElement?: MdastVisitorFn<MdxJsxFlowElement>;
+  mdxJsxTextElement?: MdastVisitorFn<MdxJsxTextElement>;
+  mdxFlowExpression?: MdastVisitorFn<MdxFlowExpression>;
+  mdxTextExpression?: MdastVisitorFn<MdxTextExpression>;
+  mdxjsEsm?: MdastVisitorFn<MdxjsEsm>;
 }
 
 interface MdastVisitResult {
@@ -188,7 +234,7 @@ export function visitMdast(
 
   if (typeof plugin.transformRoot === "function") {
     // Full materialization path
-    const root = materializeNode(reader, 0, dataMap);
+    const root = materializeNode(reader, 0, dataMap) as Root;
     const result = plugin.transformRoot(root, context);
     if (result !== undefined && result !== null) {
       const cls = classifyReturn(result);

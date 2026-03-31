@@ -485,7 +485,7 @@ fn convert_node(
             convert_mdx_jsx_element(node_id, view, builder, defs, HAST_MDX_JSX_TEXT_ELEMENT);
         }
 
-        Some(MdastNodeType::MdxFlowExpression) | Some(MdastNodeType::MdxTextExpression) => {
+        Some(MdastNodeType::MdxFlowExpression) => {
             let data = view.get_type_data(node_id);
             let value = if data.is_empty() {
                 ""
@@ -494,7 +494,32 @@ fn convert_node(
                 view.get_str(d.value)
             };
             let value_ref = builder.alloc_string(value);
-            let leaf_id = builder.add_leaf_raw(HAST_MDX_EXPRESSION);
+            let leaf_id = builder.add_leaf_raw(HAST_MDX_FLOW_EXPRESSION);
+            builder
+                .arena_mut()
+                .set_type_data(leaf_id, &encode_text_data(value_ref));
+            let mdast_node = view.get_node(node_id);
+            builder.arena_mut().set_position(
+                leaf_id,
+                mdast_node.start_offset,
+                mdast_node.end_offset,
+                mdast_node.start_line,
+                mdast_node.start_column,
+                mdast_node.end_line,
+                mdast_node.end_column,
+            );
+        }
+
+        Some(MdastNodeType::MdxTextExpression) => {
+            let data = view.get_type_data(node_id);
+            let value = if data.is_empty() {
+                ""
+            } else {
+                let d = decode_expression_data(data);
+                view.get_str(d.value)
+            };
+            let value_ref = builder.alloc_string(value);
+            let leaf_id = builder.add_leaf_raw(HAST_MDX_TEXT_EXPRESSION);
             builder
                 .arena_mut()
                 .set_type_data(leaf_id, &encode_text_data(value_ref));

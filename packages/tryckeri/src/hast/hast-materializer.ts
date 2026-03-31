@@ -8,7 +8,8 @@ import {
   HAST_RAW,
   HAST_MDX_JSX_ELEMENT,
   HAST_MDX_JSX_TEXT_ELEMENT,
-  HAST_MDX_EXPRESSION,
+  HAST_MDX_FLOW_EXPRESSION,
+  HAST_MDX_TEXT_EXPRESSION,
   HAST_MDX_ESM,
   type HastProperty,
 } from "./hast-reader.js";
@@ -78,8 +79,11 @@ export function materializeHastNode(
     case HAST_MDX_JSX_TEXT_ELEMENT:
       typeName = "mdxJsxTextElement";
       break;
-    case HAST_MDX_EXPRESSION:
-      typeName = "mdxExpression";
+    case HAST_MDX_FLOW_EXPRESSION:
+      typeName = "mdxFlowExpression";
+      break;
+    case HAST_MDX_TEXT_EXPRESSION:
+      typeName = "mdxTextExpression";
       break;
     case HAST_MDX_ESM:
       typeName = "mdxjsEsm";
@@ -194,7 +198,8 @@ export function materializeHastNode(
       });
       break;
 
-    case HAST_MDX_EXPRESSION:
+    case HAST_MDX_FLOW_EXPRESSION:
+    case HAST_MDX_TEXT_EXPRESSION:
     case HAST_MDX_ESM:
       Object.defineProperties(node, {
         value: lazyProp("value", () => reader.getTextValue(nodeId)),

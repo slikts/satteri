@@ -140,7 +140,8 @@ const HAST_DOCTYPE_TYPE: u8 = 4;
 const HAST_RAW_TYPE: u8 = 5;
 const HAST_MDX_JSX_ELEMENT_TYPE: u8 = 10;
 const HAST_MDX_JSX_TEXT_ELEMENT_TYPE: u8 = 11;
-const HAST_MDX_EXPRESSION_TYPE: u8 = 12;
+const HAST_MDX_FLOW_EXPRESSION_TYPE: u8 = 12;
+const HAST_MDX_TEXT_EXPRESSION_TYPE: u8 = 14;
 const HAST_MDX_ESM_TYPE: u8 = 13;
 
 #[derive(Debug)]
@@ -602,7 +603,8 @@ fn name_to_hast_raw_type(name: &str) -> Option<u8> {
         "raw" => Some(HAST_RAW_TYPE),
         "mdxJsxFlowElement" => Some(HAST_MDX_JSX_ELEMENT_TYPE),
         "mdxJsxTextElement" => Some(HAST_MDX_JSX_TEXT_ELEMENT_TYPE),
-        "mdxExpression" => Some(HAST_MDX_EXPRESSION_TYPE),
+        "mdxFlowExpression" => Some(HAST_MDX_FLOW_EXPRESSION_TYPE),
+        "mdxTextExpression" => Some(HAST_MDX_TEXT_EXPRESSION_TYPE),
         "mdxjsEsm" => Some(HAST_MDX_ESM_TYPE),
         _ => None,
     }
@@ -683,7 +685,7 @@ fn encode_hast_js_node_data(js_node: &JsNode, raw_type: u8, builder: &mut MdastB
             encode_mdx_jsx_element_data(name_ref, &attr_tuples)
         }
 
-        HAST_MDX_EXPRESSION_TYPE | HAST_MDX_ESM_TYPE => {
+        HAST_MDX_FLOW_EXPRESSION_TYPE | HAST_MDX_TEXT_EXPRESSION_TYPE | HAST_MDX_ESM_TYPE => {
             let value = js_node.value.as_deref().unwrap_or("");
             let sref = builder.alloc_string(value);
             let mut out = [0u8; 8];

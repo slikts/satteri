@@ -1,5 +1,9 @@
 import { materializeHastNode, type HastNode } from "./hast-materializer.js";
-import type { HastNodeInternal, MdxJsxAttributeUnion } from "../types.js";
+import type { HastNodeInternal, HastRaw, MdxJsxAttributeUnion } from "../types.js";
+import type { Element, Text, Comment, Doctype, Root } from "hast";
+import type { MdxJsxFlowElementHast, MdxJsxTextElementHast } from "mdast-util-mdx-jsx";
+import type { MdxFlowExpressionHast, MdxTextExpressionHast } from "mdast-util-mdx-expression";
+import type { MdxjsEsmHast } from "mdast-util-mdxjs-esm";
 import {
   HastReader,
   HAST_ROOT,
@@ -9,7 +13,8 @@ import {
   HAST_RAW,
   HAST_MDX_JSX_ELEMENT,
   HAST_MDX_JSX_TEXT_ELEMENT,
-  HAST_MDX_EXPRESSION,
+  HAST_MDX_FLOW_EXPRESSION,
+  HAST_MDX_TEXT_EXPRESSION,
   HAST_MDX_ESM,
   type HastProperty,
 } from "./hast-reader.js";
@@ -135,29 +140,30 @@ class HastVisitorContextImpl implements HastVisitorContext {
 }
 
 /** A filtered visitor: Rust filters by tag name, only matched nodes are sent to JS. */
-interface HastFilteredVisitor {
+interface HastFilteredVisitor<N extends HastNode = HastNode> {
   filter: string[];
-  visit(node: HastNode, ctx: HastVisitorContext): HastNode | void;
+  visit(node: N, ctx: HastVisitorContext): HastNode | void;
 }
 
-type HastVisitorValue =
-  | ((node: HastNode, ctx: HastVisitorContext) => HastNode | void)
-  | HastFilteredVisitor
-  | HastFilteredVisitor[];
+type HastVisitorValue<N extends HastNode = HastNode> =
+  | ((node: N, ctx: HastVisitorContext) => HastNode | void)
+  | HastFilteredVisitor<N>
+  | HastFilteredVisitor<N>[];
 
 export interface HastVisitorInstance {
   before?(ctx: HastVisitorContext): void;
   after?(ctx: HastVisitorContext): void;
-  transformRoot?(root: HastNode, ctx: HastVisitorContext): HastNode | void;
-  element?: HastVisitorValue;
-  text?: HastVisitorValue;
-  comment?: HastVisitorValue;
-  raw?: HastVisitorValue;
-  doctype?: HastVisitorValue;
-  mdxJsxFlowElement?: HastVisitorValue;
-  mdxJsxTextElement?: HastVisitorValue;
-  mdxExpression?: HastVisitorValue;
-  mdxjsEsm?: HastVisitorValue;
+  transformRoot?(root: Root, ctx: HastVisitorContext): HastNode | void;
+  element?: HastVisitorValue<Element>;
+  text?: HastVisitorValue<Text>;
+  comment?: HastVisitorValue<Comment>;
+  raw?: HastVisitorValue<HastRaw>;
+  doctype?: HastVisitorValue<Doctype>;
+  mdxJsxFlowElement?: HastVisitorValue<MdxJsxFlowElementHast>;
+  mdxJsxTextElement?: HastVisitorValue<MdxJsxTextElementHast>;
+  mdxFlowExpression?: HastVisitorValue<MdxFlowExpressionHast>;
+  mdxTextExpression?: HastVisitorValue<MdxTextExpressionHast>;
+  mdxjsEsm?: HastVisitorValue<MdxjsEsmHast>;
 }
 
 export interface HastVisitResult {
@@ -309,7 +315,8 @@ const TEXT_TYPE_NAMES: Record<number, string> = {
   [HAST_TEXT]: "text",
   [HAST_COMMENT]: "comment",
   [HAST_RAW]: "raw",
-  [HAST_MDX_EXPRESSION]: "mdxExpression",
+  [HAST_MDX_FLOW_EXPRESSION]: "mdxFlowExpression",
+  [HAST_MDX_TEXT_EXPRESSION]: "mdxTextExpression",
   [HAST_MDX_ESM]: "mdxjsEsm",
 };
 
@@ -326,7 +333,8 @@ function materializeForVisitor(
     case HAST_TEXT:
     case HAST_COMMENT:
     case HAST_RAW:
-    case HAST_MDX_EXPRESSION:
+    case HAST_MDX_FLOW_EXPRESSION:
+    case HAST_MDX_TEXT_EXPRESSION:
     case HAST_MDX_ESM:
       return new LazyTextNode(
         TEXT_TYPE_NAMES[nodeType]!,
@@ -382,11 +390,11 @@ export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubsc
       // Bare function — fall back to buffer path
       return null;
     } else if (isFilteredVisitor(value)) {
-      subs.push({ nodeType, tagFilter: value.filter, visitFn: value.visit });
+      subs.push({ nodeType, tagFilter: value.filter, visitFn: value.visit as ResolvedSubscription["visitFn"] });
     } else if (Array.isArray(value)) {
       for (const item of value) {
         if (!isFilteredVisitor(item)) return null;
-        subs.push({ nodeType, tagFilter: item.filter, visitFn: item.visit });
+        subs.push({ nodeType, tagFilter: item.filter, visitFn: item.visit as ResolvedSubscription["visitFn"] });
       }
     } else {
       return null;
@@ -405,7 +413,8 @@ const METHOD_TO_TYPE: Record<string, number> = {
   doctype: 4, // HAST_DOCTYPE
   mdxJsxFlowElement: HAST_MDX_JSX_ELEMENT,
   mdxJsxTextElement: HAST_MDX_JSX_TEXT_ELEMENT,
-  mdxExpression: HAST_MDX_EXPRESSION,
+  mdxFlowExpression: HAST_MDX_FLOW_EXPRESSION,
+  mdxTextExpression: HAST_MDX_TEXT_EXPRESSION,
   mdxjsEsm: HAST_MDX_ESM,
 };
 
@@ -688,7 +697,8 @@ const TYPE_TO_METHOD: Record<number, keyof HastVisitorInstance> = {
   [HAST_RAW]: "raw",
   [HAST_MDX_JSX_ELEMENT]: "mdxJsxFlowElement",
   [HAST_MDX_JSX_TEXT_ELEMENT]: "mdxJsxTextElement",
-  [HAST_MDX_EXPRESSION]: "mdxExpression",
+  [HAST_MDX_FLOW_EXPRESSION]: "mdxFlowExpression",
+  [HAST_MDX_TEXT_EXPRESSION]: "mdxTextExpression",
   [HAST_MDX_ESM]: "mdxjsEsm",
 };
 
@@ -707,7 +717,7 @@ export function visitHast(
   plugin.before?.(ctx);
 
   if (typeof plugin.transformRoot === "function") {
-    const root = materializeHastNode(reader, 0, dataMap);
+    const root = materializeHastNode(reader, 0, dataMap) as Root;
     const result = plugin.transformRoot(root, ctx);
     if (result != null) {
       returnBuffer.replaceRawJson(0, JSON.stringify(markHast(result)));

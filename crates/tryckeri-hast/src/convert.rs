@@ -380,7 +380,7 @@ fn convert_node(node_id: u32, arena: &MdastArena, builder: &mut HastBuilder) {
             convert_mdx_jsx_element(node_id, arena, builder, HastNodeType::MdxJsxTextElement);
         }
 
-        MdastNodeType::MdxFlowExpression | MdastNodeType::MdxTextExpression => {
+        MdastNodeType::MdxFlowExpression => {
             let data = arena.get_type_data(node_id);
             let value = if data.is_empty() {
                 ""
@@ -388,7 +388,18 @@ fn convert_node(node_id: u32, arena: &MdastArena, builder: &mut HastBuilder) {
                 let d = decode_expression_data(data);
                 arena.get_str(d.value)
             };
-            let id = builder.add_mdx_value_node(HastNodeType::MdxExpression, value);
+            let id = builder.add_mdx_value_node(HastNodeType::MdxFlowExpression, value);
+            let _ = id;
+        }
+        MdastNodeType::MdxTextExpression => {
+            let data = arena.get_type_data(node_id);
+            let value = if data.is_empty() {
+                ""
+            } else {
+                let d = decode_expression_data(data);
+                arena.get_str(d.value)
+            };
+            let id = builder.add_mdx_value_node(HastNodeType::MdxTextExpression, value);
             let _ = id;
         }
 

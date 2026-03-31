@@ -13,7 +13,8 @@ pub enum HastNodeType {
     Raw = 5,                // raw HTML passthrough (from MDAST Html nodes)
     MdxJsxElement = 10,     // MDX JSX flow element (<Component>)
     MdxJsxTextElement = 11, // MDX JSX text element (inline <Component />)
-    MdxExpression = 12,     // MDX expression ({expr})
+    MdxFlowExpression = 12, // MDX flow expression ({expr} in block)
+    MdxTextExpression = 14, // MDX text expression ({expr} inline)
     MdxEsm = 13,            // MDX ESM (import/export)
 }
 
@@ -28,7 +29,8 @@ impl HastNodeType {
             5 => Some(Self::Raw),
             10 => Some(Self::MdxJsxElement),
             11 => Some(Self::MdxJsxTextElement),
-            12 => Some(Self::MdxExpression),
+            12 => Some(Self::MdxFlowExpression),
+            14 => Some(Self::MdxTextExpression),
             13 => Some(Self::MdxEsm),
             _ => None,
         }
