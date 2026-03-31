@@ -28,10 +28,10 @@ export const PROP_SPACE_SEP = 3;
 export const PROP_COMMA_SEP = 4;
 
 // MDX JSX attribute kinds (must match node_types.rs)
-export const MDX_ATTR_BOOLEAN_PROP = 0;
-export const MDX_ATTR_LITERAL_PROP = 1;
-export const MDX_ATTR_EXPRESSION_PROP = 2;
-export const MDX_ATTR_SPREAD = 3;
+const MDX_ATTR_BOOLEAN_PROP = 0;
+const MDX_ATTR_LITERAL_PROP = 1;
+const MDX_ATTR_EXPRESSION_PROP = 2;
+const MDX_ATTR_SPREAD = 3;
 
 export interface HastProperty {
   name: string;

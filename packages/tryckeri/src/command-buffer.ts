@@ -15,40 +15,40 @@ import type { MdastNode } from "./types.js";
 // Command bytes (0x01–0x0F)
 // ---------------------------------------------------------------------------
 
-export const CMD_REMOVE = 0x01;
-export const CMD_INSERT_BEFORE = 0x05;
-export const CMD_INSERT_AFTER = 0x06;
-export const CMD_PREPEND_CHILD = 0x07;
-export const CMD_APPEND_CHILD = 0x08;
-export const CMD_WRAP = 0x09;
-export const CMD_REPLACE = 0x0b;
-export const CMD_SET_PROPERTY = 0x0c;
+const CMD_REMOVE = 0x01;
+const CMD_INSERT_BEFORE = 0x05;
+const CMD_INSERT_AFTER = 0x06;
+const CMD_PREPEND_CHILD = 0x07;
+const CMD_APPEND_CHILD = 0x08;
+const CMD_WRAP = 0x09;
+const CMD_REPLACE = 0x0b;
+const CMD_SET_PROPERTY = 0x0c;
 
 // ---------------------------------------------------------------------------
 // Payload types (0x10+, distinct range from commands)
 // ---------------------------------------------------------------------------
 
-export const PAYLOAD_RAW_MARKDOWN = 0x10;
-export const PAYLOAD_RAW_HTML = 0x11;
-export const PAYLOAD_SERDE_JSON = 0x12;
+const PAYLOAD_RAW_MARKDOWN = 0x10;
+const PAYLOAD_RAW_HTML = 0x11;
+const PAYLOAD_SERDE_JSON = 0x12;
 
 // ---------------------------------------------------------------------------
 // Value types for CMD_SET_PROPERTY (must match commands.rs PROP_* constants)
 // ---------------------------------------------------------------------------
 
-export const PROP_STRING = 0;
-export const PROP_BOOL_TRUE = 1;
-export const PROP_BOOL_FALSE = 2;
-export const PROP_SPACE_SEP = 3;
-export const PROP_INT = 4;
-export const PROP_NULL = 5;
+const PROP_STRING = 0;
+const PROP_BOOL_TRUE = 1;
+const PROP_BOOL_FALSE = 2;
+const PROP_SPACE_SEP = 3;
+const PROP_INT = 4;
+const PROP_NULL = 5;
 
 
 // ---------------------------------------------------------------------------
 // Return value classification
 // ---------------------------------------------------------------------------
 
-export type ReturnClass = "no_change" | "raw_markdown" | "raw_html" | "structured_node";
+type ReturnClass = "no_change" | "raw_markdown" | "raw_html" | "structured_node";
 
 export function classifyReturn(value: unknown): ReturnClass {
   if (value === undefined || value === null) return "no_change";

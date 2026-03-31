@@ -78,27 +78,26 @@ declare module "hast" {
   }
 }
 
-// ── Materialized node types (with internal _nodeId) ─────────────────────────
-
-/** @internal Non-enumerable arena node ID added to all materialized nodes. */
-interface NodeId {
-  /** @internal */
-  _nodeId: number;
-}
+// ── Materialized node types ──────────────────────────────────────────────────
 
 /**
- * Materialized mdast node — a standard `mdast.Nodes` discriminated union with
- * an internal arena tracking ID. Narrow by `node.type` to access type-specific
- * properties (e.g. `depth` on `"heading"`, `url` on `"link"`).
+ * Materialized mdast node — a standard `mdast.Nodes` discriminated union.
+ * Narrow by `node.type` to access type-specific properties
+ * (e.g. `depth` on `"heading"`, `url` on `"link"`).
  */
-export type MdastNode = MdastStdNodes & NodeId;
+export type MdastNode = MdastStdNodes;
 
 /**
- * Materialized hast node — a standard `hast.Nodes` discriminated union with
- * an internal arena tracking ID. Narrow by `node.type` to access type-specific
- * properties (e.g. `tagName` on `"element"`, `value` on `"text"`).
+ * Materialized hast node — a standard `hast.Nodes` discriminated union.
+ * Narrow by `node.type` to access type-specific properties
+ * (e.g. `tagName` on `"element"`, `value` on `"text"`).
  */
-export type HastNode = HastStdNodes & NodeId;
+export type HastNode = HastStdNodes;
+
+/** @internal Node with arena tracking ID — only used inside the library. */
+export type MdastNodeInternal = MdastStdNodes & { _nodeId: number };
+/** @internal */
+export type HastNodeInternal = HastStdNodes & { _nodeId: number };
 
 // ── Internal binary format types ────────────────────────────────────────────
 

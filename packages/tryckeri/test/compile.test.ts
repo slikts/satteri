@@ -179,7 +179,6 @@ describe("compileMarkdownToHtml", () => {
             if (node.type === "text") {
               return {
                 type: "element" as const,
-                _nodeId: -1,
                 tagName: "span",
                 properties: { class: "text-wrap" },
                 children: [node],

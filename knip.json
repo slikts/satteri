@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["crates/**"],
+  "workspaces": {
+    "packages/tryckeri": {
+      "entry": ["bench/**/*.{ts,mjs}", "test/**/*.ts"],
+      "project": ["src/**/*.ts"],
+      "ignoreDependencies": [
+        "@emnapi/runtime",
+        "@napi-rs/wasm-runtime",
+        "@types/hast",
+        "@types/mdast"
+      ]
+    }
+  },
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
+  }
+}

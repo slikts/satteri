@@ -8,7 +8,7 @@ import type { MdastDiagnostic } from "./mdast/mdast-visitor.js";
 
 export { ProcessorContext };
 
-export interface ProcessBufferResult {
+interface ProcessBufferResult {
   buffer: ArrayBuffer | Uint8Array;
   dataMap: DataMap;
   diagnostics: MdastDiagnostic[];
@@ -16,7 +16,7 @@ export interface ProcessBufferResult {
   structuralMutationCount: number;
 }
 
-export interface ProcessTreeResult {
+interface ProcessTreeResult {
   tree: MdastNode;
   dataMap: DataMap;
   diagnostics: MdastDiagnostic[];

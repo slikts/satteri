@@ -39,7 +39,7 @@ export const NodeType = Object.freeze({
   MdxjsEsm: 104,
 } as const);
 
-export type NodeTypeValue = (typeof NodeType)[keyof typeof NodeType];
+type NodeTypeValue = (typeof NodeType)[keyof typeof NodeType];
 
 // Reverse map: number → string name
 export const NodeTypeName: Record<number, string> = Object.fromEntries(

@@ -1,5 +1,5 @@
 import { materializeHastNode, type HastNode } from "./hast-materializer.js";
-import type { MdxJsxAttributeUnion } from "../types.js";
+import type { HastNodeInternal, MdxJsxAttributeUnion } from "../types.js";
 import {
   HastReader,
   HAST_ROOT,
@@ -57,6 +57,10 @@ function markHast(node: HastNode): Record<string, unknown> {
   return obj;
 }
 
+function nid(node: HastNode): number {
+  return (node as HastNodeInternal)._nodeId;
+}
+
 class HastVisitorContextImpl implements HastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: HastDiagnostic[] = [];
@@ -64,25 +68,27 @@ class HastVisitorContextImpl implements HastVisitorContext {
   readonly #pendingNodes: Map<number, HastNode> = new Map();
 
   removeNode(node: HastNode): void {
-    this.#commandBuffer.removeNode(node._nodeId);
+    this.#commandBuffer.removeNode(nid(node));
   }
 
   replaceNode(node: HastNode, newNode: HastNode): void {
+    const id = nid(node);
     // Encode as a REPLACE command with _hast marker for Rust deserialization
-    this.#commandBuffer.replaceRawJson(node._nodeId, JSON.stringify(markHast(newNode)));
-    this.#pendingNodes.set(node._nodeId, newNode);
+    this.#commandBuffer.replaceRawJson(id, JSON.stringify(markHast(newNode)));
+    this.#pendingNodes.set(id, newNode);
   }
 
   setProperty(node: HastNode, key: string, value: unknown): void {
+    const id = nid(node);
     if (node.type === "element") {
       // Fast binary path — no materialization, no JSON serialization
-      this.#commandBuffer.setProperty(node._nodeId, key, value);
+      this.#commandBuffer.setProperty(id, key, value);
       return;
     }
 
     if (node.type === "mdxJsxFlowElement" || node.type === "mdxJsxTextElement") {
       // MDX JSX nodes use `attributes`, not `properties` — keep replaceNode path
-      const current = this.#pendingNodes.get(node._nodeId) ?? node;
+      const current = this.#pendingNodes.get(id) ?? node;
       const updated: Record<string, unknown> = { ...current };
       const attrs = [...((updated.attributes as MdxJsxAttributeUnion[] | undefined) ?? [])];
       const idx = attrs.findIndex((a) => a.type === "mdxJsxAttribute" && a.name === key);
@@ -100,7 +106,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
     }
 
     // Fallback for other node types
-    const current = this.#pendingNodes.get(node._nodeId) ?? node;
+    const current = this.#pendingNodes.get(id) ?? node;
     const updated: Record<string, unknown> = { ...current };
     const props = (updated.properties ?? {}) as Record<string, string | boolean | string[]>;
     updated.properties = { ...props, [key]: value as string | boolean | string[] };
@@ -116,7 +122,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
     node?: HastNode;
     severity?: "error" | "warning" | "info";
   }): void {
-    this.#diagnostics.push({ message, nodeId: node?._nodeId, severity });
+    this.#diagnostics.push({ message, nodeId: node ? nid(node) : undefined, severity });
   }
 
   getCommandBuffer(): CommandBuffer {
@@ -129,7 +135,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
 }
 
 /** A filtered visitor: Rust filters by tag name, only matched nodes are sent to JS. */
-export interface HastFilteredVisitor {
+interface HastFilteredVisitor {
   filter: string[];
   visit(node: HastNode, ctx: HastVisitorContext): HastNode | void;
 }
@@ -322,7 +328,12 @@ function materializeForVisitor(
     case HAST_RAW:
     case HAST_MDX_EXPRESSION:
     case HAST_MDX_ESM:
-      return new LazyTextNode(TEXT_TYPE_NAMES[nodeType]!, nodeId, reader, dataMap) as unknown as HastNode;
+      return new LazyTextNode(
+        TEXT_TYPE_NAMES[nodeType]!,
+        nodeId,
+        reader,
+        dataMap,
+      ) as unknown as HastNode;
     default:
       // For root, mdxJsx*, doctype — fall back to full materializer
       return materializeHastNode(reader, nodeId, dataMap);
@@ -333,7 +344,7 @@ function materializeForVisitor(
 // Selective walk helpers
 // ---------------------------------------------------------------------------
 
-export interface ResolvedSubscription {
+interface ResolvedSubscription {
   nodeType: number;
   tagFilter: string[];
   visitFn: (node: HastNode, ctx: HastVisitorContext) => HastNode | void;
@@ -356,9 +367,7 @@ function isFilteredVisitor(v: unknown): v is HastFilteredVisitor {
  * bare functions (which may return replacement nodes needing full children).
  * Those cases fall back to the buffer path.
  */
-export function resolveSubscriptions(
-  plugin: HastVisitorInstance,
-): ResolvedSubscription[] | null {
+export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubscription[] | null {
   if (plugin.transformRoot) return null;
 
   const subs: ResolvedSubscription[] = [];
@@ -534,7 +543,11 @@ function readMdxJsxFromBinary(
         attributes.push({ type: "mdxJsxAttribute", name: attrName, value: attrVal });
         break;
       case 2: // ExpressionProp
-        attributes.push({ type: "mdxJsxAttribute", name: attrName, value: { type: "mdxJsxAttributeValueExpression", value: attrVal } });
+        attributes.push({
+          type: "mdxJsxAttribute",
+          name: attrName,
+          value: { type: "mdxJsxAttributeValueExpression", value: attrVal },
+        });
         break;
       case 3: // Spread
         attributes.push({ type: "mdxJsxExpressionAttribute", value: attrVal });

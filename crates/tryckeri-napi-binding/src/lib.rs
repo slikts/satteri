@@ -365,7 +365,7 @@ pub fn render_handle(
     handle: &External<Mutex<tryckeri_mdast::MdastArena>>,
 ) -> Result<String> {
     let arena = handle.lock().map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    Ok(tryckeri_hast::hast_arena_to_html(&*arena))
+    Ok(tryckeri_hast::hast_arena_to_html(&arena))
 }
 
 /// Compile a handle's HAST arena to MDX JavaScript. Does not consume the handle.

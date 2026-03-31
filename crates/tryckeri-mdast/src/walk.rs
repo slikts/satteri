@@ -51,10 +51,7 @@ const HAST_ELEMENT_TYPE: u8 = 1;
 ///
 /// Returns a `Vec<u8>` containing the match index + inline data section.
 /// JS reads this with DataView — zero per-node object allocation.
-pub fn walk_and_collect(
-    arena: &dyn ReadMdast,
-    subscriptions: &[Subscription],
-) -> Vec<u8> {
+pub fn walk_and_collect(arena: &dyn ReadMdast, subscriptions: &[Subscription]) -> Vec<u8> {
     if subscriptions.is_empty() {
         return 0u32.to_le_bytes().to_vec();
     }
@@ -316,11 +313,6 @@ mod tests {
         u32::from_le_bytes(buf[0..4].try_into().unwrap())
     }
 
-    fn read_match_node_id(buf: &[u8], index: usize) -> u32 {
-        let offset = 4 + index * 12;
-        u32::from_le_bytes(buf[offset..offset + 4].try_into().unwrap())
-    }
-
     fn read_match_sub_index(buf: &[u8], index: usize) -> u8 {
         buf[4 + index * 12 + 4]
     }
@@ -386,10 +378,8 @@ mod tests {
         let buf = walk_and_collect(&arena, &subs);
         assert_eq!(read_match_count(&buf), 1);
         // Read data offset and len from index
-        let data_offset =
-            u32::from_le_bytes(buf[4 + 6..4 + 10].try_into().unwrap()) as usize;
-        let data_len =
-            u16::from_le_bytes(buf[4 + 10..4 + 12].try_into().unwrap()) as usize;
+        let data_offset = u32::from_le_bytes(buf[4 + 6..4 + 10].try_into().unwrap()) as usize;
+        let data_len = u16::from_le_bytes(buf[4 + 10..4 + 12].try_into().unwrap()) as usize;
         assert!(data_len > 0);
         // First 2 bytes of data = tag_name_len
         let tag_len =

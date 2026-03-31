@@ -2,6 +2,7 @@ import { test, expect, describe } from "vitest";
 import { MdastReader } from "../src/mdast/mdast-reader.js";
 import { DataMap } from "../src/data-map.js";
 import { materializeTree } from "../src/mdast/mdast-materializer.js";
+import type { MdastNodeInternal } from "../src/types.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
 import { parseMdxToBuffer } from "../index.js";
 
@@ -77,7 +78,7 @@ test("_nodeId is non-enumerable", () => {
   const { reader, dataMap } = setup();
   const root = materializeTree(reader, dataMap);
   expect(Object.keys(root)).not.toContain("_nodeId");
-  expect(root._nodeId).toBe(0);
+  expect((root as MdastNodeInternal)._nodeId).toBe(0);
 });
 
 test("data getter returns null when no data is set", () => {

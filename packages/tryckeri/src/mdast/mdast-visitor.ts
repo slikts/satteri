@@ -1,6 +1,6 @@
 import { materializeNode, TYPE_NAMES } from "./mdast-materializer.js";
 import { CommandBuffer, classifyReturn } from "../command-buffer.js";
-import type { MdastNode } from "../types.js";
+import type { MdastNode, MdastNodeInternal } from "../types.js";
 import type { MdastReader } from "./mdast-reader.js";
 import type { DataMap } from "../data-map.js";
 
@@ -15,9 +15,9 @@ export const MutationType = {
   SetProperty: "setProperty",
 } as const;
 
-export type MutationTypeValue = (typeof MutationType)[keyof typeof MutationType];
+type MutationTypeValue = (typeof MutationType)[keyof typeof MutationType];
 
-export interface Mutation {
+interface Mutation {
   type: MutationTypeValue;
   nodeId: number;
   newNode?: MdastNode;
@@ -69,6 +69,10 @@ const VISITOR_KEYS = new Set([
   "mdxjsEsm",
 ]);
 
+function nid(node: MdastNode): number {
+  return (node as MdastNodeInternal)._nodeId;
+}
+
 export class MdastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: MdastDiagnostic[] = [];
@@ -82,35 +86,35 @@ export class MdastVisitorContext {
   }
 
   removeNode(node: MdastNode): void {
-    this.#commandBuffer.removeNode(node._nodeId);
+    this.#commandBuffer.removeNode(nid(node));
   }
 
   insertBefore(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.insertBefore(node._nodeId, newNode);
+    this.#commandBuffer.insertBefore(nid(node), newNode);
   }
 
   insertAfter(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.insertAfter(node._nodeId, newNode);
+    this.#commandBuffer.insertAfter(nid(node), newNode);
   }
 
   wrapNode(node: MdastNode, parentNode: MdastNode): void {
-    this.#commandBuffer.wrapNode(node._nodeId, parentNode);
+    this.#commandBuffer.wrapNode(nid(node), parentNode);
   }
 
   prependChild(node: MdastNode, childNode: MdastNode): void {
-    this.#commandBuffer.prependChild(node._nodeId, childNode);
+    this.#commandBuffer.prependChild(nid(node), childNode);
   }
 
   appendChild(node: MdastNode, childNode: MdastNode): void {
-    this.#commandBuffer.appendChild(node._nodeId, childNode);
+    this.#commandBuffer.appendChild(nid(node), childNode);
   }
 
   replaceNode(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.replace(node._nodeId, newNode);
+    this.#commandBuffer.replace(nid(node), newNode);
   }
 
   setProperty(node: MdastNode, key: string, value: unknown): void {
-    this.#commandBuffer.setProperty(node._nodeId, key, value);
+    this.#commandBuffer.setProperty(nid(node), key, value);
   }
 
   report({
@@ -124,7 +128,7 @@ export class MdastVisitorContext {
   }): void {
     this.#diagnostics.push({
       message,
-      nodeId: node?._nodeId,
+      nodeId: node ? nid(node) : undefined,
       position: node?.position,
       severity,
     });
@@ -155,7 +159,7 @@ export interface MdastPluginInstance {
   [nodeTypeName: string]: unknown;
 }
 
-export interface MdastVisitResult {
+interface MdastVisitResult {
   /** Binary command buffer containing all mutations. */
   commandBuffer: Uint8Array;
   diagnostics: MdastDiagnostic[];

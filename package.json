@@ -5,12 +5,13 @@
   "author": "Bruits",
   "type": "module",
   "scripts": {
-    "lint": "oxlint && cargo clippy",
+    "lint": "oxlint && cargo clippy && knip",
     "lint:fix": "oxlint --fix && cargo clippy --fix --allow-dirty",
     "format": "oxfmt && cargo fmt"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1",
+    "knip": "^6.1.1",
     "oxfmt": "^0.41.0",
     "oxlint": "^1.56.0",
     "oxlint-tsgolint": "^0.17.1",

@@ -22,13 +22,13 @@ export class ProcessorContext {
   }
 }
 
-export interface FileContext {
+interface FileContext {
   source: string;
   filename: string;
   get root(): MdastNode;
 }
 
-export interface RunResult {
+interface RunResult {
   buffer: ArrayBuffer | Uint8Array;
   /** If set, the last plugin's mutations were deferred for fusion with the next step. */
   pendingCommands: Uint8Array | null;

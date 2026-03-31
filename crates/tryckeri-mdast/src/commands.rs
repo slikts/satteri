@@ -143,7 +143,6 @@ const HAST_MDX_JSX_TEXT_ELEMENT_TYPE: u8 = 11;
 const HAST_MDX_EXPRESSION_TYPE: u8 = 12;
 const HAST_MDX_ESM_TYPE: u8 = 13;
 
-
 #[derive(Debug)]
 pub enum CommandError {
     UnexpectedEof,
@@ -268,8 +267,8 @@ fn apply_set_property(
     }
 
     // MDAST node — resolve name to field and apply
-    let field_id = resolve_mdast_field(node_type, prop_name)
-        .ok_or(CommandError::UnknownField(0))?;
+    let field_id =
+        resolve_mdast_field(node_type, prop_name).ok_or(CommandError::UnknownField(0))?;
 
     match value_type {
         PROP_STRING | PROP_SPACE_SEP => {
@@ -298,7 +297,9 @@ fn apply_mdast_int(
     let data_len = arena.get_node(node_id).data_len as usize;
     match (node_type, field_id) {
         (2, FIELD_DEPTH) => {
-            if data_len >= 1 { arena.type_data[data_offset] = value as u8; }
+            if data_len >= 1 {
+                arena.type_data[data_offset] = value as u8;
+            }
         }
         (5, FIELD_START) => {
             if data_len >= 4 {
@@ -307,7 +308,9 @@ fn apply_mdast_int(
             }
         }
         (6, FIELD_CHECKED) => {
-            if data_len >= 1 { arena.type_data[data_offset] = value as u8; }
+            if data_len >= 1 {
+                arena.type_data[data_offset] = value as u8;
+            }
         }
         _ => return Err(CommandError::UnknownField(field_id)),
     }
@@ -325,13 +328,19 @@ fn apply_mdast_bool(
     let data_len = arena.get_node(node_id).data_len as usize;
     match (node_type, field_id) {
         (5, FIELD_ORDERED) => {
-            if data_len >= 5 { arena.type_data[data_offset + 4] = value as u8; }
+            if data_len >= 5 {
+                arena.type_data[data_offset + 4] = value as u8;
+            }
         }
         (5, FIELD_SPREAD) => {
-            if data_len >= 6 { arena.type_data[data_offset + 5] = value as u8; }
+            if data_len >= 6 {
+                arena.type_data[data_offset + 5] = value as u8;
+            }
         }
         (6, FIELD_SPREAD) => {
-            if data_len >= 2 { arena.type_data[data_offset + 1] = value as u8; }
+            if data_len >= 2 {
+                arena.type_data[data_offset + 1] = value as u8;
+            }
         }
         _ => return Err(CommandError::UnknownField(field_id)),
     }
@@ -348,7 +357,9 @@ fn apply_mdast_null(
         (6, FIELD_CHECKED) => {
             let data_offset = arena.get_node(node_id).data_offset as usize;
             let data_len = arena.get_node(node_id).data_len as usize;
-            if data_len >= 1 { arena.type_data[data_offset] = 2; }
+            if data_len >= 1 {
+                arena.type_data[data_offset] = 2;
+            }
             Ok(())
         }
         _ => set_string_ref(arena, node_id, field_id, StringRef::empty()),
@@ -425,8 +436,7 @@ fn apply_hast_element_property(
         return Err(CommandError::UnexpectedEof);
     }
 
-    let old_prop_count =
-        u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
+    let old_prop_count = u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
 
     // Scan existing properties for a name match
     let mut found_index: Option<usize> = None;
@@ -468,7 +478,7 @@ fn apply_hast_element_property(
         new_data.extend_from_slice(&old_data[0..8]); // tag StringRef
         new_data.extend_from_slice(&new_prop_count.to_le_bytes());
         new_data.extend_from_slice(&0u32.to_le_bytes()); // pad
-        // Copy existing properties
+                                                         // Copy existing properties
         if old_prop_count > 0 {
             new_data.extend_from_slice(&old_data[16..16 + old_prop_count * 20]);
         }
@@ -1218,6 +1228,7 @@ mod tests {
                 tag_name: None,
                 properties: None,
                 is_hast: false,
+                keep_children: false,
             }]),
             depth: Some(2),
             value: None,
@@ -1238,6 +1249,7 @@ mod tests {
             tag_name: None,
             properties: None,
             is_hast: false,
+            keep_children: false,
         };
 
         let arena = js_node_to_arena(&js).unwrap();

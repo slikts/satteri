@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 import { MdastReader } from "../src/mdast/mdast-reader.js";
 import { DataMap } from "../src/data-map.js";
 import { visitMdast, type MdastVisitorContext } from "../src/mdast/mdast-visitor.js";
+import type { MdastNodeInternal } from "../src/types.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
 import type { MdastNode } from "../src/types.js";
 
@@ -163,7 +164,7 @@ test("transformRoot gets the full materialized root", () => {
   );
   expect(capturedRoot).not.toBeNull();
   expect(capturedRoot!.type).toBe("root");
-  expect(capturedRoot!._nodeId).toBe(0);
+  expect((capturedRoot! as MdastNodeInternal)._nodeId).toBe(0);
 });
 
 test("multiple subscribed types — all fire", () => {
