@@ -73,10 +73,15 @@ use std::sync::Mutex;
 
 type ArenaHandle = External<Mutex<tryckeri_mdast::MdastArena>>;
 
-fn make_parse_fn() -> impl Fn(&str) -> tryckeri_mdast::MdastArena {
-    |source: &str| -> tryckeri_mdast::MdastArena {
-        let (parsed, _errors) =
-            tryckeri_parser::parse(source, &tryckeri_parser::ParseOptions::mdx());
+fn make_parse_fn(mdx: bool) -> impl Fn(&str) -> tryckeri_mdast::MdastArena {
+    move |source: &str| -> tryckeri_mdast::MdastArena {
+        let opts = if mdx {
+            tryckeri_parser::ParseOptions::mdx()
+        } else {
+            tryckeri_parser::ParseOptions::default()
+        };
+        let (mut parsed, _errors) = tryckeri_parser::parse(source, &opts);
+        parsed.mdx = mdx;
         parsed
     }
 }
@@ -93,14 +98,16 @@ pub struct JsSubscription {
 /// Parse markdown source into an MDAST arena handle.
 #[napi]
 pub fn create_mdast_handle(source: String) -> Result<ArenaHandle> {
-    let (arena, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::default());
+    let (mut arena, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::default());
+    arena.mdx = false;
     Ok(External::new(Mutex::new(arena)))
 }
 
 /// Parse MDX source into an MDAST arena handle.
 #[napi]
 pub fn create_mdx_mdast_handle(source: String) -> Result<ArenaHandle> {
-    let (arena, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::mdx());
+    let (mut arena, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::mdx());
+    arena.mdx = true;
     Ok(External::new(Mutex::new(arena)))
 }
 
@@ -161,7 +168,7 @@ pub fn apply_commands_to_mdast_handle(handle: &ArenaHandle, command_buf: Uint8Ar
     let mut arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    let parse_markdown = make_parse_fn();
+    let parse_markdown = make_parse_fn(arena.mdx);
     let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
     let new_arena = tryckeri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
@@ -175,11 +182,11 @@ pub fn convert_mdast_to_hast_handle(handle: &ArenaHandle) -> Result<ArenaHandle>
     let mut arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
+    let mdx = arena.mdx;
     let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
-    let hast_buf = tryckeri_hast::mdast_arena_to_hast_buffer(&owned);
-    let hast_view = tryckeri_mdast::MdastArena::from_raw_buffer(&hast_buf)
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    Ok(External::new(Mutex::new(hast_view)))
+    let mut hast = tryckeri_hast::mdast_arena_to_hast_arena(&owned);
+    hast.mdx = mdx;
+    Ok(External::new(Mutex::new(hast)))
 }
 
 /// Apply MDAST commands and convert to HAST handle in one step.
@@ -192,14 +199,14 @@ pub fn apply_commands_and_convert_to_hast_handle(
     let mut arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    let parse_markdown = make_parse_fn();
+    let mdx = arena.mdx;
+    let parse_markdown = make_parse_fn(mdx);
     let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
     let mutated = tryckeri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
-    let hast_buf = tryckeri_hast::mdast_arena_to_hast_buffer(&mutated);
-    let hast_view = tryckeri_mdast::MdastArena::from_raw_buffer(&hast_buf)
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    Ok(External::new(Mutex::new(hast_view)))
+    let mut hast_arena = tryckeri_hast::mdast_arena_to_hast_arena(&mutated);
+    hast_arena.mdx = mdx;
+    Ok(External::new(Mutex::new(hast_arena)))
 }
 
 // ── HAST handles ───────────────────────────────────────────────────────────
@@ -209,22 +216,18 @@ pub fn apply_commands_and_convert_to_hast_handle(
 #[napi]
 pub fn create_hast_handle(source: String) -> Result<ArenaHandle> {
     let (mdast, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::default());
-    let hast_buf = tryckeri_hast::mdast_to_hast_buffer(&mdast.to_raw_buffer())
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    let view = tryckeri_mdast::MdastArena::from_raw_buffer(&hast_buf)
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    Ok(External::new(Mutex::new(view)))
+    let mut hast = tryckeri_hast::mdast_arena_to_hast_arena(&mdast);
+    hast.mdx = false;
+    Ok(External::new(Mutex::new(hast)))
 }
 
 /// Parse MDX source and convert to HAST. Returns an opaque handle.
 #[napi]
 pub fn create_mdx_hast_handle(source: String) -> Result<ArenaHandle> {
     let (mdast, _) = tryckeri_parser::parse(&source, &tryckeri_parser::ParseOptions::mdx());
-    let hast_buf = tryckeri_hast::mdast_to_hast_buffer(&mdast.to_raw_buffer())
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    let view = tryckeri_mdast::MdastArena::from_raw_buffer(&hast_buf)
-        .map_err(|e| napi::Error::from_reason(format!("{e:?}")))?;
-    Ok(External::new(Mutex::new(view)))
+    let mut hast = tryckeri_hast::mdast_arena_to_hast_arena(&mdast);
+    hast.mdx = true;
+    Ok(External::new(Mutex::new(hast)))
 }
 
 /// Walk a handle's arena and return matched nodes as a flat binary buffer.
@@ -252,7 +255,7 @@ pub fn apply_commands_to_handle(handle: &ArenaHandle, command_buf: Uint8Array) -
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
 
-    let parse_markdown = make_parse_fn();
+    let parse_markdown = make_parse_fn(arena.mdx);
 
     // apply_commands takes ownership, so swap out the arena
     let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
@@ -299,6 +302,34 @@ pub fn compile_handle(handle: &ArenaHandle, options: Option<JsMdxOptions>) -> Re
 
     tryckeri_mdxjs::compile_hast_arena(&arena, &opts)
         .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+/// Parse a JavaScript expression and return its ESTree-compatible AST as a JSON string.
+/// Returns null if parsing fails. The JS layer calls JSON.parse (faster than serde_json → NAPI).
+#[napi]
+pub fn parse_expression(source: String) -> Option<String> {
+    tryckeri_mdxjs::parse_expression_to_estree_json(&source)
+}
+
+/// Read the node_data JSON blob for a node. Returns null if none is set.
+#[napi]
+pub fn get_node_data(handle: &ArenaHandle, node_id: u32) -> Option<String> {
+    let arena = handle
+        .lock()
+        .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))
+        .ok()?;
+    let data = arena.get_node_data(node_id)?;
+    String::from_utf8(data.to_vec()).ok()
+}
+
+/// Collect the concatenated text content of a node and all its descendants.
+/// Walks entirely in Rust — no per-child NAPI round-trips.
+#[napi]
+pub fn text_content_handle(handle: &ArenaHandle, node_id: u32) -> Result<String> {
+    let arena = handle
+        .lock()
+        .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
+    Ok(tryckeri_hast::text_content(&arena, node_id))
 }
 
 /// Release the arena memory held by a handle. The handle becomes empty

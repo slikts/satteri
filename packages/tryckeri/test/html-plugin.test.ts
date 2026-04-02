@@ -5,13 +5,15 @@ import {
   createMdastHandle,
   serializeHandle,
   renderHandle,
-  applyCommandsToHandle,
   dropHandle,
   convertMdastToHastHandle,
+  getHandleSource,
 } from "../index.js";
 import { HastReader } from "../src/hast/hast-reader.js";
-import { DataMap } from "../src/data-map.js";
-import { visitHast } from "../src/hast/hast-visitor.js";
+import {
+  visitHastHandle,
+  resolveSubscriptions,
+} from "../src/hast/hast-visitor.js";
 import { compileMarkdownToHtml, defineMdastPlugin } from "../src/index.js";
 import type { MdastNode } from "../src/types.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
@@ -45,7 +47,7 @@ function markdownToHtmlWithMdastPlugins(
   const mdastPlugins = plugins.map((p) =>
     defineMdastPlugin({ name: p.name, createOnce: () => p.instance }),
   );
-  return compileMarkdownToHtml(source, { mdastPlugins });
+  return compileMarkdownToHtml(source, { mdastPlugins }) as string;
 }
 
 // =========================================================================
@@ -166,21 +168,18 @@ describe("HAST plugins affecting HTML output", () => {
   });
 
   test("HAST visitor sees all element nodes", () => {
-    const { reader, handle } = makeHastReader("# Title\n\n- one\n- two\n\n> quote");
-    const dataMap = new DataMap();
+    const handle = createHastHandle("# Title\n\n- one\n- two\n\n> quote");
+    const source = getHandleSource(handle);
     const tags: string[] = [];
-    visitHast(
-      reader,
-      {
-        element: {
-          filter: [],
-          visit(node: HastNode) {
-            if (node.type === "element") tags.push(node.tagName);
-          },
+    const plugin = {
+      element: {
+        filter: [] as string[],
+        visit(node: HastNode) {
+          if (node.type === "element") tags.push(node.tagName);
         },
       },
-      dataMap,
-    );
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     dropHandle(handle);
     expect(tags).toContain("h1");
     expect(tags).toContain("ul");
@@ -189,45 +188,39 @@ describe("HAST plugins affecting HTML output", () => {
   });
 
   test("HAST visitor can inspect link properties (href)", () => {
-    const { reader, handle } = makeHastReader("[click](https://example.com)");
-    const dataMap = new DataMap();
+    const handle = createHastHandle("[click](https://example.com)");
+    const source = getHandleSource(handle);
     const hrefs: string[] = [];
-    visitHast(
-      reader,
-      {
-        element: {
-          filter: ["a"],
-          visit(node: HastNode) {
-            if (node.type === "element" && node.tagName === "a" && node.properties?.href) {
-              hrefs.push(node.properties.href as string);
-            }
-          },
+    const plugin = {
+      element: {
+        filter: ["a"],
+        visit(node: HastNode) {
+          if (node.type === "element" && node.tagName === "a" && node.properties?.href) {
+            hrefs.push(node.properties.href as string);
+          }
         },
       },
-      dataMap,
-    );
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     dropHandle(handle);
     expect(hrefs).toContain("https://example.com");
   });
 
   test("HAST visitor can identify images and their attributes", () => {
-    const { reader, handle } = makeHastReader('![alt text](image.png "my title")');
-    const dataMap = new DataMap();
+    const handle = createHastHandle('![alt text](image.png "my title")');
+    const source = getHandleSource(handle);
     let imgNode: HastNode | null = null;
-    visitHast(
-      reader,
-      {
-        element: {
-          filter: ["img"],
-          visit(node: HastNode) {
-            if (node.type === "element" && node.tagName === "img") {
-              imgNode = node;
-            }
-          },
+    const plugin = {
+      element: {
+        filter: ["img"],
+        visit(node: HastNode) {
+          if (node.type === "element" && node.tagName === "img") {
+            imgNode = node;
+          }
         },
       },
-      dataMap,
-    );
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     dropHandle(handle);
     expect(imgNode).not.toBeNull();
     const img = imgNode!;
@@ -238,44 +231,32 @@ describe("HAST plugins affecting HTML output", () => {
   });
 
   test("HAST visitor text() sees all text content", () => {
-    const { reader, handle } = makeHastReader("Hello **world**");
-    const dataMap = new DataMap();
+    const handle = createHastHandle("Hello **world**");
+    const source = getHandleSource(handle);
     const texts: string[] = [];
-    visitHast(
-      reader,
-      {
-        text(node: HastNode) {
-          if (node.type === "text") texts.push(node.value);
-        },
+    const plugin = {
+      text(node: HastNode) {
+        if (node.type === "text") texts.push(node.value);
       },
-      dataMap,
-    );
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     dropHandle(handle);
     expect(texts).toContain("Hello ");
     expect(texts).toContain("world");
   });
 
-  test("HAST visitor: setProperty mutation is recorded for elements", () => {
+  test("HAST visitor: setProperty mutation is applied to elements", () => {
     const handle = createHastHandle("# Hello");
-    const buf = serializeHandle(handle);
-    const reader = new HastReader(buf);
-    const dataMap = new DataMap();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "h1") {
-              ctx.setProperty(node, "id", "my-title");
-            }
-          },
+    const source = getHandleSource(handle);
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.setProperty(node, "id", "my-title");
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    applyCommandsToHandle(handle, result.commandBuffer);
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     const html = renderHandle(handle);
     dropHandle(handle);
     expect(html).toContain('id="my-title"');
@@ -283,25 +264,16 @@ describe("HAST plugins affecting HTML output", () => {
 
   test("HAST visitor: remove mutation removes element from result", () => {
     const handle = createHastHandle("# Keep\n\nRemove this");
-    const buf = serializeHandle(handle);
-    const reader = new HastReader(buf);
-    const dataMap = new DataMap();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["p"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "p") {
-              ctx.removeNode(node);
-            }
-          },
+    const source = getHandleSource(handle);
+    const plugin = {
+      element: {
+        filter: ["p"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.removeNode(node);
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    applyCommandsToHandle(handle, result.commandBuffer);
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     const html = renderHandle(handle);
     dropHandle(handle);
     expect(html).not.toContain("Remove this");
@@ -310,82 +282,49 @@ describe("HAST plugins affecting HTML output", () => {
 
   test("HAST visitor: replace mutation swaps an element", () => {
     const handle = createHastHandle("# Hello");
-    const buf = serializeHandle(handle);
-    const reader = new HastReader(buf);
-    const dataMap = new DataMap();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode) {
-            if (node.type === "element" && node.tagName === "h1") {
-              return {
-                type: "element" as const,
-                _nodeId: -1,
-                tagName: "h2",
-                properties: {},
-                children: node.children ?? [],
-                data: undefined,
-              };
-            }
-          },
+    const source = getHandleSource(handle);
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode) {
+          if (node.type === "element" && node.tagName === "h1") {
+            return {
+              type: "element" as const,
+              _nodeId: -1,
+              tagName: "h2",
+              properties: {},
+              children: node.children ?? [],
+              data: undefined,
+            };
+          }
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    applyCommandsToHandle(handle, result.commandBuffer);
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     const html = renderHandle(handle);
     dropHandle(handle);
     expect(html).toContain("<h2>");
     expect(html).not.toContain("<h1>");
   });
 
-  test("HAST visitor: transformRoot receives complete tree with deep structure", () => {
-    const source = "# Title\n\n- item 1\n- item 2\n\n```js\ncode\n```";
-    const { reader, handle } = makeHastReader(source);
-    const dataMap = new DataMap();
-    let rootChildren = 0;
-    visitHast(
-      reader,
-      {
-        transformRoot(root: HastNode) {
-          if (root.type === "root") rootChildren = root.children.length;
-        },
-      },
-      dataMap,
-    );
-    dropHandle(handle);
-    // Should have h1, ul, and pre elements at the root level
-    expect(rootChildren).toBeGreaterThanOrEqual(3);
-  });
-
   test("HAST visitor: diagnostics from HAST plugins are collected", () => {
-    const { reader, handle } = makeHastReader("# Hello");
-    const dataMap = new DataMap();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "h1") {
-              ctx.report({
-                message: "headings should have IDs",
-                node,
-                severity: "warning",
-              });
-            }
-          },
+    const handle = createHastHandle("# Hello");
+    const source = getHandleSource(handle);
+    let diags: { message: string; severity: string }[] = [];
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.report({ message: "headings should have IDs", node, severity: "warning" });
+          diags = ctx.getDiagnostics();
         },
       },
-      dataMap,
-    );
+    };
+    visitHastHandle(handle, plugin, resolveSubscriptions(plugin), source, "<test>");
     dropHandle(handle);
-    expect(result.diagnostics.length).toBe(1);
-    expect(result.diagnostics[0]!.message).toBe("headings should have IDs");
-    expect(result.diagnostics[0]!.severity).toBe("warning");
+    expect(diags.length).toBe(1);
+    expect(diags[0]!.message).toBe("headings should have IDs");
+    expect(diags[0]!.severity).toBe("warning");
   });
 });
 

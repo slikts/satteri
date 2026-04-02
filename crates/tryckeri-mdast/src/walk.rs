@@ -412,6 +412,14 @@ fn serialize_node_inline(
             for &child_id in children {
                 out.extend_from_slice(&child_id.to_le_bytes());
             }
+
+            // Node data (JSON bytes for plugin-visible `data` property)
+            if let Some(data) = arena.get_node_data(node_id) {
+                out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                out.extend_from_slice(data);
+            } else {
+                out.extend_from_slice(&0u32.to_le_bytes());
+            }
         }
 
         // MDX JSX elements (flow=10, text=11) — same layout as HAST element
@@ -454,8 +462,8 @@ fn serialize_node_inline(
             }
         }
 
-        // HAST text / comment / raw
-        2 | 3 | 5 => {
+        // HAST text / comment / raw / MDX expressions
+        2 | 3 | 5 | 12 | 14 => {
             if type_data.len() >= 8 {
                 let val_ref = read_string_ref(type_data, 0);
                 let val = arena.get_str(val_ref);

@@ -1,6 +1,6 @@
 {
   "name": "tryckeri",
-  "version": "0.1.20",
+  "version": "0.1.22",
   "description": "High-performance Markdown processing",
   "files": [
     "dist",

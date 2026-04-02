@@ -5,8 +5,9 @@ tryckeri-hast = { path = "../tryckeri-hast" }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 oxc_allocator = { workspace = true }
-oxc_ast = { workspace = true }
+oxc_ast = { workspace = true, features = ["serialize"] }
 oxc_codegen = { workspace = true }
+oxc_estree = { workspace = true, features = ["serialize"] }
 oxc_parser = { workspace = true }
 oxc_span = { workspace = true }
 oxc_syntax = { workspace = true }

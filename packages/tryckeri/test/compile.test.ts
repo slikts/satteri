@@ -181,36 +181,6 @@ describe("compileMarkdownToHtml", () => {
     expect(html).toContain('id="main-title"');
   });
 
-  test("HAST plugin wraps text in span via transformRoot", () => {
-    const wrapTexts = defineHastPlugin({
-      name: "wrap-texts",
-      createOnce: () => ({
-        transformRoot(root) {
-          function walk(node: HastNode): HastNode {
-            if (node.type === "text") {
-              return {
-                type: "element" as const,
-                tagName: "span",
-                properties: { class: "text-wrap" },
-                children: [node],
-                data: undefined,
-              };
-            }
-            if ("children" in node && node.children) {
-              return { ...node, children: (node.children as HastNode[]).map(walk) } as HastNode;
-            }
-            return node;
-          }
-          return walk(root);
-        },
-      }),
-    });
-
-    const html = compileMarkdownToHtml("Hello", {
-      hastPlugins: [wrapTexts],
-    });
-    expect(html).toContain('<span class="text-wrap">Hello</span>');
-  });
 
   test("no mutations — fast Rust path still works", () => {
     const noopPlugin = defineHastPlugin({
@@ -731,4 +701,139 @@ describe("compileMdxToJs", () => {
     // The filter still works via fallback JS walk
     expect(html).toContain("Hello");
   });
+
+  // -----------------------------------------------------------------------
+  // Async visitors
+  // -----------------------------------------------------------------------
+
+  test("async MDAST visitor — replaces code block after await", async () => {
+    const plugin = defineMdastPlugin({
+      name: "async-code",
+      createOnce: () => ({
+        async code(node: MdastNode) {
+          await new Promise((r) => setTimeout(r, 1));
+          return { rawHtml: "<pre>async-highlighted</pre>" };
+        },
+      }),
+    });
+
+    const result = compileMdxToJs("```js\ncode\n```", { mdastPlugins: [plugin] });
+    expect(result).toBeInstanceOf(Promise);
+    const js = await result;
+    expect(js).toContain("async-highlighted");
+  });
+
+
+  test("sync MDAST plugins return string not Promise", () => {
+    const plugin = defineMdastPlugin({
+      name: "sync-mdast",
+      createOnce: () => ({
+        heading(node: MdastNode, ctx: any) {
+          ctx.setProperty(node, "depth", 2);
+        },
+      }),
+    });
+
+    const result = compileMdxToJs("# Title", { mdastPlugins: [plugin] });
+    expect(typeof result).toBe("string");
+  });
+
+  test("async HAST visitor — replaces element after await", async () => {
+    const plugin = defineHastPlugin({
+      name: "async-replace",
+      createOnce: () => ({
+        element: {
+          filter: ["pre"],
+          async visit(node: Element, ctx: HastVisitorContext) {
+            // Simulate async work (e.g. shiki language loading)
+            await new Promise((r) => setTimeout(r, 1));
+            ctx.replaceNode(node, { type: "raw", value: "<pre>highlighted</pre>" } as HastNode);
+          },
+        },
+      }),
+    });
+
+    const result = compileMarkdownToHtml("```js\ncode\n```", { hastPlugins: [plugin] });
+    expect(result).toBeInstanceOf(Promise);
+    const html = await result;
+    expect(html).toContain("highlighted");
+  });
+
+  test("async HAST visitor — multiple async visitors run in parallel", async () => {
+    const order: string[] = [];
+    const plugin = defineHastPlugin({
+      name: "async-parallel",
+      createOnce: () => ({
+        element: {
+          filter: ["h1", "h2"],
+          async visit(node: Element, ctx: HastVisitorContext) {
+            const tag = node.tagName;
+            order.push(`start:${tag}`);
+            await new Promise((r) => setTimeout(r, tag === "h1" ? 10 : 1));
+            order.push(`end:${tag}`);
+            ctx.setProperty(node, "class", "processed");
+          },
+        },
+      }),
+    });
+
+    const html = await compileMarkdownToHtml("# One\n\n## Two", { hastPlugins: [plugin] });
+    expect(html).toContain('class="processed"');
+    // Both should start before either ends (parallel execution)
+    expect(order[0]).toBe("start:h1");
+    expect(order[1]).toBe("start:h2");
+  });
+
+  test("mixed sync and async plugins — sync has zero overhead", async () => {
+    const syncPlugin = defineHastPlugin({
+      name: "sync-class",
+      createOnce: () => ({
+        element: {
+          filter: ["h1"],
+          visit(node: Element, ctx: HastVisitorContext) {
+            ctx.setProperty(node, "id", "sync");
+          },
+        },
+      }),
+    });
+
+    const asyncPlugin = defineHastPlugin({
+      name: "async-class",
+      createOnce: () => ({
+        element: {
+          filter: ["p"],
+          async visit(node: Element, ctx: HastVisitorContext) {
+            await new Promise((r) => setTimeout(r, 1));
+            ctx.setProperty(node, "class", "async");
+          },
+        },
+      }),
+    });
+
+    const result = compileMarkdownToHtml("# Title\n\nParagraph", {
+      hastPlugins: [syncPlugin, asyncPlugin],
+    });
+    const html = await result;
+    expect(html).toContain('id="sync"');
+    expect(html).toContain('class="async"');
+  });
+
+  test("sync-only plugins still return string (not Promise)", () => {
+    const plugin = defineHastPlugin({
+      name: "sync-only",
+      createOnce: () => ({
+        element: {
+          filter: ["h1"],
+          visit(node: Element, ctx: HastVisitorContext) {
+            ctx.setProperty(node, "id", "test");
+          },
+        },
+      }),
+    });
+
+    const result = compileMarkdownToHtml("# Hello", { hastPlugins: [plugin] });
+    expect(typeof result).toBe("string");
+    expect(result).toContain('id="test"');
+  });
+
 });

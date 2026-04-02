@@ -1,6 +1,5 @@
 import type { MdastNode } from "../types.js";
 import type { MdastReader } from "./mdast-reader.js";
-import type { DataMap } from "../data-map.js";
 import { lazyProp, lazyGroup } from "../lazy-props.js";
 
 export const TYPE_NAMES: Record<number, string> = {
@@ -148,7 +147,7 @@ function addTypeProperties(
 /**
  * Materialize a single MDAST node from a binary buffer as a lazy JS object.
  */
-export function materializeNode(reader: MdastReader, nodeId: number, dataMap: DataMap): MdastNode {
+export function materializeNode(reader: MdastReader, nodeId: number): MdastNode {
   const rawNode = reader.getNode(nodeId);
   const nodeType = rawNode.type;
   const typeName = TYPE_NAMES[nodeType] ?? `unknown(${nodeType})`;
@@ -166,17 +165,7 @@ export function materializeNode(reader: MdastReader, nodeId: number, dataMap: Da
     enumerable: false,
   });
 
-  // data: getter/setter backed by the DataMap
-  Object.defineProperty(node, "data", {
-    get() {
-      return dataMap.get(nodeId);
-    },
-    set(value: Record<string, unknown>) {
-      dataMap.set(nodeId, value);
-    },
-    configurable: true,
-    enumerable: true,
-  });
+
 
   // Type-specific lazy properties
   addTypeProperties(node, reader, nodeId, nodeType);
@@ -186,7 +175,7 @@ export function materializeNode(reader: MdastReader, nodeId: number, dataMap: Da
     Object.defineProperty(node, "children", {
       get(this: MdastNode) {
         const childIds = reader.getChildIds(nodeId);
-        const children = childIds.map((id) => materializeNode(reader, id, dataMap));
+        const children = childIds.map((id) => materializeNode(reader, id));
         Object.defineProperty(this, "children", {
           value: children,
           writable: true,
@@ -204,6 +193,6 @@ export function materializeNode(reader: MdastReader, nodeId: number, dataMap: Da
 }
 
 /** Materialize the full tree from root (nodeId=0). */
-export function materializeTree(reader: MdastReader, dataMap: DataMap): MdastNode {
-  return materializeNode(reader, 0, dataMap);
+export function materializeTree(reader: MdastReader): MdastNode {
+  return materializeNode(reader, 0);
 }

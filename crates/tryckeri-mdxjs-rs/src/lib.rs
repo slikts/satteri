@@ -26,12 +26,39 @@ use crate::{
     oxc_util_build_jsx::{Options as BuildOptions, oxc_util_build_jsx},
 };
 use oxc_allocator::Allocator;
-use oxc_span::Span;
+use oxc_estree::{CompactJSSerializer, ESTree};
+use oxc_parser::{ParseOptions, Parser};
+use oxc_span::{SourceType, Span};
 use rustc_hash::FxHashSet;
 use tryckeri_mdast::mdx_types::{self as message, Location};
 
 pub use crate::configuration::{MdxConstructs, MdxParseOptions, OptimizeStaticConfig, Options};
 pub use crate::mdx_plugin_recma_document::JsxRuntime;
+
+/// Parse a JavaScript expression and return its ESTree-compatible JSON representation.
+///
+/// Wraps the expression in an `ExpressionStatement` inside a `Program` to match
+/// the standard ESTree `Program` shape that tools like `estree-util-*` expect.
+///
+/// Returns `None` if parsing fails (e.g. invalid syntax).
+pub fn parse_expression_to_estree_json(source: &str) -> Option<String> {
+    let allocator = Allocator::default();
+    let source_type = SourceType::mjs().with_jsx(true);
+    let src = allocator.alloc_str(source);
+    let expr = Parser::new(&allocator, src, source_type)
+        .with_options(ParseOptions::default())
+        .parse_expression()
+        .ok()?;
+
+    let mut serializer = CompactJSSerializer::new(false);
+    expr.serialize(&mut serializer);
+    let expr_json = serializer.into_string();
+
+    // Wrap in Program > ExpressionStatement to match ESTree Program shape
+    Some(format!(
+        r#"{{"type":"Program","body":[{{"type":"ExpressionStatement","expression":{expr_json}}}],"sourceType":"module"}}"#,
+    ))
+}
 
 /// Turn MDX into JavaScript.
 ///

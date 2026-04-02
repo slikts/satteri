@@ -1,10 +1,11 @@
 import { materializeNode, TYPE_NAMES } from "./mdast-materializer.js";
+import { MdastReader } from "./mdast-reader.js";
 import { CommandBuffer, classifyReturn } from "../command-buffer.js";
 import type { MdastNode, MdastNodeInternal, Toml, MathNode, InlineMath } from "../types.js";
 import {
   walkMdastHandle,
-  applyCommandsToMdastHandle,
-  getHandleSource,
+  serializeMdastHandle,
+  getNodeData as napiGetNodeData,
   setNodeData,
 } from "../../index.js";
 import type {
@@ -38,8 +39,6 @@ import type {
 import type { MdxJsxFlowElement, MdxJsxTextElement } from "mdast-util-mdx-jsx";
 import type { MdxFlowExpression, MdxTextExpression } from "mdast-util-mdx-expression";
 import type { MdxjsEsm } from "mdast-util-mdxjs-esm";
-import type { MdastReader } from "./mdast-reader.js";
-import { DataMap } from "../data-map.js";
 
 const MutationType = {
   Replace: "replace",
@@ -113,13 +112,12 @@ function nid(node: MdastNode): number {
 export class MdastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: MdastDiagnostic[] = [];
-  readonly #reader: MdastReader;
-  readonly #dataMap: DataMap;
-  readonly #rootId: number = 0;
+  readonly source: string;
+  readonly filename: string;
 
-  constructor(reader: MdastReader, dataMap: DataMap) {
-    this.#reader = reader;
-    this.#dataMap = dataMap;
+  constructor(source: string, filename: string) {
+    this.source = source;
+    this.filename = filename;
   }
 
   removeNode(node: MdastNode): void {
@@ -171,14 +169,6 @@ export class MdastVisitorContext {
     });
   }
 
-  get root(): MdastNode {
-    return materializeNode(this.#reader, this.#rootId, this.#dataMap);
-  }
-
-  get source(): string {
-    return this.#reader.getSource();
-  }
-
   /** Get the binary command buffer for all mutations recorded via context methods. */
   getCommandBuffer(): CommandBuffer {
     return this.#commandBuffer;
@@ -189,15 +179,14 @@ export class MdastVisitorContext {
   }
 }
 
+type MdastVisitorResult = MdastNode | { raw: string } | { rawHtml: string } | undefined | null | void;
+
 type MdastVisitorFn<N extends MdastNode = MdastNode> = (
   node: N,
   context: MdastVisitorContext,
-) => MdastNode | { raw: string } | { rawHtml: string } | undefined | null | void;
+) => MdastVisitorResult | Promise<MdastVisitorResult>;
 
 export interface MdastPluginInstance {
-  before?(context: MdastVisitorContext): void;
-  after?(context: MdastVisitorContext): void;
-  transformRoot?(root: Root, context: MdastVisitorContext): MdastNode | undefined | null;
   root?: MdastVisitorFn<Root>;
   paragraph?: MdastVisitorFn<Paragraph>;
   heading?: MdastVisitorFn<Heading>;
@@ -265,108 +254,6 @@ function mergeAndReset(
   return { merged, hasMutations: totalLen > 0 };
 }
 
-/**
- * Walk the MDAST and dispatch to plugin visitor functions.
- *
- * Mutations are collected into a binary command buffer. Return values from
- * visitor functions are classified (raw/rawHtml/structured) and encoded
- * as REPLACE commands in the buffer.
- */
-export function visitMdast(
-  reader: MdastReader,
-  plugin: MdastPluginInstance,
-  dataMap: DataMap,
-): MdastVisitResult {
-  const context = new MdastVisitorContext(reader, dataMap);
-
-  plugin.before?.(context);
-
-  // Separate CommandBuffer for return-value mutations (replace commands from
-  // visitor return values). These are merged with the context's buffer at the end.
-  const returnBuffer = new CommandBuffer();
-
-  if (typeof plugin.transformRoot === "function") {
-    // Full materialization path
-    const root = materializeNode(reader, 0, dataMap) as Root;
-    const result = plugin.transformRoot(root, context);
-    if (result !== undefined && result !== null) {
-      const cls = classifyReturn(result);
-      switch (cls) {
-        case "raw_markdown":
-          returnBuffer.replace(0, result as unknown as { raw: string });
-          break;
-        case "raw_html":
-          returnBuffer.replace(0, result as unknown as { rawHtml: string });
-          break;
-        case "structured_node":
-          returnBuffer.replace(0, result);
-          break;
-        // no_change: do nothing
-      }
-    }
-  } else {
-    // Fast path: walk raw bytes, only materialize subscribed node types
-
-    // Build reverse map: numeric type → visitor function
-    const TYPE_TO_VISITOR = new Map<
-      number,
-      (node: MdastNode, context: MdastVisitorContext) => unknown
-    >();
-    for (const [name, fn] of Object.entries(plugin)) {
-      if (VISITOR_KEYS.has(name) && typeof fn === "function") {
-        for (const [num, typeName] of Object.entries(TYPE_NAMES)) {
-          if (typeName === name) {
-            TYPE_TO_VISITOR.set(
-              Number(num),
-              fn as (node: MdastNode, context: MdastVisitorContext) => unknown,
-            );
-            break;
-          }
-        }
-      }
-    }
-
-    // Walk raw buffer — only type-check each node, materialize only on subscription match
-    const stack: number[] = [0];
-    while (stack.length > 0) {
-      const nodeId = stack.pop()!;
-      const nodeType = reader.getNodeType(nodeId);
-
-      const visitor = TYPE_TO_VISITOR.get(nodeType);
-      if (visitor) {
-        const node = materializeNode(reader, nodeId, dataMap);
-        const result = visitor.call(plugin, node, context);
-        if (result !== undefined && result !== null) {
-          const cls = classifyReturn(result);
-          switch (cls) {
-            case "raw_markdown":
-              returnBuffer.replace(nodeId, result as unknown as { raw: string });
-              break;
-            case "raw_html":
-              returnBuffer.replace(nodeId, result as unknown as { rawHtml: string });
-              break;
-            case "structured_node":
-              returnBuffer.replace(nodeId, result as MdastNode);
-              break;
-            // no_change: do nothing
-          }
-        }
-      }
-
-      reader.pushChildIds(nodeId, stack);
-    }
-  }
-
-  plugin.after?.(context);
-
-  const { merged, hasMutations } = mergeAndReset(returnBuffer, context);
-  return {
-    commandBuffer: merged,
-    diagnostics: context.getDiagnostics(),
-    hasMutations,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Handle-based MDAST visitor (arena stays in Rust)
 // ---------------------------------------------------------------------------
@@ -376,10 +263,6 @@ export type MdastHandle = any;
 
 const textDecoder = new TextDecoder("utf-8");
 
-function isChildRefArray(children: unknown): boolean {
-  if (!Array.isArray(children) || children.length === 0) return false;
-  return children.every((c: Record<string, unknown>) => c?.type === "__child_ref__");
-}
 
 /** Build name→nodeType map from TYPE_NAMES (reverse of TYPE_NAMES). */
 const NAME_TO_TYPE: Record<string, number> = {};
@@ -392,13 +275,8 @@ interface MdastSubscription {
   visitFn: (node: MdastNode, context: MdastVisitorContext) => unknown;
 }
 
-/**
- * Resolve subscriptions from a plugin. Returns null if the plugin uses
- * transformRoot (needs buffer fallback).
- */
-export function resolveMdastSubscriptions(plugin: MdastPluginInstance): MdastSubscription[] | null {
-  if (plugin.transformRoot) return null;
-
+/** Resolve subscriptions from a plugin instance. */
+export function resolveMdastSubscriptions(plugin: MdastPluginInstance): MdastSubscription[] {
   const subs: MdastSubscription[] = [];
   for (const [name, fn] of Object.entries(plugin)) {
     if (VISITOR_KEYS.has(name) && typeof fn === "function") {
@@ -411,7 +289,7 @@ export function resolveMdastSubscriptions(plugin: MdastPluginInstance): MdastSub
       }
     }
   }
-  return subs.length > 0 ? subs : null;
+  return subs;
 }
 
 /** Read a u16 from buf at offset (LE). */
@@ -428,10 +306,55 @@ function rstr(buf: Uint8Array, off: number, len: number): string {
 }
 
 /**
+ * Lazy child materializer for the MDAST handle walk path.
+ * Serializes the handle once on first child access, then materializes
+ * children via MdastReader + materializeNode.
+ */
+class MdastLazyChildResolver {
+  #handle: MdastHandle;
+  #reader: MdastReader | null = null;
+
+  constructor(handle: MdastHandle) {
+    this.#handle = handle;
+  }
+
+  #ensure(): MdastReader {
+    if (!this.#reader) {
+      this.#reader = new MdastReader(serializeMdastHandle(this.#handle));
+    }
+    return this.#reader;
+  }
+
+  materializeChildren(childIds: number[]): MdastNode[] {
+    const reader = this.#ensure();
+    const handle = this.#handle;
+    return childIds.map((id) => {
+      const node = materializeNode(reader, id);
+      Object.defineProperty(node, "data", {
+        get() {
+          const json = napiGetNodeData(handle, id);
+          const val = json ? (JSON.parse(json) as Record<string, unknown>) : null;
+          Object.defineProperty(this, "data", {
+            value: val,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          return val;
+        },
+        configurable: true,
+        enumerable: true,
+      });
+      return node;
+    });
+  }
+}
+
+/**
  * Read an MDAST node from the inline data in a match buffer entry.
  *
  * Inline format (from Rust serialize_mdast_node_inline):
- *   [position: 6×u32 = 24B][child_count: u16][child_ids: N×u32][type-specific data]
+ *   [node_data: u32+bytes][position: 6×u32 = 24B][child_count: u16][child_ids: N×u32][type-specific data]
  */
 const encoder = new TextEncoder();
 
@@ -442,6 +365,7 @@ function readMdastMatchedNode(
   nodeId: number,
   nodeType: number,
   dirtyData: Map<number, Record<string, unknown>>,
+  resolver: MdastLazyChildResolver,
 ): MdastNode {
   let pos = dataOffset;
 
@@ -466,12 +390,12 @@ function readMdastMatchedNode(
   };
   pos += 24;
 
-  // Children (opaque refs)
+  // Children — read IDs, materialize lazily via resolver
   const childCount = ru16(view, pos);
   pos += 2;
-  const children: { _nodeId: number; type: string }[] = [];
+  const childIds: number[] = [];
   for (let i = 0; i < childCount; i++) {
-    children.push({ _nodeId: ru32(view, pos), type: "__child_ref__" });
+    childIds.push(ru32(view, pos));
     pos += 4;
   }
 
@@ -479,7 +403,22 @@ function readMdastMatchedNode(
 
   // Build node with type-specific fields
   const node: Record<string, unknown> = { type: typeName, position };
-  if (childCount > 0) node.children = children;
+  if (childCount > 0) {
+    Object.defineProperty(node, "children", {
+      get() {
+        const val = resolver.materializeChildren(childIds);
+        Object.defineProperty(this, "children", {
+          value: val,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+        return val;
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
 
   switch (nodeType) {
     case 2: {
@@ -701,28 +640,51 @@ function readMdastMatchedNode(
   return node as unknown as MdastNode;
 }
 
+/** Apply a sync visitor result to the return buffer. */
+function applyMdastVisitResult(
+  result: MdastVisitorResult,
+  nodeId: number,
+  returnBuffer: CommandBuffer,
+): void {
+  if (result === undefined || result === null) return;
+  const cls = classifyReturn(result);
+  switch (cls) {
+    case "raw_markdown":
+      returnBuffer.replace(nodeId, result as unknown as { raw: string });
+      break;
+    case "raw_html":
+      returnBuffer.replace(nodeId, result as unknown as { rawHtml: string });
+      break;
+    case "structured_node":
+      returnBuffer.replace(nodeId, result as MdastNode);
+      break;
+  }
+}
+
 /**
  * Walk an MDAST handle in Rust, dispatch matched nodes to JS visitor functions,
  * and apply mutations back to the handle. No arena buffers cross NAPI.
+ *
+ * Returns MdastVisitResult synchronously if all visitors are sync,
+ * or Promise<MdastVisitResult> if any visitor is async.
  */
 export function visitMdastHandle(
   handle: MdastHandle,
   plugin: MdastPluginInstance,
   subs: MdastSubscription[],
-  dataMap?: DataMap,
-): MdastVisitResult {
-  const dm = dataMap ?? new DataMap();
-  const context = new MdastVisitorContext(null as unknown as MdastReader, dm);
+  source: string,
+  filename: string,
+): MdastVisitResult | Promise<MdastVisitResult> {
+  const context = new MdastVisitorContext(source, filename);
   const returnBuffer = new CommandBuffer();
   const dirtyData = new Map<number, Record<string, unknown>>();
-
-  plugin.before?.(context);
-
-  // Build Rust subscriptions (no tag filter for MDAST — all matched by type)
+  const resolver = new MdastLazyChildResolver(handle);
   const rustSubs = subs.map((s) => ({ nodeType: s.nodeType, tagFilter: [] as string[] }));
   const matchBuf: Uint8Array = walkMdastHandle(handle, rustSubs);
   const matchView = new DataView(matchBuf.buffer, matchBuf.byteOffset, matchBuf.byteLength);
   const matchCount = ru32(matchView, 0);
+
+  let deferred: { nodeId: number; promise: Promise<MdastVisitorResult> }[] | null = null;
 
   for (let i = 0; i < matchCount; i++) {
     const indexBase = 4 + i * 12;
@@ -731,46 +693,40 @@ export function visitMdastHandle(
     const dataOffset = ru32(matchView, indexBase + 6);
 
     const sub = subs[subIndex]!;
-    const nodeType = sub.nodeType;
-    const node = readMdastMatchedNode(matchView, matchBuf, dataOffset, nodeId, nodeType, dirtyData);
+    const node = readMdastMatchedNode(matchView, matchBuf, dataOffset, nodeId, sub.nodeType, dirtyData, resolver);
     const result = sub.visitFn.call(plugin, node, context);
 
-    if (result !== undefined && result !== null) {
-      const cls = classifyReturn(result);
-      switch (cls) {
-        case "raw_markdown":
-          returnBuffer.replace(nodeId, result as unknown as { raw: string });
-          break;
-        case "raw_html":
-          returnBuffer.replace(nodeId, result as unknown as { rawHtml: string });
-          break;
-        case "structured_node": {
-          const r = result as Record<string, unknown>;
-          if ("children" in r && isChildRefArray(r.children)) {
-            // Children are opaque refs — tell Rust to keep the original children
-            const { children: _, ...rest } = r;
-            returnBuffer.replaceRawJson(nodeId, JSON.stringify({ ...rest, _keepChildren: true }));
-          } else {
-            returnBuffer.replace(nodeId, result as MdastNode);
-          }
-          break;
-        }
-      }
+    if (result instanceof Promise) {
+      deferred ??= [];
+      deferred.push({ nodeId, promise: result });
+    } else {
+      applyMdastVisitResult(result as MdastVisitorResult, nodeId, returnBuffer);
     }
   }
 
-  plugin.after?.(context);
+  if (deferred) {
+    return Promise.all(deferred.map((d) => d.promise.then((r) => ({ nodeId: d.nodeId, result: r }))))
+      .then((results) => {
+        for (const { nodeId, result } of results) {
+          applyMdastVisitResult(result, nodeId, returnBuffer);
+        }
+        return finalizeMdastVisit(handle, context, returnBuffer, dirtyData);
+      });
+  }
 
-  // Flush dirty node data to the Rust arena
+  return finalizeMdastVisit(handle, context, returnBuffer, dirtyData);
+}
+
+function finalizeMdastVisit(
+  handle: MdastHandle,
+  context: MdastVisitorContext,
+  returnBuffer: CommandBuffer,
+  dirtyData: Map<number, Record<string, unknown>>,
+): MdastVisitResult {
   for (const [id, value] of dirtyData) {
     const json = value ? JSON.stringify(value) : "";
     setNodeData(handle, id, encoder.encode(json));
   }
-
   const { merged, hasMutations } = mergeAndReset(returnBuffer, context);
-  return {
-    commandBuffer: merged,
-    diagnostics: context.getDiagnostics(),
-    hasMutations,
-  };
+  return { commandBuffer: merged, diagnostics: context.getDiagnostics(), hasMutations };
 }

@@ -1,12 +1,11 @@
 import { materializeHastNode, type HastNode } from "./hast-materializer.js";
 import type { HastNodeInternal, HastRaw, MdxJsxAttributeUnion } from "../types.js";
-import type { Element, Text, Comment, Doctype, Root } from "hast";
+import type { Element, Text, Comment, Doctype } from "hast";
 import type { MdxJsxFlowElementHast, MdxJsxTextElementHast } from "mdast-util-mdx-jsx";
 import type { MdxFlowExpressionHast, MdxTextExpressionHast } from "mdast-util-mdx-expression";
 import type { MdxjsEsmHast } from "mdast-util-mdxjs-esm";
 import {
   HastReader,
-  HAST_ROOT,
   HAST_ELEMENT,
   HAST_TEXT,
   HAST_COMMENT,
@@ -16,15 +15,40 @@ import {
   HAST_MDX_FLOW_EXPRESSION,
   HAST_MDX_TEXT_EXPRESSION,
   HAST_MDX_ESM,
-  type HastProperty,
 } from "./hast-reader.js";
 import { CommandBuffer } from "../command-buffer.js";
-import { DataMap } from "../data-map.js";
-import { walkHandle, applyCommandsToHandle, serializeHandle } from "../../index.js";
+import {
+  walkHandle,
+  applyCommandsToHandle,
+  serializeHandle,
+  textContentHandle,
+  getNodeData as napiGetNodeData,
+  parseExpression as napiParseExpression,
+} from "../../index.js";
 
 // Opaque handle type from NAPI — the arena lives in Rust memory.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HastHandle = any;
+
+/** ESTree-compatible Program node returned by `parseExpression()`. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type EstreeProgram = Record<string, any>;
+
+/** Attach `parseExpression()` to an MDX expression node. */
+function attachParseExpression(node: HastNode): void {
+  Object.defineProperty(node, "parseExpression", {
+    value(): EstreeProgram | null {
+      const value = (this as { value?: string }).value;
+      if (typeof value !== "string") return null;
+      const json = napiParseExpression(value);
+      if (json == null) return null;
+      return JSON.parse(json) as EstreeProgram;
+    },
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
+}
 
 export interface HastDiagnostic {
   message: string;
@@ -33,16 +57,15 @@ export interface HastDiagnostic {
 }
 
 export interface HastVisitorContext {
+  readonly source: string;
+  readonly filename: string;
   removeNode(node: HastNode): void;
   replaceNode(node: HastNode, newNode: HastNode): void;
   setProperty(node: HastNode, key: string, value: unknown): void;
+  /** Collect the concatenated text of all descendant text nodes (like DOM textContent). */
+  textContent(node: HastNode): string;
   report(opts: { message: string; node?: HastNode; severity?: "error" | "warning" | "info" }): void;
   getDiagnostics(): HastDiagnostic[];
-}
-
-function isChildRefArray(children: unknown): boolean {
-  if (!Array.isArray(children) || children.length === 0) return false;
-  return children.every((c: Record<string, unknown>) => c?.type === "__child_ref__");
 }
 
 /** Inject `_hast: true` marker on a HastNode and all its children for JSON serialization. */
@@ -54,9 +77,7 @@ function markHast(node: HastNode): Record<string, unknown> {
   if ("value" in node) obj.value = n.value;
   if ("name" in node) obj.name = n.name;
   if ("attributes" in node) obj.attributes = n.attributes;
-  if ("children" in node && isChildRefArray(n.children)) {
-    obj._keepChildren = true;
-  } else if ("children" in node) {
+  if ("children" in node) {
     obj.children = (n.children as HastNode[]).map(markHast);
   }
   return obj;
@@ -71,6 +92,15 @@ class HastVisitorContextImpl implements HastVisitorContext {
   readonly #diagnostics: HastDiagnostic[] = [];
   /** Track accumulated node state for multiple setProperty calls on the same node. */
   readonly #pendingNodes: Map<number, HastNode> = new Map();
+  readonly #handle: HastHandle;
+  readonly source: string;
+  readonly filename: string;
+
+  constructor(handle: HastHandle, source: string, filename: string) {
+    this.#handle = handle;
+    this.source = source;
+    this.filename = filename;
+  }
 
   removeNode(node: HastNode): void {
     this.#commandBuffer.removeNode(nid(node));
@@ -118,6 +148,10 @@ class HastVisitorContextImpl implements HastVisitorContext {
     this.replaceNode(node, updated as unknown as HastNode);
   }
 
+  textContent(node: HastNode): string {
+    return textContentHandle(this.#handle, nid(node));
+  }
+
   report({
     message,
     node,
@@ -142,18 +176,15 @@ class HastVisitorContextImpl implements HastVisitorContext {
 /** A filtered visitor: Rust filters by tag/component name, only matched nodes cross the boundary. */
 export interface HastFilteredVisitor<N extends HastNode = HastNode> {
   filter: string[];
-  visit(node: N, ctx: HastVisitorContext): HastNode | void;
+  visit(node: N, ctx: HastVisitorContext): HastNode | void | Promise<HastNode | void>;
 }
 
 type HastVisitorFn<N extends HastNode = HastNode> = (
   node: N,
   ctx: HastVisitorContext,
-) => HastNode | void;
+) => HastNode | void | Promise<HastNode | void>;
 
 export interface HastVisitorInstance {
-  before?(ctx: HastVisitorContext): void;
-  after?(ctx: HastVisitorContext): void;
-  transformRoot?(root: Root, ctx: HastVisitorContext): HastNode | void;
   // Element-like nodes: filtered by tag/component name (single or array)
   element?: HastFilteredVisitor<Element> | HastFilteredVisitor<Element>[];
   mdxJsxFlowElement?:
@@ -167,191 +198,9 @@ export interface HastVisitorInstance {
   comment?: HastVisitorFn<Comment>;
   raw?: HastVisitorFn<HastRaw>;
   doctype?: HastVisitorFn<Doctype>;
-  mdxFlowExpression?: HastVisitorFn<MdxFlowExpressionHast>;
-  mdxTextExpression?: HastVisitorFn<MdxTextExpressionHast>;
+  mdxFlowExpression?: HastVisitorFn<MdxFlowExpressionHast & { parseExpression(): EstreeProgram | null }>;
+  mdxTextExpression?: HastVisitorFn<MdxTextExpressionHast & { parseExpression(): EstreeProgram | null }>;
   mdxjsEsm?: HastVisitorFn<MdxjsEsmHast>;
-}
-
-export interface HastVisitResult {
-  commandBuffer: Uint8Array;
-  diagnostics: HastDiagnostic[];
-  hasMutations: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Lightweight node materializer for the visitor hot path.
-//
-// Avoids per-node Object.defineProperty calls by using class prototypes
-// with lazy getters that cache on first access.
-// ---------------------------------------------------------------------------
-
-function propsToRecord(props: HastProperty[]): Record<string, string | boolean | string[]> {
-  const result: Record<string, string | boolean | string[]> = {};
-  for (const p of props) {
-    result[p.name] = p.value;
-  }
-  return result;
-}
-
-class LazyElementNode {
-  type = "element" as const;
-  _nodeId: number;
-  declare _reader: HastReader;
-  declare _dataMap: DataMap;
-  declare tagName: string;
-  declare properties: Record<string, string | boolean | string[]>;
-  declare children: HastNode[];
-  declare data: Record<string, unknown> | null;
-
-  constructor(nodeId: number, reader: HastReader, dataMap: DataMap) {
-    this._nodeId = nodeId;
-    // Store reader/dataMap as non-enumerable to avoid serialization
-    Object.defineProperty(this, "_reader", { value: reader, enumerable: false });
-    Object.defineProperty(this, "_dataMap", { value: dataMap, enumerable: false });
-  }
-}
-
-// Helper: resolve element data once and cache both tagName and properties.
-function resolveElementData(self: LazyElementNode): void {
-  const { tagName, properties } = self._reader.getElementData(self._nodeId);
-  Object.defineProperty(self, "tagName", {
-    value: tagName,
-    writable: true,
-    enumerable: true,
-    configurable: true,
-  });
-  Object.defineProperty(self, "properties", {
-    value: propsToRecord(properties),
-    writable: true,
-    enumerable: true,
-    configurable: true,
-  });
-}
-
-// Define lazy getters on prototype — one-time cost at module load
-Object.defineProperty(LazyElementNode.prototype, "tagName", {
-  get(this: LazyElementNode) {
-    resolveElementData(this);
-    return this.tagName;
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-Object.defineProperty(LazyElementNode.prototype, "properties", {
-  get(this: LazyElementNode) {
-    resolveElementData(this);
-    return this.properties;
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-Object.defineProperty(LazyElementNode.prototype, "children", {
-  get(this: LazyElementNode) {
-    const ids = this._reader.getChildIds(this._nodeId);
-    const val = ids.map((id) => materializeHastNode(this._reader, id, this._dataMap));
-    Object.defineProperty(this, "children", {
-      value: val,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-    return val;
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-Object.defineProperty(LazyElementNode.prototype, "data", {
-  get(this: LazyElementNode) {
-    return this._dataMap.get(this._nodeId);
-  },
-  set(this: LazyElementNode, value: Record<string, unknown>) {
-    this._dataMap.set(this._nodeId, value);
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-class LazyTextNode {
-  _nodeId: number;
-  declare _reader: HastReader;
-  declare _dataMap: DataMap;
-  declare value: string;
-  declare data: Record<string, unknown> | null;
-
-  type: string;
-  constructor(type: string, nodeId: number, reader: HastReader, dataMap: DataMap) {
-    this.type = type;
-    this._nodeId = nodeId;
-    Object.defineProperty(this, "_reader", { value: reader, enumerable: false });
-    Object.defineProperty(this, "_dataMap", { value: dataMap, enumerable: false });
-  }
-}
-
-Object.defineProperty(LazyTextNode.prototype, "value", {
-  get(this: LazyTextNode) {
-    const val = this._reader.getTextValue(this._nodeId);
-    Object.defineProperty(this, "value", {
-      value: val,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-    return val;
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-Object.defineProperty(LazyTextNode.prototype, "data", {
-  get(this: LazyTextNode) {
-    return this._dataMap.get(this._nodeId);
-  },
-  set(this: LazyTextNode, value: Record<string, unknown>) {
-    this._dataMap.set(this._nodeId, value);
-  },
-  configurable: true,
-  enumerable: true,
-});
-
-// Type name lookup for text-like nodes (hoisted to avoid per-node allocation)
-const TEXT_TYPE_NAMES: Record<number, string> = {
-  [HAST_TEXT]: "text",
-  [HAST_COMMENT]: "comment",
-  [HAST_RAW]: "raw",
-  [HAST_MDX_FLOW_EXPRESSION]: "mdxFlowExpression",
-  [HAST_MDX_TEXT_EXPRESSION]: "mdxTextExpression",
-  [HAST_MDX_ESM]: "mdxjsEsm",
-};
-
-/** Fast materializer for the visitor — avoids per-node Object.defineProperty overhead. */
-function materializeForVisitor(
-  nodeType: number,
-  nodeId: number,
-  reader: HastReader,
-  dataMap: DataMap,
-): HastNode {
-  switch (nodeType) {
-    case HAST_ELEMENT:
-      return new LazyElementNode(nodeId, reader, dataMap) as unknown as HastNode;
-    case HAST_TEXT:
-    case HAST_COMMENT:
-    case HAST_RAW:
-    case HAST_MDX_FLOW_EXPRESSION:
-    case HAST_MDX_TEXT_EXPRESSION:
-    case HAST_MDX_ESM:
-      return new LazyTextNode(
-        TEXT_TYPE_NAMES[nodeType]!,
-        nodeId,
-        reader,
-        dataMap,
-      ) as unknown as HastNode;
-    default:
-      // For root, mdxJsx*, doctype — fall back to full materializer
-      return materializeHastNode(reader, nodeId, dataMap);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,13 +220,8 @@ function isFilteredVisitor(v: unknown): v is HastFilteredVisitor {
 /** Node types that use filtered visitors (have tag/component names). */
 const FILTERED_METHODS = new Set(["element", "mdxJsxFlowElement", "mdxJsxTextElement"]);
 
-/**
- * Resolve subscriptions from a plugin instance.
- * Returns null if the plugin uses transformRoot (needs full buffer path).
- */
-export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubscription[] | null {
-  if (plugin.transformRoot) return null;
-
+/** Resolve subscriptions from a plugin instance. */
+export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubscription[] {
   const subs: ResolvedSubscription[] = [];
 
   for (const [methodName, nodeType] of Object.entries(METHOD_TO_TYPE)) {
@@ -399,7 +243,7 @@ export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubsc
     }
   }
 
-  return subs.length > 0 ? subs : null;
+  return subs;
 }
 
 /** Reverse map: method name → node type number */
@@ -418,27 +262,15 @@ const METHOD_TO_TYPE: Record<string, number> = {
 
 /**
  * Selective walk path: Rust walks the tree, only sends matched nodes to JS.
- * Used when all plugin subscriptions have filters.
  */
 const textDecoder = new TextDecoder("utf-8");
 
-/** Read a matched element node from the binary data section into a HastNode. */
-function readElementFromBinary(
+/** Decode properties from the walk buffer at the given position. */
+function decodeProperties(
   view: DataView,
   buf: Uint8Array,
-  offset: number,
-  nodeId: number,
-  resolver?: LazyChildResolver,
-): HastNode {
-  let pos = offset;
-
-  // tagName
-  const tagLen = view.getUint16(pos, true);
-  pos += 2;
-  const tagName = textDecoder.decode(buf.subarray(pos, pos + tagLen));
-  pos += tagLen;
-
-  // properties
+  pos: number,
+): Record<string, string | boolean | string[]> {
   const propCount = view.getUint16(pos, true);
   pos += 2;
   const properties: Record<string, string | boolean | string[]> = {};
@@ -461,44 +293,103 @@ function readElementFromBinary(
         properties[name] = true;
         break;
       case 2: // PROP_BOOL_FALSE
-        // skip false booleans (matches HastReader behavior)
         break;
       case 3: // PROP_SPACE_SEP
         properties[name] = valStr.split(" ").filter((s) => s.length > 0);
         break;
     }
   }
+  return properties;
+}
 
-  // Child IDs
+/** Read a matched element node from the binary data section into a HastNode.
+ *  Only tagName is decoded eagerly; properties, children, and data are lazy. */
+function readElementFromBinary(
+  view: DataView,
+  buf: Uint8Array,
+  offset: number,
+  nodeId: number,
+  resolver: LazyChildResolver,
+): HastNode {
+  let pos = offset;
+
+  // Eager: tagName (almost always accessed by visitors)
+  const tagLen = view.getUint16(pos, true);
+  pos += 2;
+  const tagName = textDecoder.decode(buf.subarray(pos, pos + tagLen));
+  pos += tagLen;
+
+  // Pre-scan: find section byte offsets without decoding strings
+  const propsPos = pos;
+  const propCount = view.getUint16(pos, true);
+  pos += 2;
+  for (let i = 0; i < propCount; i++) {
+    const nLen = view.getUint16(pos, true);
+    pos += 2 + nLen + 1; // name + kind byte
+    const vLen = view.getUint16(pos, true);
+    pos += 2 + vLen; // value
+  }
+
   const childCount = view.getUint16(pos, true);
   pos += 2;
-  const childIds: number[] = [];
-  for (let i = 0; i < childCount; i++) {
-    childIds.push(view.getUint32(pos, true));
-    pos += 4;
-  }
+  const childIdsPos = pos;
+  pos += childCount * 4;
 
-  const node = { type: "element" as const, tagName, properties } as unknown as HastNode &
+  const nodeDataLen = view.getUint32(pos, true);
+  pos += 4;
+  const nodeDataPos = nodeDataLen > 0 ? pos : -1;
+
+  // Build node with lazy getters
+  const node = { type: "element" as const, tagName } as unknown as HastNode &
     Record<string, unknown>;
-  if (resolver) {
-    makeLazyChildren(node, childIds, resolver);
-  } else {
-    (node as Record<string, unknown>).children = childIds.map((id) => ({
-      _nodeId: id,
-      type: "__child_ref__",
-    }));
-  }
+
   Object.defineProperty(node, "_nodeId", {
     value: nodeId,
     writable: false,
     configurable: true,
     enumerable: false,
   });
+
+  // Lazy: properties
+  Object.defineProperty(node, "properties", {
+    get() {
+      const val = decodeProperties(view, buf, propsPos);
+      Object.defineProperty(this, "properties", { value: val, writable: true, enumerable: true, configurable: true });
+      return val;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  // Lazy: children
+  const ids: number[] = [];
+  for (let i = 0; i < childCount; i++) ids.push(view.getUint32(childIdsPos + i * 4, true));
+  makeLazyChildren(node, ids, resolver);
+
+  // Lazy: data
+  if (nodeDataPos >= 0) {
+    Object.defineProperty(node, "data", {
+      get() {
+        const val = JSON.parse(textDecoder.decode(buf.subarray(nodeDataPos, nodeDataPos + nodeDataLen))) as Record<string, unknown>;
+        Object.defineProperty(this, "data", { value: val, writable: true, enumerable: true, configurable: true });
+        return val;
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
+
   return node;
 }
 
-/** Read a text/comment/raw node from the binary data section. */
-const TEXT_NODE_TYPES: Record<number, string> = { 2: "text", 3: "comment", 5: "raw" };
+/** Read a text/comment/raw/expression node from the binary data section. */
+const TEXT_NODE_TYPES: Record<number, string> = {
+  2: "text",
+  3: "comment",
+  5: "raw",
+  [HAST_MDX_FLOW_EXPRESSION]: "mdxFlowExpression",
+  [HAST_MDX_TEXT_EXPRESSION]: "mdxTextExpression",
+};
 
 function readTextFromBinary(
   view: DataView,
@@ -516,6 +407,9 @@ function readTextFromBinary(
     configurable: true,
     enumerable: false,
   });
+  if (nodeType === HAST_MDX_FLOW_EXPRESSION || nodeType === HAST_MDX_TEXT_EXPRESSION) {
+    attachParseExpression(node);
+  }
   return node;
 }
 
@@ -526,7 +420,7 @@ function readMdxJsxFromBinary(
   offset: number,
   nodeId: number,
   nodeType: number,
-  resolver?: LazyChildResolver,
+  resolver: LazyChildResolver,
 ): HastNode {
   let pos = offset;
 
@@ -584,14 +478,7 @@ function readMdxJsxFromBinary(
   const typeName = nodeType === HAST_MDX_JSX_ELEMENT ? "mdxJsxFlowElement" : "mdxJsxTextElement";
   const node = { type: typeName, name, attributes } as unknown as HastNode &
     Record<string, unknown>;
-  if (resolver) {
-    makeLazyChildren(node, childIds, resolver);
-  } else {
-    (node as Record<string, unknown>).children = childIds.map((id) => ({
-      _nodeId: id,
-      type: "__child_ref__",
-    }));
-  }
+  makeLazyChildren(node, childIds, resolver);
   Object.defineProperty(node, "_nodeId", {
     value: nodeId,
     writable: false,
@@ -607,11 +494,17 @@ function readMatchedNode(
   offset: number,
   nodeId: number,
   nodeType: number,
-  resolver?: LazyChildResolver,
+  resolver: LazyChildResolver,
 ): HastNode {
   if (nodeType === HAST_ELEMENT) {
     return readElementFromBinary(view, buf, offset, nodeId, resolver);
-  } else if (nodeType === HAST_TEXT || nodeType === HAST_COMMENT || nodeType === HAST_RAW) {
+  } else if (
+    nodeType === HAST_TEXT ||
+    nodeType === HAST_COMMENT ||
+    nodeType === HAST_RAW ||
+    nodeType === HAST_MDX_FLOW_EXPRESSION ||
+    nodeType === HAST_MDX_TEXT_EXPRESSION
+  ) {
     return readTextFromBinary(view, buf, offset, nodeId, nodeType);
   } else if (nodeType === HAST_MDX_JSX_ELEMENT || nodeType === HAST_MDX_JSX_TEXT_ELEMENT) {
     return readMdxJsxFromBinary(view, buf, offset, nodeId, nodeType, resolver);
@@ -631,23 +524,36 @@ function readMatchedNode(
 class LazyChildResolver {
   #handle: HastHandle;
   #reader: HastReader | null = null;
-  #dataMap: DataMap | null = null;
 
   constructor(handle: HastHandle) {
     this.#handle = handle;
   }
 
-  #ensure(): { reader: HastReader; dataMap: DataMap } {
+  #ensure(): HastReader {
     if (!this.#reader) {
       this.#reader = new HastReader(serializeHandle(this.#handle));
-      this.#dataMap = new DataMap();
     }
-    return { reader: this.#reader, dataMap: this.#dataMap! };
+    return this.#reader;
   }
 
   materializeChildren(childIds: number[]): HastNode[] {
-    const { reader, dataMap } = this.#ensure();
-    return childIds.map((id) => materializeHastNode(reader, id, dataMap));
+    const reader = this.#ensure();
+    const handle = this.#handle;
+    return childIds.map((id) => {
+      const node = materializeHastNode(reader, id);
+      // Override data with a lazy getter backed by the Rust arena's node_data.
+      Object.defineProperty(node, "data", {
+        get() {
+          const json = napiGetNodeData(handle, id);
+          const val = json ? (JSON.parse(json) as Record<string, unknown>) : null;
+          Object.defineProperty(this, "data", { value: val, writable: true, enumerable: true, configurable: true });
+          return val;
+        },
+        configurable: true,
+        enumerable: true,
+      });
+      return node;
+    });
   }
 }
 
@@ -673,16 +579,37 @@ function makeLazyChildren(
   });
 }
 
-/** Dispatch matched nodes from a binary match buffer to visitor functions. */
+/** Handle a visitor result (sync). Returns true if it was a Promise (deferred). */
+function handleVisitResult(
+  result: HastNode | void | Promise<HastNode | void>,
+  nodeId: number,
+  returnBuffer: CommandBuffer,
+  deferred: { nodeId: number; promise: Promise<HastNode | void> }[] | null,
+): { nodeId: number; promise: Promise<HastNode | void> }[] | null {
+  if (result == null) return deferred;
+  if (result instanceof Promise) {
+    const list = deferred ?? [];
+    list.push({ nodeId, promise: result });
+    return list;
+  }
+  returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result as HastNode)));
+  return deferred;
+}
+
+/**
+ * Dispatch matched nodes from a binary match buffer to visitor functions.
+ * Returns null if all sync, or an array of deferred promises if any visitor was async.
+ */
 function dispatchMatches(
   matchBuf: Uint8Array,
   subs: ResolvedSubscription[],
   ctx: HastVisitorContextImpl,
   returnBuffer: CommandBuffer,
-  resolver?: LazyChildResolver,
-): void {
+  resolver: LazyChildResolver,
+): { nodeId: number; promise: Promise<HastNode | void> }[] | null {
   const matchView = new DataView(matchBuf.buffer, matchBuf.byteOffset, matchBuf.byteLength);
   const matchCount = matchView.getUint32(0, true);
+  let deferred: { nodeId: number; promise: Promise<HastNode | void> }[] | null = null;
 
   for (let i = 0; i < matchCount; i++) {
     const indexBase = 4 + i * 12;
@@ -693,10 +620,10 @@ function dispatchMatches(
     const sub = subs[subIndex]!;
     const node = readMatchedNode(matchView, matchBuf, dataOffset, nodeId, sub.nodeType, resolver);
     const result = sub.visitFn(node, ctx);
-    if (result != null) {
-      returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result)));
-    }
+    deferred = handleVisitResult(result, nodeId, returnBuffer, deferred);
   }
+
+  return deferred;
 }
 
 /** Merge return-value + context command buffers and release internals. */
@@ -724,105 +651,50 @@ function mergeAndReset(
 }
 
 // ---------------------------------------------------------------------------
-// Handle-based visitor (primary path)
+// Handle-based visitor
 // ---------------------------------------------------------------------------
 
 /**
  * Walk a handle's arena in Rust, dispatch matched nodes to JS visitor functions,
  * and apply mutations back to the handle. No arena buffers cross NAPI.
+ *
+ * Returns void if all visitors are sync, or a Promise if any visitor is async.
  */
 export function visitHastHandle(
   handle: HastHandle,
   plugin: HastVisitorInstance,
   subs: ResolvedSubscription[],
-): void {
-  const ctx = new HastVisitorContextImpl();
+  source: string,
+  filename: string,
+): void | Promise<void> {
+  const ctx = new HastVisitorContextImpl(handle, source, filename);
   const returnBuffer = new CommandBuffer();
-
-  plugin.before?.(ctx);
-
   const resolver = new LazyChildResolver(handle);
   const rustSubs = subs.map((s) => ({ nodeType: s.nodeType, tagFilter: s.tagFilter }));
-  dispatchMatches(walkHandle(handle, rustSubs), subs, ctx, returnBuffer, resolver);
+  const deferred = dispatchMatches(walkHandle(handle, rustSubs), subs, ctx, returnBuffer, resolver);
 
-  plugin.after?.(ctx);
+  if (deferred) {
+    return Promise.all(deferred.map((d) => d.promise.then((result) => ({ nodeId: d.nodeId, result }))))
+      .then((results) => {
+        for (const { nodeId, result } of results) {
+          if (result != null) {
+            returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result)));
+          }
+        }
+        applyMutations(handle, returnBuffer, ctx);
+      });
+  }
 
+  applyMutations(handle, returnBuffer, ctx);
+}
+
+function applyMutations(
+  handle: HastHandle,
+  returnBuffer: CommandBuffer,
+  ctx: HastVisitorContextImpl,
+): void {
   const { merged, hasMutations } = mergeAndReset(returnBuffer, ctx);
   if (hasMutations) {
     applyCommandsToHandle(handle, merged);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Buffer-based visitor (fallback for transformRoot / bare function plugins)
-// ---------------------------------------------------------------------------
-
-// Map from node_type number to visitor method name
-const TYPE_TO_METHOD: Record<number, keyof HastVisitorInstance> = {
-  [HAST_ROOT]: "transformRoot",
-  [HAST_ELEMENT]: "element",
-  [HAST_TEXT]: "text",
-  [HAST_COMMENT]: "comment",
-  [HAST_RAW]: "raw",
-  [HAST_MDX_JSX_ELEMENT]: "mdxJsxFlowElement",
-  [HAST_MDX_JSX_TEXT_ELEMENT]: "mdxJsxTextElement",
-  [HAST_MDX_FLOW_EXPRESSION]: "mdxFlowExpression",
-  [HAST_MDX_TEXT_EXPRESSION]: "mdxTextExpression",
-  [HAST_MDX_ESM]: "mdxjsEsm",
-};
-
-/**
- * Buffer fallback: walk a HAST binary buffer in JS and dispatch to visitor methods.
- * Used for transformRoot plugins and bare-function plugins that may return replacement nodes.
- */
-export function visitHast(
-  reader: HastReader,
-  plugin: HastVisitorInstance,
-  dataMap: DataMap,
-): HastVisitResult {
-  const ctx = new HastVisitorContextImpl();
-  const returnBuffer = new CommandBuffer();
-
-  plugin.before?.(ctx);
-
-  if (typeof plugin.transformRoot === "function") {
-    const root = materializeHastNode(reader, 0, dataMap) as Root;
-    const result = plugin.transformRoot(root, ctx);
-    if (result != null) {
-      returnBuffer.replaceRawJson(0, JSON.stringify(markHast(result)));
-    }
-  } else {
-    const stack: number[] = [0];
-    while (stack.length > 0) {
-      const nodeId = stack.pop()!;
-      const nodeType = reader.getNodeType(nodeId);
-      const methodName = TYPE_TO_METHOD[nodeType];
-
-      if (methodName && methodName !== "transformRoot") {
-        const entry = plugin[methodName];
-        if (entry !== undefined) {
-          let visitFn: ((node: HastNode, ctx: HastVisitorContext) => HastNode | void) | undefined;
-          if (typeof entry === "function") {
-            visitFn = entry as (node: HastNode, ctx: HastVisitorContext) => HastNode | void;
-          } else if (isFilteredVisitor(entry)) {
-            visitFn = entry.visit as (node: HastNode, ctx: HastVisitorContext) => HastNode | void;
-          }
-          if (visitFn) {
-            const node = materializeForVisitor(nodeType, nodeId, reader, dataMap);
-            const result = visitFn.call(plugin, node, ctx);
-            if (result != null) {
-              returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result)));
-            }
-          }
-        }
-      }
-
-      reader.pushChildIds(nodeId, stack);
-    }
-  }
-
-  plugin.after?.(ctx);
-
-  const { merged, hasMutations } = mergeAndReset(returnBuffer, ctx);
-  return { commandBuffer: merged, diagnostics: ctx.getDiagnostics(), hasMutations };
 }

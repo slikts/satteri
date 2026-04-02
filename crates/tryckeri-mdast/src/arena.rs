@@ -17,6 +17,8 @@ pub struct MdastArena {
     pub(crate) source: String,
     /// Per-node `data` blobs (JSON bytes), set by JS plugins.
     pub(crate) node_data: HashMap<u32, Vec<u8>>,
+    /// Whether this arena was parsed in MDX mode.
+    pub mdx: bool,
 }
 
 impl MdastArena {
@@ -27,6 +29,7 @@ impl MdastArena {
             type_data: Vec::new(),
             source,
             node_data: HashMap::new(),
+            mdx: false,
         }
     }
 

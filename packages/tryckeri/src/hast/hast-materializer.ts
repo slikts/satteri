@@ -13,7 +13,6 @@ import {
   HAST_MDX_ESM,
   type HastProperty,
 } from "./hast-reader.js";
-import type { DataMap } from "../data-map.js";
 import type { HastNode } from "../types.js";
 import { lazyProp, lazyGroup } from "../lazy-props.js";
 
@@ -33,7 +32,6 @@ function propsToRecord(props: HastProperty[]): Record<string, string | boolean |
 export function materializeHastNode(
   reader: HastReader,
   nodeId: number,
-  dataMap: DataMap,
 ): HastNode {
   const nodeType = reader.getNodeType(nodeId);
 
@@ -87,25 +85,13 @@ export function materializeHastNode(
     enumerable: false,
   });
 
-  // data: backed by DataMap
-  Object.defineProperty(node, "data", {
-    get() {
-      return dataMap.get(nodeId);
-    },
-    set(value: Record<string, unknown>) {
-      dataMap.set(nodeId, value);
-    },
-    configurable: true,
-    enumerable: true,
-  });
-
   switch (nodeType) {
     case HAST_ROOT:
       // children: lazy getter
       Object.defineProperty(node, "children", {
         get(this: HastNode) {
           const childIds = reader.getChildIds(nodeId);
-          const children = childIds.map((id) => materializeHastNode(reader, id, dataMap));
+          const children = childIds.map((id) => materializeHastNode(reader, id));
           Object.defineProperty(this, "children", {
             value: children,
             writable: true,
@@ -129,7 +115,7 @@ export function materializeHastNode(
       Object.defineProperty(node, "children", {
         get(this: HastNode) {
           const childIds = reader.getChildIds(nodeId);
-          const children = childIds.map((id) => materializeHastNode(reader, id, dataMap));
+          const children = childIds.map((id) => materializeHastNode(reader, id));
           Object.defineProperty(this, "children", {
             value: children,
             writable: true,
@@ -162,7 +148,7 @@ export function materializeHastNode(
       Object.defineProperty(node, "children", {
         get(this: HastNode) {
           const childIds = reader.getChildIds(nodeId);
-          const children = childIds.map((id) => materializeHastNode(reader, id, dataMap));
+          const children = childIds.map((id) => materializeHastNode(reader, id));
           Object.defineProperty(this, "children", {
             value: children,
             writable: true,
@@ -191,6 +177,6 @@ export function materializeHastNode(
 /**
  * Materialize the full HAST tree from root (nodeId=0).
  */
-export function materializeHastTree(reader: HastReader, dataMap: DataMap): HastNode {
-  return materializeHastNode(reader, 0, dataMap);
+export function materializeHastTree(reader: HastReader): HastNode {
+  return materializeHastNode(reader, 0);
 }

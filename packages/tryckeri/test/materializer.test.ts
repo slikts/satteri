@@ -1,6 +1,5 @@
 import { test, expect, describe } from "vitest";
 import { MdastReader } from "../src/mdast/mdast-reader.js";
-import { DataMap } from "../src/data-map.js";
 import { materializeTree } from "../src/mdast/mdast-materializer.js";
 import type { MdastNodeInternal } from "../src/types.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
@@ -9,27 +8,26 @@ import { createMdxMdastHandle, serializeMdastHandle } from "../index.js";
 function setup() {
   const buf = buildHelloWorldBuffer();
   const reader = new MdastReader(buf);
-  const dataMap = new DataMap();
-  return { reader, dataMap };
+  return { reader };
 }
 
 test('materializeTree returns a root node with type === "root"', () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   expect(root.type).toBe("root");
 });
 
 test("root node children is a lazy getter initially", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   const desc = Object.getOwnPropertyDescriptor(root, "children");
   expect(typeof desc?.get === "function").toBe(true);
   expect("value" in (desc ?? {})).toBe(false);
 });
 
 test("accessing root.children returns 2 children (heading, paragraph)", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   if (root.type !== "root") throw new Error("expected root");
   const children = root.children;
   expect(children.length).toBe(2);
@@ -38,8 +36,8 @@ test("accessing root.children returns 2 children (heading, paragraph)", () => {
 });
 
 test("heading has depth === 1", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   if (root.type !== "root") throw new Error("expected root");
   const heading = root.children[0]!;
   if (heading.type !== "heading") throw new Error("expected heading");
@@ -47,8 +45,8 @@ test("heading has depth === 1", () => {
 });
 
 test('text child of heading has value === "Hello"', () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   if (root.type !== "root") throw new Error("expected root");
   const heading = root.children[0]!;
   if (heading.type !== "heading") throw new Error("expected heading");
@@ -58,8 +56,8 @@ test('text child of heading has value === "Hello"', () => {
 });
 
 test('text child of paragraph has value === "World"', () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   if (root.type !== "root") throw new Error("expected root");
   const para = root.children[1]!;
   if (para.type !== "paragraph") throw new Error("expected paragraph");
@@ -69,41 +67,27 @@ test('text child of paragraph has value === "World"', () => {
 });
 
 test("position data is correct: root.position.start.line === 1", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   expect(root.position!.start.line).toBe(1);
 });
 
 test("_nodeId is non-enumerable", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   expect(Object.keys(root)).not.toContain("_nodeId");
   expect((root as MdastNodeInternal)._nodeId).toBe(0);
 });
 
-test("data getter returns null when no data is set", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
-  expect(root.data).toBeNull();
-});
-
-test("setting node.data stores in dataMap", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
-  root.data = { id: "hello" };
-  expect(dataMap.has(0)).toBe(true);
-});
-
-test("reading node.data after setting returns the value", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
-  root.data = { id: "hello" };
-  expect(root.data).toEqual({ id: "hello" });
+test("data is undefined when no data is set", () => {
+  const { reader } = setup();
+  const root = materializeTree(reader);
+  expect(root.data).toBeUndefined();
 });
 
 test("children are lazily evaluated (getter replaced by plain array after access)", () => {
-  const { reader, dataMap } = setup();
-  const root = materializeTree(reader, dataMap);
+  const { reader } = setup();
+  const root = materializeTree(reader);
   if (root.type !== "root") throw new Error("expected root");
 
   const beforeDesc = Object.getOwnPropertyDescriptor(root, "children");
@@ -124,8 +108,7 @@ test("children are lazily evaluated (getter replaced by plain array after access
 function mdxSetup(source: string) {
   const buf = serializeMdastHandle(createMdxMdastHandle(source)) as Uint8Array;
   const reader = new MdastReader(buf);
-  const dataMap = new DataMap();
-  return { reader, dataMap, tree: materializeTree(reader, dataMap) };
+  return { reader, tree: materializeTree(reader) };
 }
 
 function findNode(node: ReturnType<typeof materializeTree>, type: string): any {

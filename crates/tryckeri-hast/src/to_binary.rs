@@ -19,10 +19,18 @@ pub fn mdast_to_hast_buffer(mdast_buf: &[u8]) -> Result<Vec<u8>, BufferError> {
 
 /// Convert an MDAST arena directly to a HAST buffer (skips deserialize round-trip).
 pub fn mdast_arena_to_hast_buffer(source: &dyn ReadMdast) -> Vec<u8> {
+    mdast_arena_to_hast_arena(source).to_raw_buffer()
+}
+
+/// Convert an MDAST arena directly to a HAST arena.
+///
+/// Unlike `mdast_arena_to_hast_buffer`, this preserves `node_data` (e.g. code
+/// fence `lang`/`meta` stored on `<code>` element data).
+pub fn mdast_arena_to_hast_arena(source: &dyn ReadMdast) -> MdastArena {
     let mut builder = MdastBuilder::new(String::new());
     let defs = collect_definitions(source);
     convert_node(0, source, &mut builder, &defs);
-    builder.finish().to_raw_buffer()
+    builder.finish()
 }
 
 struct Definition {
@@ -82,15 +90,16 @@ fn build_props(builder: &mut MdastBuilder, specs: &[(&str, u8, StringRef)]) -> V
         .collect()
 }
 
-fn open_element(builder: &mut MdastBuilder, tag: &str) {
-    builder.open_node_raw(HAST_ELEMENT);
+fn open_element(builder: &mut MdastBuilder, tag: &str) -> u32 {
+    let id = builder.open_node_raw(HAST_ELEMENT);
     let tag_ref = builder.alloc_string(tag);
     let encoded = crate::codec::encode_element_data(tag_ref, &[]);
     builder.set_data_current(&encoded);
+    id
 }
 
-fn open_element_with_props(builder: &mut MdastBuilder, tag: &str, props: &[PropData]) {
-    builder.open_node_raw(HAST_ELEMENT);
+fn open_element_with_props(builder: &mut MdastBuilder, tag: &str, props: &[PropData]) -> u32 {
+    let id = builder.open_node_raw(HAST_ELEMENT);
     let tag_ref = builder.alloc_string(tag);
     let prop_tuples: Vec<(StringRef, u8, StringRef)> = props
         .iter()
@@ -98,6 +107,7 @@ fn open_element_with_props(builder: &mut MdastBuilder, tag: &str, props: &[PropD
         .collect();
     let encoded = crate::codec::encode_element_data(tag_ref, &prop_tuples);
     builder.set_data_current(&encoded);
+    id
 }
 
 fn add_void_element(builder: &mut MdastBuilder, tag: &str) {
@@ -134,6 +144,39 @@ fn add_raw_node(builder: &mut MdastBuilder, html: &str) {
     builder
         .arena_mut()
         .set_type_data(leaf_id, &encode_text_data(html_ref));
+}
+
+/// Encode lang and meta as a JSON object for the code element's node_data.
+fn encode_code_node_data(lang: &str, meta: &str) -> Vec<u8> {
+    // Manual JSON construction — avoids serde_json dep.
+    // Both lang and meta come from markdown source, so we need to escape
+    // backslashes, double quotes, and control characters.
+    fn json_escape(s: &str, out: &mut Vec<u8>) {
+        for ch in s.bytes() {
+            match ch {
+                b'"' => out.extend_from_slice(b"\\\""),
+                b'\\' => out.extend_from_slice(b"\\\\"),
+                b'\n' => out.extend_from_slice(b"\\n"),
+                b'\r' => out.extend_from_slice(b"\\r"),
+                b'\t' => out.extend_from_slice(b"\\t"),
+                c if c < 0x20 => {
+                    // Other control characters: \u00XX
+                    out.extend_from_slice(b"\\u00");
+                    out.push(b"0123456789abcdef"[(c >> 4) as usize]);
+                    out.push(b"0123456789abcdef"[(c & 0xf) as usize]);
+                }
+                _ => out.push(ch),
+            }
+        }
+    }
+
+    let mut buf = Vec::with_capacity(32 + lang.len() + meta.len());
+    buf.extend_from_slice(b"{\"lang\":\"");
+    json_escape(lang, &mut buf);
+    buf.extend_from_slice(b"\",\"meta\":\"");
+    json_escape(meta, &mut buf);
+    buf.extend_from_slice(b"\"}");
+    buf
 }
 
 fn copy_position(node_id: u32, view: &dyn ReadMdast, builder: &mut MdastBuilder) {
@@ -267,15 +310,24 @@ fn convert_node(
             let value = view.get_str(code_data.value);
 
             open_element(builder, "pre");
-            if code_data.lang.len > 0 {
+            let code_id = if code_data.lang.len > 0 {
                 let lang = view.get_str(code_data.lang);
                 let class_val = format!("language-{}", lang);
                 let class_ref = builder.alloc_string(&class_val);
                 let props = build_props(builder, &[("class", PROP_SPACE_SEP, class_ref)]);
-                open_element_with_props(builder, "code", &props);
+                open_element_with_props(builder, "code", &props)
             } else {
-                open_element(builder, "code");
+                open_element(builder, "code")
+            };
+
+            // Attach lang/meta to code element's data for easy access by plugins
+            let lang = view.get_str(code_data.lang);
+            let meta = view.get_str(code_data.meta);
+            if !lang.is_empty() || !meta.is_empty() {
+                let json = encode_code_node_data(lang, meta);
+                builder.arena_mut().set_node_data(code_id, json);
             }
+
             add_text_node(builder, value);
             builder.close_node(); // code
             builder.close_node(); // pre

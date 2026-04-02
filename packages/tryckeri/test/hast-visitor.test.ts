@@ -1,225 +1,133 @@
 import { describe, test, expect } from "vitest";
 import { HastReader } from "../src/hast/hast-reader.js";
-import { DataMap } from "../src/data-map.js";
-import { visitHast } from "../src/hast/hast-visitor.js";
+import {
+  visitHastHandle,
+  resolveSubscriptions,
+} from "../src/hast/hast-visitor.js";
 import { materializeHastTree } from "../src/hast/hast-materializer.js";
 import {
   createHastHandle,
   createMdxHastHandle,
   serializeHandle,
-  applyCommandsToHandle,
   renderHandle,
-  dropHandle,
+  getHandleSource,
 } from "../index.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 
-// Parse a simple markdown document to a HAST binary buffer for testing.
-// "# Hello\n\nWorld" produces: root > [h1 > text("Hello"), p > text("World")]
 function setup(source = "# Hello\n\nWorld") {
   const handle = createHastHandle(source);
-  const uint8 = serializeHandle(handle);
-  const reader = new HastReader(uint8);
-  const dataMap = new DataMap();
-  return { reader, dataMap, handle };
-}
-
-/** Apply visitor mutations to handle and return HTML */
-function applyAndRender(
-  handle: ReturnType<typeof createHastHandle>,
-  commandBuffer: Uint8Array,
-): string {
-  applyCommandsToHandle(handle, commandBuffer);
-  return renderHandle(handle);
+  const src = getHandleSource(handle);
+  return { handle, source: src };
 }
 
 // ---------------------------------------------------------------------------
-// Basic visitor behaviour
+// Basic visitor behaviour (handle-based)
 // ---------------------------------------------------------------------------
 
-describe("visitHast — basic behaviour", () => {
-  test("visitor with no subscriptions produces no mutations, no diagnostics", () => {
-    const { reader, dataMap } = setup();
-    const result = visitHast(reader, {}, dataMap);
-    expect(result.commandBuffer.length).toBe(0);
-    expect(result.diagnostics.length).toBe(0);
-    expect(result.hasMutations).toBe(false);
+describe("visitHastHandle — basic behaviour", () => {
+  test("visitor with no subscriptions produces no mutations", () => {
+    const { handle, source } = setup();
+    const plugin = {};
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    // No crash, no mutations — handle still renders
+    expect(renderHandle(handle)).toContain("Hello");
   });
 
   test("element() callback fires for each element node", () => {
-    const { reader, dataMap } = setup();
+    const { handle, source } = setup();
     const tags: string[] = [];
-    visitHast(
-      reader,
-      {
-        element: {
-          filter: [],
-          visit(node: HastNode) {
-            tags.push(node.type === "element" ? node.tagName : "?");
-          },
+    const plugin = {
+      element: {
+        filter: [] as string[],
+        visit(node: HastNode) {
+          if (node.type === "element") tags.push(node.tagName);
         },
       },
-      dataMap,
-    );
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
     expect(tags).toContain("h1");
     expect(tags).toContain("p");
   });
 
   test("text() callback fires for each text node", () => {
-    const { reader, dataMap } = setup();
+    const { handle, source } = setup();
     const texts: string[] = [];
-    visitHast(
-      reader,
-      {
-        text(node: HastNode) {
-          texts.push(node.type === "text" ? node.value : "");
-        },
+    const plugin = {
+      text(node: HastNode) {
+        if (node.type === "text") texts.push(node.value);
       },
-      dataMap,
-    );
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
     expect(texts).toContain("Hello");
     expect(texts).toContain("World");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Lifecycle hooks
+// Mutations (end-to-end via handle)
 // ---------------------------------------------------------------------------
 
-describe("visitHast — lifecycle hooks", () => {
-  test("before() fires before visitor methods", () => {
-    const { reader, dataMap } = setup();
-    const order: string[] = [];
-    visitHast(
-      reader,
-      {
-        before() {
-          order.push("before");
-        },
-        element: {
-          filter: [],
-          visit() {
-            order.push("element");
-          },
-        },
-      },
-      dataMap,
-    );
-    expect(order[0]).toBe("before");
-    expect(order).toContain("element");
-  });
-
-  test("after() fires after visitor methods", () => {
-    const { reader, dataMap } = setup();
-    const order: string[] = [];
-    visitHast(
-      reader,
-      {
-        element: {
-          filter: [],
-          visit() {
-            order.push("element");
-          },
-        },
-        after() {
-          order.push("after");
-        },
-      },
-      dataMap,
-    );
-    expect(order[order.length - 1]).toBe("after");
-  });
-
-  test("transformRoot() receives the full materialized root", () => {
-    const { reader, dataMap } = setup();
-    let rootType = "";
-    visitHast(
-      reader,
-      {
-        transformRoot(root: HastNode) {
-          rootType = root.type;
-        },
-      },
-      dataMap,
-    );
-    expect(rootType).toBe("root");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Mutations (end-to-end: visit → applyMutations → HTML)
-// ---------------------------------------------------------------------------
-
-describe("visitHast — mutations", () => {
+describe("visitHastHandle — mutations", () => {
   test("returning a node from element() creates a replace mutation", () => {
-    const { reader, dataMap, handle } = setup();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode) {
-            if (node.type === "element" && node.tagName === "h1") {
-              return {
-                type: "element" as const,
-                tagName: "h2",
-                properties: {},
-                children: node.children ?? [],
-                data: undefined,
-                _nodeId: -1,
-              };
-            }
-          },
+    const { handle, source } = setup();
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode) {
+          if (node.type === "element" && node.tagName === "h1") {
+            return {
+              type: "element" as const,
+              tagName: "h2",
+              properties: {},
+              children: node.children ?? [],
+              data: undefined,
+              _nodeId: -1,
+            };
+          }
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    const html = applyAndRender(handle, result.commandBuffer);
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    const html = renderHandle(handle);
     expect(html).toContain("<h2>");
     expect(html).not.toContain("<h1>");
   });
 
   test("context.removeNode() removes a node", () => {
-    const { reader, dataMap, handle } = setup();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "h1") {
-              ctx.removeNode(node);
-            }
-          },
+    const { handle, source } = setup();
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.removeNode(node);
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    const html = applyAndRender(handle, result.commandBuffer);
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    const html = renderHandle(handle);
     expect(html).not.toContain("<h1>");
     expect(html).toContain("World");
   });
 
   test("context.setProperty() modifies element attributes", () => {
-    const { reader, dataMap, handle } = setup();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "h1") {
-              ctx.setProperty(node, "id", "title");
-            }
-          },
+    const { handle, source } = setup();
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.setProperty(node, "id", "title");
         },
       },
-      dataMap,
-    );
-    expect(result.hasMutations).toBe(true);
-    const html = applyAndRender(handle, result.commandBuffer);
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    const html = renderHandle(handle);
     expect(html).toContain('id="title"');
   });
 });
@@ -228,37 +136,123 @@ describe("visitHast — mutations", () => {
 // Diagnostics
 // ---------------------------------------------------------------------------
 
-describe("visitHast — diagnostics", () => {
+describe("visitHastHandle — diagnostics", () => {
   test("context.report() collects diagnostics", () => {
-    const { reader, dataMap } = setup();
-    const result = visitHast(
-      reader,
-      {
-        element: {
-          filter: ["h1"],
-          visit(node: HastNode, ctx: HastVisitorContext) {
-            if (node.type === "element" && node.tagName === "h1") {
-              ctx.report({ message: "heading found", node, severity: "info" });
-            }
-          },
+    const { handle, source } = setup();
+    let diags: { message: string; severity: string }[] = [];
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          ctx.report({ message: "heading found", node, severity: "info" });
+          diags = ctx.getDiagnostics();
         },
       },
-      dataMap,
-    );
-    expect(result.diagnostics.length).toBe(1);
-    expect(result.diagnostics[0]!.message).toBe("heading found");
-    expect(result.diagnostics[0]!.severity).toBe("info");
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(diags.length).toBe(1);
+    expect(diags[0]!.message).toBe("heading found");
+    expect(diags[0]!.severity).toBe("info");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Materialize
+// Context properties
+// ---------------------------------------------------------------------------
+
+describe("visitHastHandle — context", () => {
+  test("ctx.source and ctx.filename are available", () => {
+    const handle = createHastHandle("# Hello\n\nWorld");
+    // Pass the original source explicitly (the real pipeline does this)
+    const originalSource = "# Hello\n\nWorld";
+    let capturedSource = "";
+    let capturedFilename = "";
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(_node: HastNode, ctx: HastVisitorContext) {
+          capturedSource = ctx.source;
+          capturedFilename = ctx.filename;
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, originalSource, "test.md");
+    expect(capturedSource).toBe("# Hello\n\nWorld");
+    expect(capturedFilename).toBe("test.md");
+  });
+
+  test("ctx.textContent() returns concatenated text", () => {
+    const { handle, source } = setup();
+    let text = "";
+    const plugin = {
+      element: {
+        filter: ["h1"],
+        visit(node: HastNode, ctx: HastVisitorContext) {
+          text = ctx.textContent(node);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(text).toBe("Hello");
+  });
+
+  test("code fence data.lang and data.meta are available on code elements", () => {
+    const handle = createHastHandle('```typescript {highlight=[1]}\nconst x = 1;\n```');
+    const source = "```typescript {highlight=[1]}\nconst x = 1;\n```";
+    let lang: string | undefined;
+    let meta: string | undefined;
+    const plugin = {
+      element: {
+        filter: ["code"],
+        visit(node: HastNode) {
+          if (node.type === "element") {
+            lang = (node.data as Record<string, string> | null)?.lang;
+            meta = (node.data as Record<string, string> | null)?.meta;
+          }
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(lang).toBe("typescript");
+    expect(meta).toBe("{highlight=[1]}");
+  });
+
+  test("code fence data flows through child resolution", () => {
+    const handle = createHastHandle('```js\ncode\n```');
+    const source = "```js\ncode\n```";
+    let childLang: string | undefined;
+    const plugin = {
+      element: {
+        filter: ["pre"],
+        visit(node: HastNode) {
+          if (node.type === "element") {
+            const code = node.children?.[0];
+            if (code?.type === "element" && code.tagName === "code") {
+              childLang = (code.data as Record<string, string> | null)?.lang;
+            }
+          }
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(childLang).toBe("js");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Materialize (still uses buffer path — independent of visitor changes)
 // ---------------------------------------------------------------------------
 
 describe("materializeHastTree", () => {
   test("materializes a tree from a HAST buffer", () => {
-    const { reader, dataMap } = setup();
-    const tree = materializeHastTree(reader, dataMap);
+    const handle = createHastHandle("# Hello\n\nWorld");
+    const reader = new HastReader(serializeHandle(handle));
+    const tree = materializeHastTree(reader);
     expect(tree.type).toBe("root");
     if (tree.type !== "root") throw new Error("expected root");
     expect(tree.children).toBeDefined();
@@ -266,8 +260,9 @@ describe("materializeHastTree", () => {
   });
 
   test("element nodes have tagName and properties", () => {
-    const { reader, dataMap } = setup();
-    const tree = materializeHastTree(reader, dataMap);
+    const handle = createHastHandle("# Hello\n\nWorld");
+    const reader = new HastReader(serializeHandle(handle));
+    const tree = materializeHastTree(reader);
     if (tree.type !== "root") throw new Error("expected root");
     const h1 = tree.children.find(
       (n): n is Extract<HastNode, { type: "element" }> =>
@@ -279,8 +274,9 @@ describe("materializeHastTree", () => {
   });
 
   test("text nodes have value", () => {
-    const { reader, dataMap } = setup();
-    const tree = materializeHastTree(reader, dataMap);
+    const handle = createHastHandle("# Hello\n\nWorld");
+    const reader = new HastReader(serializeHandle(handle));
+    const tree = materializeHastTree(reader);
     if (tree.type !== "root") throw new Error("expected root");
     const h1 = tree.children.find(
       (n): n is Extract<HastNode, { type: "element" }> =>
@@ -314,7 +310,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("self-closing element with no attributes", () => {
     const buf = serializeHandle(createMdxHastHandle("<Component />\n"));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     expect(jsx).not.toBeNull();
     if (!jsx || jsx.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
@@ -325,7 +321,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("element with string literal attribute", () => {
     const buf = serializeHandle(createMdxHastHandle('<Component foo="bar" />\n'));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
     expect(jsx.name).toBe("Component");
@@ -335,7 +331,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("element with boolean attribute", () => {
     const buf = serializeHandle(createMdxHastHandle("<Component disabled />\n"));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
     expect(jsx.attributes).toEqual([{ type: "mdxJsxAttribute", name: "disabled", value: null }]);
@@ -344,7 +340,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("element with expression attribute", () => {
     const buf = serializeHandle(createMdxHastHandle("<Component count={42} />\n"));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
     expect(jsx.attributes).toEqual([
@@ -359,7 +355,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("element with spread attribute", () => {
     const buf = serializeHandle(createMdxHastHandle("<Component {...props} />\n"));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
     expect(jsx.attributes).toEqual([{ type: "mdxJsxExpressionAttribute", value: "...props" }]);
@@ -368,7 +364,7 @@ describe("MDX JSX attributes on HAST nodes", () => {
   test("element with multiple mixed attributes", () => {
     const buf = serializeHandle(createMdxHastHandle('<Component a="1" b={2} c {...d} />\n'));
     const reader = new HastReader(buf);
-    const tree = materializeHastTree(reader, new DataMap());
+    const tree = materializeHastTree(reader);
     const jsx = findHastNode(tree, "mdxJsxFlowElement");
     if (jsx?.type !== "mdxJsxFlowElement") throw new Error("expected mdxJsxFlowElement");
     expect(jsx.attributes).toHaveLength(4);

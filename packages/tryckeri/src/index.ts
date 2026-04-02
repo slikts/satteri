@@ -10,8 +10,8 @@ export type { MdastPluginDefinition, HastPluginDefinition } from "./plugin.js";
 export type {
   HastVisitorInstance,
   HastVisitorContext,
-  HastVisitResult,
   HastFilteredVisitor,
+  EstreeProgram,
 } from "./hast/hast-visitor.js";
 
 // Node types

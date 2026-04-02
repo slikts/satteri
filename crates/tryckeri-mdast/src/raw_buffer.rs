@@ -181,6 +181,7 @@ impl MdastArena {
             type_data,
             source,
             node_data: std::collections::HashMap::new(),
+            mdx: false,
         })
     }
 }

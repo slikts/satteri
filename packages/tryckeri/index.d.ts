@@ -45,6 +45,9 @@ export declare function dropHandle(handle: ArenaHandle): void
 /** Get the source string from an MDAST handle. */
 export declare function getHandleSource(handle: ArenaHandle): string
 
+/** Read the node_data JSON blob for a node. Returns null if none is set. */
+export declare function getNodeData(handle: ArenaHandle, nodeId: number): string | null
+
 /** MDX compile options passed from JavaScript. */
 export interface JsMdxOptions {
   /**
@@ -72,6 +75,12 @@ export interface JsSubscription {
   tagFilter: Array<string>
 }
 
+/**
+ * Parse a JavaScript expression and return its ESTree-compatible AST as a JSON string.
+ * Returns null if parsing fails. The JS layer calls JSON.parse (faster than serde_json → NAPI).
+ */
+export declare function parseExpression(source: string): string | null
+
 /** Parse Markdown source and return HTML string directly. */
 export declare function parseToHtml(source: string): string
 
@@ -86,6 +95,12 @@ export declare function serializeMdastHandle(handle: ArenaHandle): Uint8Array
 
 /** Set the `data` blob (JSON bytes) for a node in the handle's arena. */
 export declare function setNodeData(handle: ArenaHandle, nodeId: number, json: Uint8Array): void
+
+/**
+ * Collect the concatenated text content of a node and all its descendants.
+ * Walks entirely in Rust — no per-child NAPI round-trips.
+ */
+export declare function textContentHandle(handle: ArenaHandle, nodeId: number): string
 
 /** Walk a handle's arena and return matched nodes as a flat binary buffer. */
 export declare function walkHandle(handle: ArenaHandle, subscriptions: Array<JsSubscription>): Uint8Array
