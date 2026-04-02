@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/tryckeri-arena",
   "crates/tryckeri-mdast",
   "crates/bench",
   "crates/tryckeri-hast",

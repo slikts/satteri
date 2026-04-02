@@ -1011,6 +1011,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tryckeri-arena"
+version = "0.1.0"
+dependencies = [
+ "rustc-hash",
+ "unicode-id",
+]
+
+[[package]]
 name = "tryckeri-bench"
 version = "0.1.0"
 dependencies = [
@@ -1028,6 +1036,7 @@ name = "tryckeri-hast"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark-escape",
+ "tryckeri-arena",
  "tryckeri-mdast",
  "tryckeri-parser",
 ]
@@ -1036,9 +1045,10 @@ dependencies = [
 name = "tryckeri-mdast"
 version = "0.1.0"
 dependencies = [
+ "rustc-hash",
  "serde",
  "serde_json",
- "unicode-id",
+ "tryckeri-arena",
 ]
 
 [[package]]
@@ -1055,6 +1065,7 @@ dependencies = [
  "pretty_assertions",
  "rustc-hash",
  "serde",
+ "tryckeri-arena",
  "tryckeri-hast",
  "tryckeri-mdast",
  "tryckeri-parser",
@@ -1067,6 +1078,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "tryckeri-arena",
  "tryckeri-hast",
  "tryckeri-mdast",
  "tryckeri-mdxjs",
@@ -1077,6 +1089,7 @@ dependencies = [
 name = "tryckeri-parser"
 version = "0.1.0"
 dependencies = [
+ "tryckeri-arena",
  "tryckeri-hast",
  "tryckeri-mdast",
  "tryckeri-pulldown-cmark",
@@ -1087,6 +1100,7 @@ name = "tryckeri-plugin-api"
 version = "0.1.0"
 dependencies = [
  "rustc-hash",
+ "tryckeri-arena",
  "tryckeri-mdast",
 ]
 

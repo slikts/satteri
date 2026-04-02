@@ -1,7 +1,7 @@
-//! Type-specific data structs for `MdastArena::type_data`, serialized as raw
+//! Type-specific data structs for `Arena::type_data`, serialized as raw
 //! bytes via `#[repr(C)]` layout.
 
-use crate::node::StringRef;
+use tryckeri_arena::StringRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]

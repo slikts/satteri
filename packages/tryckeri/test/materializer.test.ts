@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { MdastReader } from "../src/mdast/mdast-reader.js";
+import { ArenaReader } from "../src/mdast/mdast-reader.js";
 import { materializeTree } from "../src/mdast/mdast-materializer.js";
 import type { MdastNodeInternal } from "../src/types.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
@@ -7,7 +7,7 @@ import { createMdxMdastHandle, serializeMdastHandle } from "../index.js";
 
 function setup() {
   const buf = buildHelloWorldBuffer();
-  const reader = new MdastReader(buf);
+  const reader = new ArenaReader(buf);
   return { reader };
 }
 
@@ -107,7 +107,7 @@ test("children are lazily evaluated (getter replaced by plain array after access
 
 function mdxSetup(source: string) {
   const buf = serializeMdastHandle(createMdxMdastHandle(source)) as Uint8Array;
-  const reader = new MdastReader(buf);
+  const reader = new ArenaReader(buf);
   return { reader, tree: materializeTree(reader) };
 }
 

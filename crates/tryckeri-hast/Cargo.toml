@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tryckeri-arena = { path = "../tryckeri-arena" }
 tryckeri-mdast = { path = "../tryckeri-mdast" }
 pulldown-cmark-escape = "0.11"
 

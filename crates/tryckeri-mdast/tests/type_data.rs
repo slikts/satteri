@@ -1,10 +1,7 @@
 //! Integration tests for type-specific data codec.
 
-use tryckeri_mdast::{
-    decode_code_data, decode_heading_data, decode_link_data, decode_list_data, decode_table_data,
-    encode_code_data, encode_heading_data, encode_link_data, encode_list_data, encode_table_data,
-    ColumnAlign, MdastBuilder, MdastNodeType, StringRef,
-};
+use tryckeri_arena::{ArenaBuilder, StringRef};
+use tryckeri_mdast::{decode_code_data, decode_heading_data, decode_link_data, decode_list_data, decode_table_data, encode_code_data, encode_heading_data, encode_link_data, encode_list_data, encode_table_data, ColumnAlign, MdastNodeType};
 
 #[test]
 fn encode_decode_heading_data() {
@@ -90,11 +87,11 @@ fn encode_decode_table_data_empty() {
 
 #[test]
 fn type_data_stored_in_arena() {
-    let mut builder = MdastBuilder::new("# Title".to_string());
-    builder.open_node(MdastNodeType::Root);
-    let heading = builder.open_node(MdastNodeType::Heading);
+    let mut builder = ArenaBuilder::new("# Title".to_string());
+    builder.open_node(MdastNodeType::Root as u8);
+    let heading = builder.open_node(MdastNodeType::Heading as u8);
     builder.set_data_current(&encode_heading_data(2));
-    builder.add_leaf(MdastNodeType::Text);
+    builder.add_leaf(MdastNodeType::Text as u8);
     builder.close_node();
     builder.close_node();
     let arena = builder.finish();

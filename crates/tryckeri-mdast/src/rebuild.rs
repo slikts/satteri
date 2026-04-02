@@ -1,42 +1,43 @@
-//! MdastArena rebuild: apply structural patches to produce a new arena.
+//! Arena rebuild: apply structural patches to produce a new arena.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{MdastArena, MdastBuilder, MdastNodeType};
+use tryckeri_arena::{Arena, ArenaBuilder};
+use crate::MdastNodeType;
 
 #[derive(Debug, Clone)]
 pub enum Patch {
     Replace {
         node_id: u32,
-        new_tree: MdastArena,
+        new_tree: Arena,
         keep_children: bool,
     },
     /// Removes the entire subtree rooted at this node
     Remove { node_id: u32 },
     /// Inserted as a preceding sibling
-    InsertBefore { node_id: u32, new_tree: MdastArena },
+    InsertBefore { node_id: u32, new_tree: Arena },
     /// Inserted as a following sibling
-    InsertAfter { node_id: u32, new_tree: MdastArena },
+    InsertAfter { node_id: u32, new_tree: Arena },
     /// The original node becomes a child of the new parent
     Wrap {
         node_id: u32,
-        parent_tree: MdastArena,
+        parent_tree: Arena,
     },
     PrependChild {
         node_id: u32,
-        child_tree: MdastArena,
+        child_tree: Arena,
     },
     AppendChild {
         node_id: u32,
-        child_tree: MdastArena,
+        child_tree: Arena,
     },
 }
 
 /// Node IDs in the new arena are assigned fresh (monotonically increasing)
 /// but the structure is preserved. Sub-arena type_data bytes are copied
 /// verbatim — full StringRef remapping is deferred to Phase 8.
-pub fn rebuild(arena: &MdastArena, patches: &[Patch]) -> MdastArena {
-    let mut patch_map: HashMap<u32, &Patch> = HashMap::new();
+pub fn rebuild(arena: &Arena, patches: &[Patch]) -> Arena {
+    let mut patch_map: FxHashMap<u32, &Patch> = FxHashMap::default();
     for patch in patches {
         let node_id = match patch {
             Patch::Replace { node_id, .. } => *node_id,
@@ -51,7 +52,7 @@ pub fn rebuild(arena: &MdastArena, patches: &[Patch]) -> MdastArena {
     }
 
     // Replaced or removed nodes are skipped during normal traversal
-    let mut deleted: HashSet<u32> = HashSet::new();
+    let mut deleted: FxHashSet<u32> = FxHashSet::default();
     for patch in patches {
         match patch {
             Patch::Remove { node_id } => {
@@ -65,7 +66,7 @@ pub fn rebuild(arena: &MdastArena, patches: &[Patch]) -> MdastArena {
     }
 
     let new_source = arena.source().to_string();
-    let mut builder = MdastBuilder::new(new_source);
+    let mut builder = ArenaBuilder::new(new_source);
 
     copy_node(0, arena, &mut builder, &patch_map, &deleted);
 
@@ -76,10 +77,10 @@ pub fn rebuild(arena: &MdastArena, patches: &[Patch]) -> MdastArena {
 /// `false` if skipped (Remove).
 fn copy_node(
     node_id: u32,
-    orig: &MdastArena,
-    builder: &mut MdastBuilder,
-    patch_map: &HashMap<u32, &Patch>,
-    deleted: &HashSet<u32>,
+    orig: &Arena,
+    builder: &mut ArenaBuilder,
+    patch_map: &FxHashMap<u32, &Patch>,
+    deleted: &FxHashSet<u32>,
 ) -> bool {
     // For Replace patches, the replacement is emitted here (not by the parent)
     // when this is the root node or when copy_children delegates to copy_node.
@@ -123,7 +124,7 @@ fn copy_node(
     let node_type =
         MdastNodeType::from_u8(node.node_type).expect("unknown node type in arena — corrupt data");
 
-    let new_id = builder.open_node(node_type);
+    let new_id = builder.open_node(node_type as u8);
 
     // Copy node_data if present
     if let Some(data) = orig.get_node_data(node_id) {
@@ -185,7 +186,7 @@ fn copy_node(
 
 /// Sub-arena source is appended to the builder's source, and StringRef
 /// offsets in type_data are remapped into the merged buffer.
-fn emit_subtree(sub_arena: &MdastArena, builder: &mut MdastBuilder) {
+fn emit_subtree(sub_arena: &Arena, builder: &mut ArenaBuilder) {
     if sub_arena.is_empty() {
         return;
     }
@@ -203,15 +204,15 @@ fn emit_subtree(sub_arena: &MdastArena, builder: &mut MdastBuilder) {
 /// into the merged source buffer.
 fn emit_subtree_node(
     node_id: u32,
-    sub_arena: &MdastArena,
-    builder: &mut MdastBuilder,
+    sub_arena: &Arena,
+    builder: &mut ArenaBuilder,
     source_base: u32,
 ) {
     let node = sub_arena.get_node(node_id);
     let node_type = MdastNodeType::from_u8(node.node_type)
         .expect("unknown node type in sub-arena — corrupt data");
 
-    builder.open_node(node_type);
+    builder.open_node(node_type as u8);
 
     builder.set_position_current(
         node.start_offset + source_base,
@@ -243,12 +244,12 @@ fn emit_subtree_node(
 
 /// Emit the replacement node's root (type + data) but use the original node's children.
 fn emit_subtree_with_original_children(
-    sub_arena: &MdastArena,
+    sub_arena: &Arena,
     orig_node_id: u32,
-    orig: &MdastArena,
-    builder: &mut MdastBuilder,
-    patch_map: &HashMap<u32, &Patch>,
-    deleted: &HashSet<u32>,
+    orig: &Arena,
+    builder: &mut ArenaBuilder,
+    patch_map: &FxHashMap<u32, &Patch>,
+    deleted: &FxHashSet<u32>,
 ) {
     if sub_arena.is_empty() {
         return;
@@ -266,7 +267,7 @@ fn emit_subtree_with_original_children(
     let node = sub_arena.get_node(0);
     let node_type = MdastNodeType::from_u8(node.node_type)
         .expect("unknown node type in sub-arena — corrupt data");
-    builder.open_node(node_type);
+    builder.open_node(node_type as u8);
 
     let type_data = sub_arena.get_type_data(0);
     if !type_data.is_empty() {
@@ -373,12 +374,12 @@ fn remap_one_ref(data: &mut [u8], off: usize, base: u32) {
 /// already present in parent_tree are ignored — the original node becomes
 /// the sole child (Phase 6 simplification).
 fn emit_wrap_node(
-    parent_tree: &MdastArena,
+    parent_tree: &Arena,
     original_node_id: u32,
-    orig: &MdastArena,
-    builder: &mut MdastBuilder,
-    patch_map: &HashMap<u32, &Patch>,
-    deleted: &HashSet<u32>,
+    orig: &Arena,
+    builder: &mut ArenaBuilder,
+    patch_map: &FxHashMap<u32, &Patch>,
+    deleted: &FxHashSet<u32>,
 ) {
     if parent_tree.is_empty() {
         // Degenerate: no wrapper, just emit original
@@ -390,7 +391,7 @@ fn emit_wrap_node(
     let node_type =
         MdastNodeType::from_u8(wrapper.node_type).expect("unknown node type in wrapper arena");
 
-    builder.open_node(node_type);
+    builder.open_node(node_type as u8);
     builder.set_position_current(
         wrapper.start_offset,
         wrapper.end_offset,
@@ -413,34 +414,35 @@ fn emit_wrap_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MdastBuilder, MdastNodeType};
+    use tryckeri_arena::ArenaBuilder;
+        use crate::MdastNodeType;
 
     /// Build the "# Hello\n\nWorld" arena for testing.
-    fn build_hello_world() -> MdastArena {
+    fn build_hello_world() -> Arena {
         use crate::codec::{encode_heading_data, encode_string_ref_data};
-        use crate::node::StringRef;
+        use tryckeri_arena::StringRef;
 
         let source = "# Hello\n\nWorld".to_string();
-        let mut b = MdastBuilder::new(source);
+        let mut b = ArenaBuilder::new(source);
 
-        b.open_node(MdastNodeType::Root);
+        b.open_node(MdastNodeType::Root as u8);
         b.set_position_current(0, 14, 1, 1, 2, 6);
 
-        b.open_node(MdastNodeType::Heading);
+        b.open_node(MdastNodeType::Heading as u8);
         b.set_position_current(0, 7, 1, 1, 1, 8);
         b.set_data_current(&encode_heading_data(1));
 
-        b.open_node(MdastNodeType::Text);
+        b.open_node(MdastNodeType::Text as u8);
         b.set_position_current(2, 7, 1, 3, 1, 8);
         b.set_data_current(&encode_string_ref_data(StringRef::new(2, 5)));
         b.close_node(); // text
 
         b.close_node(); // heading
 
-        b.open_node(MdastNodeType::Paragraph);
+        b.open_node(MdastNodeType::Paragraph as u8);
         b.set_position_current(9, 14, 2, 1, 2, 6);
 
-        b.open_node(MdastNodeType::Text);
+        b.open_node(MdastNodeType::Text as u8);
         b.set_position_current(9, 14, 2, 1, 2, 6);
         b.set_data_current(&encode_string_ref_data(StringRef::new(9, 5)));
         b.close_node(); // text
@@ -519,8 +521,8 @@ mod tests {
         let text_id = orig.get_children(heading_id)[0];
 
         // Build a replacement: a ThematicBreak (no children, no data)
-        let mut replacement_builder = MdastBuilder::new(orig.source().to_string());
-        replacement_builder.open_node(MdastNodeType::ThematicBreak);
+        let mut replacement_builder = ArenaBuilder::new(orig.source().to_string());
+        replacement_builder.open_node(MdastNodeType::ThematicBreak as u8);
         replacement_builder.close_node();
         let replacement = replacement_builder.finish();
 
@@ -548,8 +550,8 @@ mod tests {
         let heading_id = orig.get_children(0)[0];
 
         // Replace Heading with a Paragraph
-        let mut replacement_builder = MdastBuilder::new(orig.source().to_string());
-        replacement_builder.open_node(MdastNodeType::Paragraph);
+        let mut replacement_builder = ArenaBuilder::new(orig.source().to_string());
+        replacement_builder.open_node(MdastNodeType::Paragraph as u8);
         replacement_builder.close_node();
         let replacement = replacement_builder.finish();
 
@@ -580,8 +582,8 @@ mod tests {
         let para_id = orig.get_children(0)[1]; // Paragraph node
 
         // Insert a ThematicBreak before the Paragraph
-        let mut new_tree_builder = MdastBuilder::new(orig.source().to_string());
-        new_tree_builder.open_node(MdastNodeType::ThematicBreak);
+        let mut new_tree_builder = ArenaBuilder::new(orig.source().to_string());
+        new_tree_builder.open_node(MdastNodeType::ThematicBreak as u8);
         new_tree_builder.close_node();
         let new_tree = new_tree_builder.finish();
 
@@ -613,8 +615,8 @@ mod tests {
         let orig = build_hello_world();
         let heading_id = orig.get_children(0)[0]; // Heading node
 
-        let mut new_tree_builder = MdastBuilder::new(orig.source().to_string());
-        new_tree_builder.open_node(MdastNodeType::ThematicBreak);
+        let mut new_tree_builder = ArenaBuilder::new(orig.source().to_string());
+        new_tree_builder.open_node(MdastNodeType::ThematicBreak as u8);
         new_tree_builder.close_node();
         let new_tree = new_tree_builder.finish();
 
@@ -646,8 +648,8 @@ mod tests {
         let orig = build_hello_world();
         let heading_id = orig.get_children(0)[0];
 
-        let mut child_builder = MdastBuilder::new(orig.source().to_string());
-        child_builder.open_node(MdastNodeType::Break);
+        let mut child_builder = ArenaBuilder::new(orig.source().to_string());
+        child_builder.open_node(MdastNodeType::Break as u8);
         child_builder.close_node();
         let child_tree = child_builder.finish();
 
@@ -676,8 +678,8 @@ mod tests {
         let orig = build_hello_world();
         let heading_id = orig.get_children(0)[0];
 
-        let mut child_builder = MdastBuilder::new(orig.source().to_string());
-        child_builder.open_node(MdastNodeType::Break);
+        let mut child_builder = ArenaBuilder::new(orig.source().to_string());
+        child_builder.open_node(MdastNodeType::Break as u8);
         child_builder.close_node();
         let child_tree = child_builder.finish();
 
@@ -708,8 +710,8 @@ mod tests {
         let para_id = orig.get_children(0)[1];
 
         // Remove the heading AND insert a ThematicBreak after paragraph
-        let mut new_tree_builder = MdastBuilder::new(orig.source().to_string());
-        new_tree_builder.open_node(MdastNodeType::ThematicBreak);
+        let mut new_tree_builder = ArenaBuilder::new(orig.source().to_string());
+        new_tree_builder.open_node(MdastNodeType::ThematicBreak as u8);
         new_tree_builder.close_node();
         let new_tree = new_tree_builder.finish();
 

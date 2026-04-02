@@ -1,0 +1,8 @@
+[package]
+name = "tryckeri-arena"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustc-hash = "2"
+unicode-id = "0.3"

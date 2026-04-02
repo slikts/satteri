@@ -34,8 +34,8 @@
 //! [lang_len: u16][lang: utf8...][meta_len: u16][meta: utf8...][value_len: u32][value: utf8...]
 //! ```
 
-use crate::node::StringRef;
-use crate::read_arena::ReadMdast;
+use tryckeri_arena::StringRef;
+use tryckeri_arena::ReadArena;
 
 /// A single subscription: match nodes of a given type, optionally filtered
 /// by tag name (for HAST element nodes).
@@ -59,13 +59,13 @@ pub enum WalkMode {
 ///
 /// Returns a `Vec<u8>` containing the match index + inline data section.
 /// JS reads this with DataView — zero per-node object allocation.
-pub fn walk_and_collect(arena: &dyn ReadMdast, subscriptions: &[Subscription]) -> Vec<u8> {
+pub fn walk_and_collect(arena: &dyn ReadArena, subscriptions: &[Subscription]) -> Vec<u8> {
     walk_and_collect_with_mode(arena, subscriptions, WalkMode::Hast)
 }
 
 /// Walk with explicit mode (HAST or MDAST).
 pub fn walk_and_collect_with_mode(
-    arena: &dyn ReadMdast,
+    arena: &dyn ReadArena,
     subscriptions: &[Subscription],
     mode: WalkMode,
 ) -> Vec<u8> {
@@ -173,7 +173,7 @@ pub fn walk_and_collect_with_mode(
 /// [type-specific resolved data]
 /// ```
 fn serialize_mdast_node_inline(
-    arena: &dyn ReadMdast,
+    arena: &dyn ReadArena,
     node_id: u32,
     node_type: u8,
     type_data: &[u8],
@@ -363,7 +363,7 @@ fn read_string_ref(data: &[u8], offset: usize) -> StringRef {
 /// Write inline node data with all strings resolved (no StringRefs).
 /// Element data includes child node IDs so plugins can reference them.
 fn serialize_node_inline(
-    arena: &dyn ReadMdast,
+    arena: &dyn ReadArena,
     node_id: u32,
     node_type: u8,
     type_data: &[u8],
@@ -507,10 +507,10 @@ fn serialize_node_inline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MdastBuilder;
+    use tryckeri_arena::ArenaBuilder;
 
-    fn build_hast_with_elements(tags: &[&str]) -> crate::MdastArena {
-        let mut b = MdastBuilder::new(String::new());
+    fn build_hast_with_elements(tags: &[&str]) -> tryckeri_arena::Arena {
+        let mut b = ArenaBuilder::new(String::new());
         b.open_node_raw(0); // HAST root
         for tag in tags {
             b.open_node_raw(1); // HAST element

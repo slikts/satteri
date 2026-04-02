@@ -1,10 +1,10 @@
 use crate::commands::{Command, NewNode};
 use crate::data::{DataMap, DataValue, TypedDataMap};
-use tryckeri_mdast::MdastArena;
+use tryckeri_arena::Arena;
 
 /// Context passed to Rust plugin visitor methods and before/after hooks.
 pub struct PluginContext<'a> {
-    arena: &'a MdastArena,
+    arena: &'a Arena,
     pub(crate) data_map: &'a mut DataMap,
     pub(crate) typed_data: &'a mut TypedDataMap,
     commands: Vec<Command>,
@@ -27,7 +27,7 @@ pub enum Severity {
 
 impl<'a> PluginContext<'a> {
     pub(crate) fn new(
-        arena: &'a MdastArena,
+        arena: &'a Arena,
         data_map: &'a mut DataMap,
         typed_data: &'a mut TypedDataMap,
     ) -> Self {
@@ -42,7 +42,7 @@ impl<'a> PluginContext<'a> {
 
     // ── Arena access ──────────────────────────────────────────────────────────
 
-    pub fn arena(&self) -> &MdastArena {
+    pub fn arena(&self) -> &Arena {
         self.arena
     }
 

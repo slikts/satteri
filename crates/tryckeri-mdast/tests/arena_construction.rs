@@ -1,19 +1,20 @@
 //! Integration tests for arena construction.
 
-use tryckeri_mdast::{MdastArena, MdastBuilder, MdastNodeType};
+use tryckeri_arena::{Arena, ArenaBuilder};
+use tryckeri_mdast::{MdastNodeType};
 
 #[test]
 fn heading_with_text_child() {
     let source = "# Hello";
-    let mut builder = MdastBuilder::new(source.to_string());
+    let mut builder = ArenaBuilder::new(source.to_string());
 
-    let root_id = builder.open_node(MdastNodeType::Root);
+    let root_id = builder.open_node(MdastNodeType::Root as u8);
     builder.set_position_current(0, 7, 1, 1, 1, 8);
 
-    let heading_id = builder.open_node(MdastNodeType::Heading);
+    let heading_id = builder.open_node(MdastNodeType::Heading as u8);
     builder.set_position_current(0, 7, 1, 1, 1, 8);
 
-    let text_id = builder.open_node(MdastNodeType::Text);
+    let text_id = builder.open_node(MdastNodeType::Text as u8);
     builder.set_position_current(2, 7, 1, 3, 1, 8);
     builder.close_node(); // text
 
@@ -45,16 +46,16 @@ fn heading_with_text_child() {
 
 #[test]
 fn multi_level_tree_children() {
-    let mut builder = MdastBuilder::new(String::new());
+    let mut builder = ArenaBuilder::new(String::new());
 
-    let root = builder.open_node(MdastNodeType::Root);
-    let p1 = builder.open_node(MdastNodeType::Paragraph);
-    let t1 = builder.add_leaf(MdastNodeType::Text);
-    let t2 = builder.add_leaf(MdastNodeType::Text);
+    let root = builder.open_node(MdastNodeType::Root as u8);
+    let p1 = builder.open_node(MdastNodeType::Paragraph as u8);
+    let t1 = builder.add_leaf(MdastNodeType::Text as u8);
+    let t2 = builder.add_leaf(MdastNodeType::Text as u8);
     builder.close_node(); // paragraph 1
 
-    let p2 = builder.open_node(MdastNodeType::Paragraph);
-    let t3 = builder.add_leaf(MdastNodeType::Text);
+    let p2 = builder.open_node(MdastNodeType::Paragraph as u8);
+    let t3 = builder.add_leaf(MdastNodeType::Text as u8);
     builder.close_node(); // paragraph 2
 
     builder.close_node(); // root
@@ -68,12 +69,12 @@ fn multi_level_tree_children() {
 
 #[test]
 fn parent_ids_correct() {
-    let mut builder = MdastBuilder::new(String::new());
+    let mut builder = ArenaBuilder::new(String::new());
 
-    let root = builder.open_node(MdastNodeType::Root);
-    let bq = builder.open_node(MdastNodeType::Blockquote);
-    let p = builder.open_node(MdastNodeType::Paragraph);
-    let t = builder.add_leaf(MdastNodeType::Text);
+    let root = builder.open_node(MdastNodeType::Root as u8);
+    let bq = builder.open_node(MdastNodeType::Blockquote as u8);
+    let p = builder.open_node(MdastNodeType::Paragraph as u8);
+    let t = builder.add_leaf(MdastNodeType::Text as u8);
     builder.close_node(); // paragraph
     builder.close_node(); // blockquote
     builder.close_node(); // root
@@ -89,11 +90,11 @@ fn parent_ids_correct() {
 
 #[test]
 fn arena_direct_methods() {
-    let mut arena = MdastArena::new("foo bar".to_string());
+    let mut arena = Arena::new("foo bar".to_string());
 
-    let root = arena.alloc_node(MdastNodeType::Root);
-    let para = arena.alloc_node(MdastNodeType::Paragraph);
-    let text = arena.alloc_node(MdastNodeType::Text);
+    let root = arena.alloc_node(MdastNodeType::Root as u8);
+    let para = arena.alloc_node(MdastNodeType::Paragraph as u8);
+    let text = arena.alloc_node(MdastNodeType::Text as u8);
 
     arena.set_position(root, 0, 7, 1, 1, 1, 8);
     arena.set_position(para, 0, 7, 1, 1, 1, 8);
@@ -110,13 +111,13 @@ fn arena_direct_methods() {
 
 #[test]
 fn deep_nesting() {
-    let mut builder = MdastBuilder::new(String::new());
-    let root = builder.open_node(MdastNodeType::Root);
-    let bq = builder.open_node(MdastNodeType::Blockquote);
-    let list = builder.open_node(MdastNodeType::List);
-    let item = builder.open_node(MdastNodeType::ListItem);
-    let para = builder.open_node(MdastNodeType::Paragraph);
-    let leaf = builder.add_leaf(MdastNodeType::Text);
+    let mut builder = ArenaBuilder::new(String::new());
+    let root = builder.open_node(MdastNodeType::Root as u8);
+    let bq = builder.open_node(MdastNodeType::Blockquote as u8);
+    let list = builder.open_node(MdastNodeType::List as u8);
+    let item = builder.open_node(MdastNodeType::ListItem as u8);
+    let para = builder.open_node(MdastNodeType::Paragraph as u8);
+    let leaf = builder.add_leaf(MdastNodeType::Text as u8);
     builder.close_node(); // paragraph
     builder.close_node(); // list item
     builder.close_node(); // list

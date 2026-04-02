@@ -71,10 +71,10 @@ pub fn parse_to_html(source: String) -> Result<String> {
 
 use std::sync::Mutex;
 
-type ArenaHandle = External<Mutex<tryckeri_mdast::MdastArena>>;
+type ArenaHandle = External<Mutex<tryckeri_arena::Arena>>;
 
-fn make_parse_fn(mdx: bool) -> impl Fn(&str) -> tryckeri_mdast::MdastArena {
-    move |source: &str| -> tryckeri_mdast::MdastArena {
+fn make_parse_fn(mdx: bool) -> impl Fn(&str) -> tryckeri_arena::Arena {
+    move |source: &str| -> tryckeri_arena::Arena {
         let opts = if mdx {
             tryckeri_parser::ParseOptions::mdx()
         } else {
@@ -169,7 +169,7 @@ pub fn apply_commands_to_mdast_handle(handle: &ArenaHandle, command_buf: Uint8Ar
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
     let parse_markdown = make_parse_fn(arena.mdx);
-    let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
+    let owned = std::mem::replace(&mut *arena, tryckeri_arena::Arena::new(String::new()));
     let new_arena = tryckeri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     *arena = new_arena;
@@ -183,7 +183,7 @@ pub fn convert_mdast_to_hast_handle(handle: &ArenaHandle) -> Result<ArenaHandle>
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
     let mdx = arena.mdx;
-    let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
+    let owned = std::mem::replace(&mut *arena, tryckeri_arena::Arena::new(String::new()));
     let mut hast = tryckeri_hast::mdast_arena_to_hast_arena(&owned);
     hast.mdx = mdx;
     Ok(External::new(Mutex::new(hast)))
@@ -201,7 +201,7 @@ pub fn apply_commands_and_convert_to_hast_handle(
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
     let mdx = arena.mdx;
     let parse_markdown = make_parse_fn(mdx);
-    let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
+    let owned = std::mem::replace(&mut *arena, tryckeri_arena::Arena::new(String::new()));
     let mutated = tryckeri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     let mut hast_arena = tryckeri_hast::mdast_arena_to_hast_arena(&mutated);
@@ -258,7 +258,7 @@ pub fn apply_commands_to_handle(handle: &ArenaHandle, command_buf: Uint8Array) -
     let parse_markdown = make_parse_fn(arena.mdx);
 
     // apply_commands takes ownership, so swap out the arena
-    let owned = std::mem::replace(&mut *arena, tryckeri_mdast::MdastArena::new(String::new()));
+    let owned = std::mem::replace(&mut *arena, tryckeri_arena::Arena::new(String::new()));
     let new_arena = tryckeri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     *arena = new_arena;
@@ -339,6 +339,6 @@ pub fn drop_handle(handle: &ArenaHandle) -> Result<()> {
     let mut arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    *arena = tryckeri_mdast::MdastArena::new(String::new());
+    *arena = tryckeri_arena::Arena::new(String::new());
     Ok(())
 }

@@ -21,7 +21,7 @@ use oxc_ast::ast::{
 use oxc_span::{SPAN, Span};
 use oxc_syntax::node::NodeId;
 use std::cell::Cell;
-use tryckeri_mdast::mdx_types::{self as message, Location, Message};
+use tryckeri_arena::mdx_types::{self as message, Location, Message};
 
 /// Configuration.
 #[derive(Debug, Default, Clone)]

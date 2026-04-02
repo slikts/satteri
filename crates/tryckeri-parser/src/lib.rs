@@ -1,15 +1,10 @@
-//! Fast markdown parser: pulldown-cmark → `tryckeri-mdast::MdastArena`.
+//! Fast markdown parser: pulldown-cmark → `tryckeri-mdast::Arena`.
 //!
-//! This crate bridges pulldown-cmark's event stream into the flat MdastArena
+//! This crate bridges pulldown-cmark's event stream into the flat Arena
 //! representation used by the rest of the pipeline (HAST, plugins, MDX compile).
 
-use tryckeri_mdast::{
-    encode_code_data, encode_expression_data, encode_footnote_definition_data, encode_heading_data,
-    encode_image_data, encode_link_data, encode_list_data, encode_list_item_data, encode_math_data,
-    encode_mdx_jsx_element_data, encode_string_ref_data, encode_table_data, ColumnAlign, LineIndex,
-    MdastArena, MdastBuilder, MdastNodeType, StringRef, MDX_ATTR_BOOLEAN_PROP,
-    MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
-};
+use tryckeri_arena::{encode_string_ref_data, Arena, ArenaBuilder, LineIndex, StringRef};
+use tryckeri_mdast::{encode_code_data, encode_expression_data, encode_footnote_definition_data, encode_heading_data, encode_image_data, encode_link_data, encode_list_data, encode_list_item_data, encode_math_data, encode_mdx_jsx_element_data, encode_table_data, ColumnAlign, MdastNodeType, MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD};
 use tryckeri_pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd, TextMergeWithOffset,
 };
@@ -53,18 +48,18 @@ impl ParseOptions {
     }
 }
 
-/// Parse markdown source into a MdastArena.
+/// Parse markdown source into a Arena.
 ///
 /// Returns `(arena, mdx_errors)` where `mdx_errors` contains any MDX
 /// validation errors collected during parsing (empty for non-MDX input).
-pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, String)>) {
+pub fn parse(source: &str, opts: &ParseOptions) -> (Arena, Vec<(usize, String)>) {
     let line_index = LineIndex::from_source(source);
     let mut parser =
         TextMergeWithOffset::new(Parser::new_ext(source, opts.pulldown).into_offset_iter());
-    let mut builder = MdastBuilder::new(source.to_string());
+    let mut builder = ArenaBuilder::new(source.to_string());
 
     // Open root node.
-    builder.open_node(MdastNodeType::Root);
+    builder.open_node(MdastNodeType::Root as u8);
     let (end_line, end_col) = line_index.offset_to_line_col(source.len() as u32);
     builder.set_position_current(0, source.len() as u32, 1, 1, end_line, end_col);
 
@@ -206,7 +201,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                 // but leaves with content in MDAST.
                 match tag {
                     Tag::HtmlBlock => {
-                        let _id = builder.open_node(MdastNodeType::Html);
+                        let _id = builder.open_node(MdastNodeType::Html as u8);
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
@@ -215,7 +210,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                     }
                     Tag::CodeBlock(_) => {
                         let (node_type, data) = tag_to_node_type(tag, &mut builder, source);
-                        let _id = builder.open_node(node_type);
+                        let _id = builder.open_node(node_type as u8);
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
@@ -227,7 +222,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                     }
                     Tag::MetadataBlock(_) => {
                         // Metadata blocks are also containers → leaf.
-                        let _id = builder.open_node(MdastNodeType::Yaml);
+                        let _id = builder.open_node(MdastNodeType::Yaml as u8);
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
@@ -250,7 +245,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                         JsxTagKind::SelfClosing => {
                             // Self-closing: open + immediately close.
                             let (node_type, data) = tag_to_node_type(tag, &mut builder, source);
-                            let _id = builder.open_node(node_type);
+                            let _id = builder.open_node(node_type as u8);
                             builder.set_position_current(
                                 start, end, start_line, start_col, end_line, end_col,
                             );
@@ -263,7 +258,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                         JsxTagKind::Opening(name) => {
                             // Opening: open node and push to stack.
                             let (node_type, data) = tag_to_node_type(tag, &mut builder, source);
-                            let _id = builder.open_node(node_type);
+                            let _id = builder.open_node(node_type as u8);
                             builder.set_position_current(
                                 start, end, start_line, start_col, end_line, end_col,
                             );
@@ -325,7 +320,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                                         && node_start_line != end_line
                                     {
                                         builder
-                                            .change_node_type(id, MdastNodeType::MdxJsxFlowElement);
+                                            .change_node_type(id, MdastNodeType::MdxJsxFlowElement as u8);
                                         wrap_bare_text_in_paragraphs(&mut builder, id);
                                     }
 
@@ -342,7 +337,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                 }
 
                 let (node_type, data) = tag_to_node_type(tag, &mut builder, source);
-                let _id = builder.open_node(node_type);
+                let _id = builder.open_node(node_type as u8);
                 builder.set_position_current(start, end, start_line, start_col, end_line, end_col);
                 if let Some(d) = data {
                     builder.set_data_current(&d);
@@ -414,7 +409,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::Text(text) => {
                 let sr = source_ref_or_alloc(source, &text, range.start, &mut builder);
-                let id = builder.add_leaf(MdastNodeType::Text);
+                let id = builder.add_leaf(MdastNodeType::Text as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -424,7 +419,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::Code(code) => {
                 let sr = builder.alloc_string(&code);
-                let id = builder.add_leaf(MdastNodeType::InlineCode);
+                let id = builder.add_leaf(MdastNodeType::InlineCode as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -435,7 +430,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             Event::Html(html) => {
                 // Standalone Html event (outside HtmlBlock).
                 let sr = source_ref_or_alloc(source, &html, range.start, &mut builder);
-                let id = builder.add_leaf(MdastNodeType::Html);
+                let id = builder.add_leaf(MdastNodeType::Html as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -445,7 +440,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::InlineHtml(html) => {
                 let sr = source_ref_or_alloc(source, &html, range.start, &mut builder);
-                let id = builder.add_leaf(MdastNodeType::Html);
+                let id = builder.add_leaf(MdastNodeType::Html as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -454,7 +449,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                     .set_type_data(id, &encode_string_ref_data(sr));
             }
             Event::SoftBreak => {
-                let id = builder.add_leaf(MdastNodeType::Text);
+                let id = builder.add_leaf(MdastNodeType::Text as u8);
                 let sr = builder.alloc_string("\n");
                 builder
                     .arena_mut()
@@ -464,13 +459,13 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
                     .set_type_data(id, &encode_string_ref_data(sr));
             }
             Event::HardBreak => {
-                let id = builder.add_leaf(MdastNodeType::Break);
+                let id = builder.add_leaf(MdastNodeType::Break as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
             }
             Event::Rule => {
-                let id = builder.add_leaf(MdastNodeType::ThematicBreak);
+                let id = builder.add_leaf(MdastNodeType::ThematicBreak as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -496,7 +491,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::FootnoteReference(label) => {
                 let sr = builder.alloc_string(&label);
-                let id = builder.add_leaf(MdastNodeType::FootnoteReference);
+                let id = builder.add_leaf(MdastNodeType::FootnoteReference as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -505,7 +500,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::InlineMath(math) => {
                 let sr = builder.alloc_string(&math);
-                let id = builder.add_leaf(MdastNodeType::InlineMath);
+                let id = builder.add_leaf(MdastNodeType::InlineMath as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -515,7 +510,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::DisplayMath(math) => {
                 let sr = builder.alloc_string(&math);
-                let id = builder.add_leaf(MdastNodeType::Math);
+                let id = builder.add_leaf(MdastNodeType::Math as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -525,7 +520,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::MdxFlowExpression(expr) => {
                 let sr = builder.alloc_string(&expr);
-                let id = builder.add_leaf(MdastNodeType::MdxFlowExpression);
+                let id = builder.add_leaf(MdastNodeType::MdxFlowExpression as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -535,7 +530,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::MdxTextExpression(expr) => {
                 let sr = builder.alloc_string(&expr);
-                let id = builder.add_leaf(MdastNodeType::MdxTextExpression);
+                let id = builder.add_leaf(MdastNodeType::MdxTextExpression as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -545,7 +540,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
             }
             Event::MdxEsm(code) => {
                 let sr = builder.alloc_string(&code);
-                let id = builder.add_leaf(MdastNodeType::MdxjsEsm);
+                let id = builder.add_leaf(MdastNodeType::MdxjsEsm as u8);
                 builder
                     .arena_mut()
                     .set_position(id, start, end, start_line, start_col, end_line, end_col);
@@ -580,7 +575,7 @@ pub fn parse(source: &str, opts: &ParseOptions) -> (MdastArena, Vec<(usize, Stri
 /// Convert a pulldown-cmark Tag to a MdastNodeType + optional type data.
 fn tag_to_node_type(
     tag: &Tag<'_>,
-    builder: &mut MdastBuilder,
+    builder: &mut ArenaBuilder,
     _source: &str,
 ) -> (MdastNodeType, Option<Vec<u8>>) {
     match tag {
@@ -709,7 +704,7 @@ fn tag_to_node_type(
 /// `[Paragraph([Text("b")])]` (newline-only text nodes are dropped).
 ///
 /// Must be called BEFORE `close_node()` while the node's children are still pending.
-fn wrap_bare_text_in_paragraphs(builder: &mut MdastBuilder, _jsx_id: u32) {
+fn wrap_bare_text_in_paragraphs(builder: &mut ArenaBuilder, _jsx_id: u32) {
     // Phase 1: Read — collect child info without holding borrows.
     let old_children: Vec<u32> = builder.current_children_mut().clone();
     let mut is_newline: Vec<bool> = Vec::with_capacity(old_children.len());
@@ -719,7 +714,7 @@ fn wrap_bare_text_in_paragraphs(builder: &mut MdastBuilder, _jsx_id: u32) {
         let newline = if node.node_type == MdastNodeType::Text as u8 {
             let data = builder.arena_ref().get_type_data(child_id);
             if data.len() >= 8 {
-                let sr = tryckeri_mdast::decode_string_ref_data(data);
+                let sr = tryckeri_arena::decode_string_ref_data(data);
                 let text = builder.arena_ref().get_str(sr);
                 text.chars().all(|c| c == '\n' || c == '\r')
             } else {
@@ -770,7 +765,7 @@ fn wrap_bare_text_in_paragraphs(builder: &mut MdastBuilder, _jsx_id: u32) {
             last.end_column,
         );
 
-        let para_id = builder.arena_mut().alloc_node(MdastNodeType::Paragraph);
+        let para_id = builder.arena_mut().alloc_node(MdastNodeType::Paragraph as u8);
         builder.arena_mut().set_children(para_id, &run_child_ids);
         for &c in &run_child_ids {
             builder.arena_mut().set_parent(c, para_id);
@@ -807,7 +802,7 @@ fn byte_offset_to_line_col(source: &str, offset: usize) -> String {
 
 /// Find the stack depth of the open JSX element.
 /// Scans from top of stack downward, returns the 1-based depth to close to.
-fn find_jsx_depth(builder: &MdastBuilder) -> usize {
+fn find_jsx_depth(builder: &ArenaBuilder) -> usize {
     let depth = builder.stack_depth();
     for i in (0..depth).rev() {
         if let Some(node_id) = builder.stack_node_id(i) {
@@ -869,7 +864,7 @@ fn extract_jsx_name(raw: &str) -> &str {
 }
 
 /// Parse a raw JSX tag string, extract name + attributes, and encode as MDAST type_data.
-fn encode_jsx_element(raw: &str, builder: &mut MdastBuilder) -> Vec<u8> {
+fn encode_jsx_element(raw: &str, builder: &mut ArenaBuilder) -> Vec<u8> {
     let name = extract_jsx_name(raw);
     let name_ref = if name.is_empty() {
         StringRef::empty()
@@ -911,7 +906,7 @@ fn source_ref_or_alloc(
     source: &str,
     text: &str,
     offset: usize,
-    builder: &mut MdastBuilder,
+    builder: &mut ArenaBuilder,
 ) -> StringRef {
     // Check if the text is a direct slice of the source at the expected offset.
     if let Some(slice) = source.get(offset..offset + text.len()) {
@@ -1119,7 +1114,7 @@ mod tests {
     fn roundtrip_to_buffer() {
         let (arena, _) = parse("# Hello\n\nworld\n", &ParseOptions::default());
         let buf = arena.to_raw_buffer();
-        let view = MdastArena::from_raw_buffer(&buf).expect("valid buffer");
+        let view = Arena::from_raw_buffer(&buf).expect("valid buffer");
         assert_eq!(view.len(), arena.len());
     }
 }

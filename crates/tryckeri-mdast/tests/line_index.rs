@@ -1,6 +1,6 @@
 //! Integration tests for LineIndex.
 
-use tryckeri_mdast::LineIndex;
+use tryckeri_arena::LineIndex;
 
 #[test]
 fn single_line_offset_zero_is_line1_col1() {

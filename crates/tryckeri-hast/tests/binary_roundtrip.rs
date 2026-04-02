@@ -1,7 +1,7 @@
 //! Integration tests for the MDAST→HAST binary pipeline.
 
 use tryckeri_hast::{hast_buffer_to_html, mdast_to_hast_buffer};
-use tryckeri_mdast::raw_buffer::BUFFER_MAGIC;
+use tryckeri_arena::BUFFER_MAGIC;
 
 fn parse_to_mdast_buf(md: &str) -> Vec<u8> {
     let (arena, _) = tryckeri_parser::parse(md, &tryckeri_parser::ParseOptions::default());

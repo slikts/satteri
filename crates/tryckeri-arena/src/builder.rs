@@ -1,26 +1,44 @@
-use crate::arena::MdastArena;
-use crate::node::{MdastNodeType, StringRef};
+use crate::arena::Arena;
+use crate::node::StringRef;
 
-/// Builds an `MdastArena` using an open/close node pattern suitable for
+/// Builds an `Arena` using an open/close node pattern suitable for
 /// depth-first tree construction (e.g. SAX-style parsers).
-pub struct MdastBuilder {
-    arena: MdastArena,
+pub struct ArenaBuilder {
+    arena: Arena,
     /// Stack of `(node_id, children_collected_so_far)`.
     stack: Vec<(u32, Vec<u32>)>,
 }
 
-impl MdastBuilder {
+impl ArenaBuilder {
     pub fn new(source: String) -> Self {
-        MdastBuilder {
-            arena: MdastArena::new(source),
+        ArenaBuilder {
+            arena: Arena::new(source),
             stack: Vec::new(),
         }
     }
 
-    pub fn open_node(&mut self, node_type: MdastNodeType) -> u32 {
+    /// Create a builder with pre-allocated capacity based on an existing arena's size.
+    pub fn with_capacity_from(source: String, hint: &Arena) -> Self {
+        ArenaBuilder {
+            arena: Arena::with_capacity(
+                source,
+                hint.nodes.len(),
+                hint.children.len(),
+                hint.type_data.len(),
+            ),
+            stack: Vec::with_capacity(16),
+        }
+    }
+
+    pub fn open_node(&mut self, node_type: u8) -> u32 {
         let node_id = self.arena.alloc_node(node_type);
         self.stack.push((node_id, Vec::new()));
         node_id
+    }
+
+    /// Alias for `open_node` — kept for call-site clarity in HAST code.
+    pub fn open_node_raw(&mut self, node_type: u8) -> u32 {
+        self.open_node(node_type)
     }
 
     pub fn close_node(&mut self) -> u32 {
@@ -39,22 +57,14 @@ impl MdastBuilder {
         node_id
     }
 
-    pub fn add_leaf(&mut self, node_type: MdastNodeType) -> u32 {
+    pub fn add_leaf(&mut self, node_type: u8) -> u32 {
         self.open_node(node_type);
         self.close_node()
     }
 
-    /// Bypasses the `MdastNodeType` enum for building HAST or other non-MDAST
-    /// arenas that share the same binary format.
-    pub fn open_node_raw(&mut self, node_type_byte: u8) -> u32 {
-        let node_id = self.arena.alloc_node_raw(node_type_byte);
-        self.stack.push((node_id, Vec::new()));
-        node_id
-    }
-
-    pub fn add_leaf_raw(&mut self, node_type_byte: u8) -> u32 {
-        self.open_node_raw(node_type_byte);
-        self.close_node()
+    /// Alias for `add_leaf` — kept for call-site clarity in HAST code.
+    pub fn add_leaf_raw(&mut self, node_type: u8) -> u32 {
+        self.add_leaf(node_type)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -97,7 +107,7 @@ impl MdastBuilder {
     }
 
     /// For reclassifying nodes during parsing (e.g. Link → LinkReference).
-    pub fn change_node_type(&mut self, node_id: u32, new_type: MdastNodeType) {
+    pub fn change_node_type(&mut self, node_id: u32, new_type: u8) {
         self.arena.change_node_type(node_id, new_type);
     }
 
@@ -117,7 +127,7 @@ impl MdastBuilder {
         self.stack.get(depth).map(|(id, _)| *id)
     }
 
-    pub fn arena_ref(&self) -> &MdastArena {
+    pub fn arena_ref(&self) -> &Arena {
         &self.arena
     }
 
@@ -125,12 +135,12 @@ impl MdastBuilder {
         &mut self.stack.last_mut().expect("empty stack").1
     }
 
-    pub fn arena_mut(&mut self) -> &mut MdastArena {
+    pub fn arena_mut(&mut self) -> &mut Arena {
         &mut self.arena
     }
 
     /// Auto-closes any remaining open nodes before returning the arena.
-    pub fn finish(mut self) -> MdastArena {
+    pub fn finish(mut self) -> Arena {
         while !self.stack.is_empty() {
             self.close_node();
         }
@@ -141,14 +151,13 @@ impl MdastBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::MdastNodeType;
-
+    
     #[test]
     fn simple_open_close() {
-        let mut builder = MdastBuilder::new("# Hello".to_string());
-        let root = builder.open_node(MdastNodeType::Root);
-        let heading = builder.open_node(MdastNodeType::Heading);
-        let text = builder.add_leaf(MdastNodeType::Text);
+        let mut builder = ArenaBuilder::new("# Hello".to_string());
+        let root = builder.open_node(0);
+        let heading = builder.open_node(2);
+        let text = builder.add_leaf(10);
         let heading_closed = builder.close_node();
         let root_closed = builder.close_node();
         assert_eq!(heading_closed, heading);
@@ -164,10 +173,10 @@ mod tests {
 
     #[test]
     fn finish_closes_open_nodes() {
-        let mut builder = MdastBuilder::new(String::new());
-        builder.open_node(MdastNodeType::Root);
-        builder.open_node(MdastNodeType::Paragraph);
-        builder.add_leaf(MdastNodeType::Text);
+        let mut builder = ArenaBuilder::new(String::new());
+        builder.open_node(0);
+        builder.open_node(1);
+        builder.add_leaf(10);
         // Do NOT close explicitly — finish() should handle it.
         let arena = builder.finish();
         assert_eq!(arena.len(), 3);
@@ -175,9 +184,9 @@ mod tests {
 
     #[test]
     fn leaf_has_no_children() {
-        let mut builder = MdastBuilder::new(String::new());
-        builder.open_node(MdastNodeType::Root);
-        let leaf = builder.add_leaf(MdastNodeType::Break);
+        let mut builder = ArenaBuilder::new(String::new());
+        builder.open_node(0);
+        let leaf = builder.add_leaf(14);
         builder.close_node();
         let arena = builder.finish();
         assert_eq!(arena.get_children(leaf), &[] as &[u32]);
@@ -185,8 +194,8 @@ mod tests {
 
     #[test]
     fn position_and_data_current() {
-        let mut builder = MdastBuilder::new("hello".to_string());
-        let id = builder.open_node(MdastNodeType::Text);
+        let mut builder = ArenaBuilder::new("hello".to_string());
+        let id = builder.open_node(10);
         builder.set_position_current(0, 5, 1, 1, 1, 6);
         builder.set_data_current(&[42u8]);
         builder.close_node();

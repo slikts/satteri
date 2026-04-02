@@ -30,7 +30,7 @@ use oxc_estree::{CompactJSSerializer, ESTree};
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::{SourceType, Span};
 use rustc_hash::FxHashSet;
-use tryckeri_mdast::mdx_types::{self as message, Location};
+use tryckeri_arena::mdx_types::{self as message, Location};
 
 pub use crate::configuration::{MdxConstructs, MdxParseOptions, OptimizeStaticConfig, Options};
 pub use crate::mdx_plugin_recma_document::JsxRuntime;
@@ -38,9 +38,10 @@ pub use crate::mdx_plugin_recma_document::JsxRuntime;
 /// Parse a JavaScript expression and return its ESTree-compatible JSON representation.
 ///
 /// Wraps the expression in an `ExpressionStatement` inside a `Program` to match
-/// the standard ESTree `Program` shape that tools like `estree-util-*` expect.
+/// the standard `ESTree` `Program` shape that tools like `estree-util-*` expect.
 ///
 /// Returns `None` if parsing fails (e.g. invalid syntax).
+#[must_use]
 pub fn parse_expression_to_estree_json(source: &str) -> Option<String> {
     let allocator = Allocator::default();
     let source_type = SourceType::mjs().with_jsx(true);
@@ -66,7 +67,7 @@ pub fn parse_expression_to_estree_json(source: &str) -> Option<String> {
 ///
 /// ```
 /// use tryckeri_mdxjs::compile;
-/// # fn main() -> Result<(), tryckeri_mdast::mdx_types::Message> {
+/// # fn main() -> Result<(), tryckeri_arena::mdx_types::Message> {
 ///
 /// let result = compile("# Hi!", &Default::default())?;
 /// assert!(result.contains("function _createMdxContent"));
@@ -110,13 +111,12 @@ pub fn compile(value: &str, options: &Options) -> Result<String, message::Messag
 /// Returns an error if the buffer is malformed or compilation fails.
 pub fn compile_arena_bytes(buf: &[u8], options: &Options) -> Result<String, message::Message> {
     // Extract source text from MDAST buffer for position resolution.
-    let mdast_view =
-        tryckeri_mdast::MdastArena::from_raw_buffer(buf).map_err(|e| message::Message {
-            reason: format!("invalid MDAST buffer: {e:?}"),
-            place: None,
-            rule_id: Box::new(String::new()),
-            source: Box::new("mdxjs".into()),
-        })?;
+    let mdast_view = tryckeri_arena::Arena::from_raw_buffer(buf).map_err(|e| message::Message {
+        reason: format!("invalid MDAST buffer: {e:?}"),
+        place: None,
+        rule_id: Box::new(String::new()),
+        source: Box::new("mdxjs".into()),
+    })?;
     let source = mdast_view.source().to_string();
 
     let hast_buf = tryckeri_hast::mdast_to_hast_buffer(buf).map_err(|e| message::Message {
@@ -149,7 +149,7 @@ pub fn compile_hast_buffer(buf: &[u8], options: &Options) -> Result<String, mess
 ///
 /// Returns an error if compilation fails (e.g. invalid MDX expressions).
 pub fn compile_hast_arena(
-    arena: &tryckeri_mdast::MdastArena,
+    arena: &tryckeri_arena::Arena,
     options: &Options,
 ) -> Result<String, message::Message> {
     let source_bytes = arena.source().as_bytes();
@@ -185,10 +185,7 @@ pub fn compile_hast_arena(
 /// And converts them to `HAST_ELEMENT` nodes so they can be:
 /// - Collapsed by `optimizeStatic` into `set:html`
 /// - Rendered to HTML by `render_node`
-pub fn simplify_plain_mdx_nodes(
-    arena: &mut tryckeri_mdast::MdastArena,
-    ignore_elements: &[String],
-) {
+pub fn simplify_plain_mdx_nodes(arena: &mut tryckeri_arena::Arena, ignore_elements: &[String]) {
     use tryckeri_hast::node_types::{
         HAST_ELEMENT, HAST_MDX_JSX_ELEMENT, HAST_MDX_JSX_TEXT_ELEMENT,
     };
@@ -251,7 +248,7 @@ pub fn compile_hast_buffer_with_source(
     options: &Options,
     source: &[u8],
 ) -> Result<String, message::Message> {
-    let view = tryckeri_mdast::MdastArena::from_raw_buffer(buf).map_err(|e| message::Message {
+    let view = tryckeri_arena::Arena::from_raw_buffer(buf).map_err(|e| message::Message {
         reason: format!("invalid HAST buffer: {e:?}"),
         place: None,
         rule_id: Box::new(String::new()),

@@ -1,6 +1,6 @@
 //! Convert a HAST binary buffer to an HTML string.
 
-use tryckeri_mdast::{BufferError, MdastArena, ReadMdast};
+use tryckeri_arena::{BufferError, Arena, ReadArena};
 
 use crate::codec::{
     decode_element_prop, decode_element_prop_count, decode_element_tag, decode_text_data,
@@ -9,22 +9,22 @@ use crate::html::is_void_element;
 use crate::node_types::*;
 
 pub fn hast_buffer_to_html(buf: &[u8]) -> Result<String, BufferError> {
-    let view = MdastArena::from_raw_buffer(buf)?;
+    let view = Arena::from_raw_buffer(buf)?;
     let mut out = String::with_capacity(view.source().len());
     render_node(0, &view, &mut out);
     Ok(out)
 }
 
 /// Render HTML from an arena directly (skips serialize→deserialize round-trip).
-pub fn hast_arena_to_html(arena: &MdastArena) -> String {
+pub fn hast_arena_to_html(arena: &Arena) -> String {
     let mut out = String::with_capacity(arena.source().len());
     render_node(0, arena, &mut out);
     out
 }
 
 /// Render a HAST node subtree to HTML. Works with both `MdastView` (zero-copy)
-/// and `MdastArena` (owned) via the `ReadMdast` trait.
-pub fn render_node<R: ReadMdast + ?Sized>(node_id: u32, view: &R, out: &mut String) {
+/// and `Arena` (owned) via the `ReadArena` trait.
+pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut String) {
     let node = view.get_node(node_id);
     let raw_type = node.node_type;
 

@@ -7,7 +7,7 @@
 //!
 //! Text/Comment/Raw type_data: just StringRef (8 bytes).
 
-use tryckeri_mdast::{decode_string_ref_data, encode_string_ref_data, StringRef};
+use tryckeri_arena::{decode_string_ref_data, encode_string_ref_data, StringRef};
 
 /// Props tuple: (name, value_type, value).
 pub fn encode_element_data(tag_name: StringRef, props: &[(StringRef, u8, StringRef)]) -> Vec<u8> {

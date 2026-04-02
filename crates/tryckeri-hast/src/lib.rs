@@ -1,26 +1,20 @@
 //! `tryckeri-hast` — HAST conversion and HTML serialization.
 
 pub mod codec;
-pub mod convert;
-pub mod from_binary;
+pub mod render;
 pub(crate) mod html;
-pub mod node;
 pub mod node_types;
-pub mod serialize;
 pub mod text_content;
-pub mod to_binary;
+pub mod convert;
 
-pub use convert::mdast_to_hast;
-pub use from_binary::{hast_arena_to_html, hast_buffer_to_html, render_node};
-pub use node::{HastArena, HastBuilder, HastNode, HastNodeType, Property, PropertyValue};
-pub use serialize::hast_to_html;
+pub use render::{hast_arena_to_html, hast_buffer_to_html, render_node};
 pub use text_content::text_content;
-pub use to_binary::mdast_arena_to_hast_arena;
-pub use to_binary::mdast_arena_to_hast_buffer;
-pub use to_binary::mdast_to_hast_buffer;
+pub use convert::mdast_arena_to_hast_arena;
+pub use convert::mdast_arena_to_hast_buffer;
+pub use convert::mdast_to_hast_buffer;
 
 /// Convert an mdast arena directly to an HTML string.
-pub fn mdast_to_html(arena: &tryckeri_mdast::MdastArena) -> String {
-    let hast = mdast_to_hast(arena);
-    hast_to_html(&hast)
+pub fn mdast_to_html(arena: &tryckeri_arena::Arena) -> String {
+    let hast = mdast_arena_to_hast_arena(arena);
+    hast_arena_to_html(&hast)
 }

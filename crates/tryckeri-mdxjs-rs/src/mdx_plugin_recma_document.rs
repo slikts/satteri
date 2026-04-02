@@ -23,8 +23,8 @@ use oxc_ast::ast::{
 };
 use oxc_span::SPAN;
 use oxc_syntax::node::NodeId;
-use tryckeri_mdast::mdx_types as message;
-use tryckeri_mdast::mdx_types::{Location, Point, Position};
+use tryckeri_arena::mdx_types as message;
+use tryckeri_arena::mdx_types::{Location, Point, Position};
 
 /// JSX runtimes (default: `JsxRuntime::Automatic`).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

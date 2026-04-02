@@ -2,8 +2,8 @@
 //!
 //! Wire format: `[BufferHeader][nodes...][children u32s][type_data bytes][source UTF-8]`
 
-use crate::arena::MdastArena;
-use crate::node::{MdastNode, NODE_STRUCT_SIZE};
+use crate::arena::Arena;
+use crate::node::{ArenaNode, NODE_STRUCT_SIZE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BufferError {
@@ -21,7 +21,7 @@ impl std::fmt::Display for BufferError {
             BufferError::TooShort => write!(f, "buffer too short"),
             BufferError::BadMagic => write!(f, "bad magic bytes"),
             BufferError::VersionMismatch => write!(f, "version mismatch"),
-            BufferError::NodeSizeMismatch => write!(f, "MdastNode size mismatch"),
+            BufferError::NodeSizeMismatch => write!(f, "ArenaNode size mismatch"),
             BufferError::InvalidUtf8 => write!(f, "source is not valid UTF-8"),
             BufferError::OutOfBounds => write!(f, "offset out of bounds"),
         }
@@ -52,7 +52,7 @@ pub struct BufferHeader {
 
 const HEADER_SIZE: usize = std::mem::size_of::<BufferHeader>();
 
-impl MdastArena {
+impl Arena {
     /// Serialize to a flat byte buffer:
     /// `[BufferHeader][nodes][children u32s][type_data][source]`
     pub fn to_raw_buffer(&self) -> Vec<u8> {
@@ -104,8 +104,8 @@ impl MdastArena {
         buf
     }
 
-    /// Deserialize from a raw buffer into an owned `MdastArena`.
-    pub fn from_raw_buffer(buf: &[u8]) -> Result<MdastArena, BufferError> {
+    /// Deserialize from a raw buffer into an owned `Arena`.
+    pub fn from_raw_buffer(buf: &[u8]) -> Result<Arena, BufferError> {
         if buf.len() < HEADER_SIZE {
             return Err(BufferError::TooShort);
         }
@@ -145,11 +145,11 @@ impl MdastArena {
         // Deserialize into owned vectors
         let node_count = header.node_count as usize;
         let nodes_start = header.nodes_offset as usize;
-        let nodes: Vec<MdastNode> = (0..node_count)
+        let nodes: Vec<ArenaNode> = (0..node_count)
             .map(|i| {
                 let offset = nodes_start + i * NODE_STRUCT_SIZE;
                 unsafe {
-                    let mut node = std::mem::MaybeUninit::<MdastNode>::uninit();
+                    let mut node = std::mem::MaybeUninit::<ArenaNode>::uninit();
                     std::ptr::copy_nonoverlapping(
                         buf[offset..].as_ptr(),
                         node.as_mut_ptr() as *mut u8,
@@ -175,12 +175,12 @@ impl MdastArena {
 
         let source = unsafe { std::str::from_utf8_unchecked(source_bytes) }.to_string();
 
-        Ok(MdastArena {
+        Ok(Arena {
             nodes,
             children,
             type_data,
             source,
-            node_data: std::collections::HashMap::new(),
+            node_data: rustc_hash::FxHashMap::default(),
             mdx: false,
         })
     }
@@ -189,14 +189,13 @@ impl MdastArena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::MdastBuilder;
-    use crate::node::MdastNodeType;
+    use crate::builder::ArenaBuilder;
 
-    fn simple_arena() -> MdastArena {
-        let mut builder = MdastBuilder::new("Hello, world!".to_string());
-        builder.open_node(MdastNodeType::Root);
-        builder.open_node(MdastNodeType::Paragraph);
-        builder.add_leaf(MdastNodeType::Text);
+    fn simple_arena() -> Arena {
+        let mut builder = ArenaBuilder::new("Hello, world!".to_string());
+        builder.open_node(0);
+        builder.open_node(1);
+        builder.add_leaf(10);
         builder.close_node();
         builder.close_node();
         builder.finish()
@@ -216,7 +215,7 @@ mod tests {
     fn round_trip_node_count() {
         let arena = simple_arena();
         let buf = arena.to_raw_buffer();
-        let view = MdastArena::from_raw_buffer(&buf).unwrap();
+        let view = Arena::from_raw_buffer(&buf).unwrap();
         assert_eq!(view.len(), arena.len());
     }
 
@@ -225,7 +224,7 @@ mod tests {
         let arena = simple_arena();
         let mut buf = arena.to_raw_buffer();
         buf[0] = b'X';
-        let err = MdastArena::from_raw_buffer(&buf).unwrap_err();
+        let err = Arena::from_raw_buffer(&buf).unwrap_err();
         assert_eq!(err, BufferError::BadMagic);
     }
 
@@ -233,7 +232,7 @@ mod tests {
     fn round_trip_source() {
         let arena = simple_arena();
         let buf = arena.to_raw_buffer();
-        let view = MdastArena::from_raw_buffer(&buf).unwrap();
+        let view = Arena::from_raw_buffer(&buf).unwrap();
         assert_eq!(view.source(), "Hello, world!");
     }
 
@@ -242,7 +241,7 @@ mod tests {
         let arena = simple_arena();
         let original_children: Vec<u32> = arena.get_children(0).to_vec();
         let buf = arena.to_raw_buffer();
-        let view = MdastArena::from_raw_buffer(&buf).unwrap();
+        let view = Arena::from_raw_buffer(&buf).unwrap();
         assert_eq!(view.get_children(0), original_children.as_slice());
     }
 }

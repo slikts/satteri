@@ -136,6 +136,21 @@ fn full_pipeline_to_html(bencher: divan::Bencher) {
     });
 }
 
+/// Given a pre-parsed MDAST arena, convert to HAST arena (no buffer round-trip).
+#[divan::bench]
+fn mdast_arena_to_hast_arena(bencher: divan::Bencher) {
+    let (arena, _) = tryckeri_parser::parse(MARKDOWN, &tryckeri_parser::ParseOptions::default());
+    bencher.bench(|| tryckeri_hast::mdast_arena_to_hast_arena(&arena));
+}
+
+/// Given a pre-built HAST arena, render to HTML (no buffer).
+#[divan::bench]
+fn hast_arena_to_html(bencher: divan::Bencher) {
+    let (arena, _) = tryckeri_parser::parse(MARKDOWN, &tryckeri_parser::ParseOptions::default());
+    let hast = tryckeri_hast::mdast_arena_to_hast_arena(&arena);
+    bencher.bench(|| tryckeri_hast::hast_arena_to_html(&hast));
+}
+
 /// Given a pre-serialised MDAST buffer, convert to HAST buffer.
 #[divan::bench]
 fn mdast_buffer_to_hast_buffer(bencher: divan::Bencher) {

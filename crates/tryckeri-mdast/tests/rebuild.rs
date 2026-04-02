@@ -2,9 +2,10 @@
 //!
 //! Tests apply patches to the "# Hello\n\nWorld" arena and verify the resulting structure.
 
+use tryckeri_arena::{Arena, ArenaBuilder};
 use tryckeri_mdast::{
     rebuild::{rebuild, Patch},
-    MdastArena, MdastBuilder, MdastNodeType,
+    MdastNodeType,
 };
 
 /// Tree structure:
@@ -13,31 +14,31 @@ use tryckeri_mdast::{
 ///       Text "Hello" (2)
 ///     Paragraph (3)
 ///       Text "World" (4)
-fn build_hello_world() -> MdastArena {
+fn build_hello_world() -> Arena {
     use tryckeri_mdast::codec::{encode_heading_data, encode_string_ref_data};
-    use tryckeri_mdast::StringRef;
+    use tryckeri_arena::StringRef;
 
     let source = "# Hello\n\nWorld".to_string();
-    let mut b = MdastBuilder::new(source);
+    let mut b = ArenaBuilder::new(source);
 
-    b.open_node(MdastNodeType::Root);
+    b.open_node(MdastNodeType::Root as u8);
     b.set_position_current(0, 14, 1, 1, 2, 6);
 
-    b.open_node(MdastNodeType::Heading);
+    b.open_node(MdastNodeType::Heading as u8);
     b.set_position_current(0, 7, 1, 1, 1, 8);
     b.set_data_current(&encode_heading_data(1));
 
-    b.open_node(MdastNodeType::Text);
+    b.open_node(MdastNodeType::Text as u8);
     b.set_position_current(2, 7, 1, 3, 1, 8);
     b.set_data_current(&encode_string_ref_data(StringRef::new(2, 5)));
     b.close_node();
 
     b.close_node(); // heading
 
-    b.open_node(MdastNodeType::Paragraph);
+    b.open_node(MdastNodeType::Paragraph as u8);
     b.set_position_current(9, 14, 2, 1, 2, 6);
 
-    b.open_node(MdastNodeType::Text);
+    b.open_node(MdastNodeType::Text as u8);
     b.set_position_current(9, 14, 2, 1, 2, 6);
     b.set_data_current(&encode_string_ref_data(StringRef::new(9, 5)));
     b.close_node();
@@ -48,9 +49,9 @@ fn build_hello_world() -> MdastArena {
     b.finish()
 }
 
-fn single_node_arena(node_type: MdastNodeType) -> MdastArena {
-    let mut b = MdastBuilder::new(String::new());
-    b.open_node(node_type);
+fn single_node_arena(node_type: MdastNodeType) -> Arena {
+    let mut b = ArenaBuilder::new(String::new());
+    b.open_node(node_type as u8);
     b.close_node();
     b.finish()
 }

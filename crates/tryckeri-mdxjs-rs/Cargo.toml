@@ -1,4 +1,5 @@
 [dependencies]
+tryckeri-arena = { path = "../tryckeri-arena" }
 tryckeri-mdast = { path = "../tryckeri-mdast" }
 tryckeri-parser = { path = "../tryckeri-parser" }
 tryckeri-hast = { path = "../tryckeri-hast" }

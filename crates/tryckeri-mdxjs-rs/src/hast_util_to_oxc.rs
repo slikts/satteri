@@ -1,6 +1,6 @@
 //! Turn a HAST arena into a JavaScript AST.
 //!
-//! Reads from any `ReadMdast` implementation (owned arena or binary view).
+//! Reads from any `ReadArena` implementation (owned arena or binary view).
 
 use crate::configuration::OptimizeStaticConfig;
 use crate::oxc::{parse_esm_to_tree, parse_expression_to_tree, serialize};
@@ -30,13 +30,13 @@ use tryckeri_hast::node_types::{
     MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
     PROP_BOOL_TRUE, PROP_COMMA_SEP, PROP_SPACE_SEP, PROP_STRING,
 };
-use tryckeri_mdast::ReadMdast;
-use tryckeri_mdast::mdx_types::{self as message, Location, MdxExpressionKind};
+use tryckeri_arena::ReadArena;
+use tryckeri_arena::mdx_types::{self as message, Location, MdxExpressionKind};
 use tryckeri_mdast::{decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name};
 
 /// Get a Span from a HAST binary node's position data.
 /// Uses offset+1 convention so that (0,0) remains SPAN (dummy).
-fn node_span(view: &dyn ReadMdast, node_id: u32) -> Span {
+fn node_span(view: &dyn ReadArena, node_id: u32) -> Span {
     let node = view.get_node(node_id);
     if node.start_offset == 0 && node.end_offset == 0 && node.start_line == 0 {
         SPAN
@@ -96,13 +96,13 @@ struct Context<'a> {
     esm: Vec<Statement<'a>>,
     location: Option<&'a Location>,
     allocator: &'a Allocator,
-    view: &'a dyn ReadMdast,
+    view: &'a dyn ReadArena,
     optimize_static: Option<&'a OptimizeStaticConfig>,
 }
 
 /// Compile a HAST into OXC's ES AST.
 pub fn hast_util_to_oxc<'a>(
-    view: &'a dyn ReadMdast,
+    view: &'a dyn ReadArena,
     path: Option<String>,
     location: Option<&'a Location>,
     explicit_jsxs: &mut FxHashSet<Span>,
@@ -196,7 +196,7 @@ fn one<'a>(
 ///
 /// Returns `false` for any subtree containing MDX nodes (components, expressions, ESM)
 /// or elements whose tag name is in the ignore list.
-fn is_static_subtree(view: &dyn ReadMdast, node_id: u32, config: &OptimizeStaticConfig) -> bool {
+fn is_static_subtree(view: &dyn ReadArena, node_id: u32, config: &OptimizeStaticConfig) -> bool {
     let node = view.get_node(node_id);
     let raw_type = node.node_type;
 
@@ -228,7 +228,7 @@ fn is_static_subtree(view: &dyn ReadMdast, node_id: u32, config: &OptimizeStatic
 
 /// Try to render a static subtree to an HTML string. Returns false if not static.
 fn try_render_static(
-    view: &dyn ReadMdast,
+    view: &dyn ReadArena,
     node_id: u32,
     config: &OptimizeStaticConfig,
     out: &mut String,

@@ -1,13 +1,13 @@
-//! `ReadMdast` — a trait for read-only access to an arena.
+//! `ReadArena` — a trait for read-only access to an arena.
 //!
-//! Implemented by both `MdastArena` (owned) and `MdastView<'_>` (zero-copy view
+//! Implemented by both `Arena` (owned) and `MdastView<'_>` (zero-copy view
 //! over a raw buffer). Code that only needs to read the tree (e.g. HAST
 //! conversion, HTML serialization) can be generic over this trait.
 
-use crate::node::{MdastNode, StringRef};
+use crate::node::{ArenaNode, StringRef};
 
-pub trait ReadMdast {
-    fn get_node(&self, node_id: u32) -> &MdastNode;
+pub trait ReadArena {
+    fn get_node(&self, node_id: u32) -> &ArenaNode;
     fn get_children(&self, node_id: u32) -> &[u32];
     fn get_type_data(&self, node_id: u32) -> &[u8];
     fn get_str(&self, string_ref: StringRef) -> &str;
@@ -22,8 +22,8 @@ pub trait ReadMdast {
     }
 }
 
-impl ReadMdast for crate::arena::MdastArena {
-    fn get_node(&self, node_id: u32) -> &MdastNode {
+impl ReadArena for crate::arena::Arena {
+    fn get_node(&self, node_id: u32) -> &ArenaNode {
         self.get_node(node_id)
     }
     fn get_children(&self, node_id: u32) -> &[u32] {

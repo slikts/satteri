@@ -8,6 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+tryckeri-arena = { path = "../tryckeri-arena" }
 tryckeri-mdast = { path = "../tryckeri-mdast" }
 tryckeri-hast = { path = "../tryckeri-hast" }
 tryckeri-mdxjs = { path = "../tryckeri-mdxjs-rs" }
