@@ -5,7 +5,8 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "stripInternal": true
+    "stripInternal": true,
+    "types": ["node"]
   },
   "include": ["src", "test", "bench"],
   "exclude": ["dist", "node_modules"]

@@ -27,7 +27,14 @@ import {
   convertMdastToHastHandle,
   applyCommandsAndConvertToHastHandle,
   getHandleSource,
+  serializeHandle,
+  serializeMdastHandle,
 } from "../index.js";
+import { ArenaReader } from "./mdast/mdast-reader.js";
+import { materializeTree } from "./mdast/mdast-materializer.js";
+import { HastReader } from "./hast/hast-reader.js";
+import { materializeHastTree } from "./hast/hast-materializer.js";
+import type { MdastNode, HastNode } from "./types.js";
 
 // Helpers
 
@@ -142,11 +149,14 @@ export interface OptimizeStaticConfig {
 export interface CompileOptions {
   mdastPlugins?: MdastPluginDefinition[];
   hastPlugins?: HastPluginDefinition[];
-  optimizeStatic?: OptimizeStaticConfig;
   filename?: string;
 }
 
-export function compileMarkdownToHtml(
+export interface MdxCompileOptions extends CompileOptions {
+  optimizeStatic?: OptimizeStaticConfig;
+}
+
+export function markdownToHtml(
   source: string,
   options: CompileOptions = {},
 ): string | Promise<string> {
@@ -178,9 +188,9 @@ export function compileMarkdownToHtml(
   return finish(handleResult);
 }
 
-export function compileMdxToJs(
+export function mdxToJs(
   source: string,
-  options: CompileOptions = {},
+  options: MdxCompileOptions = {},
 ): string | Promise<string> {
   const { mdastPlugins = [], hastPlugins = [], optimizeStatic, filename = "<unknown>" } = options;
   const mdxOptions = optimizeStatic ? { optimizeStatic } : undefined;
@@ -240,3 +250,36 @@ function createHastHandleFromMdast(
   }
   return convert(mdastResult);
 }
+
+// Step-by-step API: individual pipeline stages with materialized trees
+
+/** Parse Markdown source into a materialized mdast tree. */
+export function markdownToMdast(source: string): MdastNode {
+  const handle = createMdastHandle(source);
+  const buf = serializeMdastHandle(handle);
+  return materializeTree(new ArenaReader(buf));
+}
+
+/** Parse MDX source into a materialized mdast tree. */
+export function mdxToMdast(source: string): MdastNode {
+  const handle = createMdxMdastHandle(source);
+  const buf = serializeMdastHandle(handle);
+  return materializeTree(new ArenaReader(buf));
+}
+
+/** Convert Markdown source to a materialized hast tree. */
+export function markdownToHast(source: string): HastNode {
+  const handle = createHastHandle(source);
+  const buf = serializeHandle(handle);
+  dropHandle(handle);
+  return materializeHastTree(new HastReader(buf));
+}
+
+/** Convert MDX source to a materialized hast tree. */
+export function mdxToHast(source: string): HastNode {
+  const handle = createMdxHastHandle(source);
+  const buf = serializeHandle(handle);
+  dropHandle(handle);
+  return materializeHastTree(new HastReader(buf));
+}
+

@@ -3,6 +3,7 @@ import {
   visitMdastHandle,
   resolveMdastSubscriptions,
   type MdastVisitorContext,
+  type MdastPluginInstance,
 } from "../src/mdast/mdast-visitor.js";
 import {
   createMdastHandle,
@@ -194,8 +195,8 @@ test("hasMutations is false when no mutations, true when there are mutations", (
 
 test("setProperty + returning the same node does not drop the mutation", () => {
   const { handle, source } = setup();
-  const plugin = {
-    heading(node: MdastNode, context: MdastVisitorContext) {
+  const plugin: MdastPluginInstance = {
+    heading(node, context) {
       context.setProperty(node, "depth", 3);
       return node; // returning same object should NOT clobber the setProperty
     },

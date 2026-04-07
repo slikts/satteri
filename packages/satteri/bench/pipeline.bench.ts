@@ -10,8 +10,12 @@
 import { readFileSync } from "node:fs";
 import { bench, describe } from "vitest";
 import {
-  compileMarkdownToHtml,
-  compileMdxToJs,
+  markdownToHtml,
+  mdxToJs,
+  markdownToMdast,
+  mdxToMdast,
+  markdownToHast,
+  mdxToHast,
   defineHastPlugin,
   defineMdastPlugin,
 } from "../src/index.js";
@@ -55,48 +59,72 @@ const noopMdastPlugin = defineMdastPlugin({
   createOnce: () => ({ heading() {} }),
 });
 
-describe("compileMarkdownToHtml", () => {
+describe("markdownToHtml", () => {
   bench("no plugins", () => {
-    compileMarkdownToHtml(MARKDOWN);
+    markdownToHtml(MARKDOWN);
   });
 
   bench("noop HAST plugin (all elements)", () => {
-    compileMarkdownToHtml(MARKDOWN, { hastPlugins: [noopHastPlugin] });
+    markdownToHtml(MARKDOWN, { hastPlugins: [noopHastPlugin] });
   });
 
   bench("filtered HAST plugin ([a] only)", () => {
-    compileMarkdownToHtml(MARKDOWN, { hastPlugins: [filteredHastPlugin] });
+    markdownToHtml(MARKDOWN, { hastPlugins: [filteredHastPlugin] });
   });
 
   bench("mutating HAST plugin (set id on headings)", () => {
-    compileMarkdownToHtml(MARKDOWN, { hastPlugins: [mutatingHastPlugin] });
+    markdownToHtml(MARKDOWN, { hastPlugins: [mutatingHastPlugin] });
   });
 
   bench("noop MDAST plugin", () => {
-    compileMarkdownToHtml(MARKDOWN, { mdastPlugins: [noopMdastPlugin] });
+    markdownToHtml(MARKDOWN, { mdastPlugins: [noopMdastPlugin] });
   });
 
   bench("MDAST + HAST plugins", () => {
-    compileMarkdownToHtml(MARKDOWN, {
+    markdownToHtml(MARKDOWN, {
       mdastPlugins: [noopMdastPlugin],
       hastPlugins: [mutatingHastPlugin],
     });
   });
 });
 
-describe("compileMdxToJs", () => {
+describe("mdxToJs", () => {
   bench("no plugins", () => {
-    compileMdxToJs(MDX);
+    mdxToJs(MDX);
   });
 
   bench("noop HAST plugin", () => {
-    compileMdxToJs(MDX, { hastPlugins: [noopHastPlugin] });
+    mdxToJs(MDX, { hastPlugins: [noopHastPlugin] });
   });
 
   bench("MDAST + HAST plugins", () => {
-    compileMdxToJs(MDX, {
+    mdxToJs(MDX, {
       mdastPlugins: [noopMdastPlugin],
       hastPlugins: [mutatingHastPlugin],
     });
+  });
+});
+
+describe("markdownToMdast", () => {
+  bench("markdown", () => {
+    markdownToMdast(MARKDOWN);
+  });
+});
+
+describe("mdxToMdast", () => {
+  bench("mdx", () => {
+    mdxToMdast(MDX);
+  });
+});
+
+describe("markdownToHast", () => {
+  bench("markdown", () => {
+    markdownToHast(MARKDOWN);
+  });
+});
+
+describe("mdxToHast", () => {
+  bench("mdx", () => {
+    mdxToHast(MDX);
   });
 });

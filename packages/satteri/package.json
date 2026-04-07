@@ -16,9 +16,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
-    "./hast": "./dist/hast-types.js",
-    "./mdast": "./dist/mdast-types.js"
+    ".": "./dist/index.js"
   },
   "scripts": {
     "build:native": "napi build --manifest-path ../../crates/satteri-napi-binding/Cargo.toml --output-dir . --platform --release --esm --strip",
@@ -41,6 +39,7 @@
     "@emnapi/runtime": "^1.9.1",
     "@napi-rs/wasm-runtime": "^1.1.2",
     "@types/node": "^25.5.0",
+    "shiki": "^4.0.2",
     "vitest": "^4"
   },
   "napi": {

@@ -1,6 +1,13 @@
 // Public API: compile functions
-export { compileMarkdownToHtml, compileMdxToJs } from "./compile.js";
-export type { CompileOptions, OptimizeStaticConfig } from "./compile.js";
+export {
+  markdownToHtml,
+  mdxToJs,
+  markdownToMdast,
+  mdxToMdast,
+  markdownToHast,
+  mdxToHast,
+} from "./compile.js";
+export type { CompileOptions, MdxCompileOptions, OptimizeStaticConfig } from "./compile.js";
 
 // Plugin definitions
 export { defineMdastPlugin, defineHastPlugin } from "./plugin.js";

@@ -11,18 +11,13 @@ import {
 } from "../index.js";
 import { HastReader } from "../src/hast/hast-reader.js";
 import { visitHastHandle, resolveSubscriptions } from "../src/hast/hast-visitor.js";
-import { compileMarkdownToHtml, defineMdastPlugin } from "../src/index.js";
+import { markdownToHtml, defineMdastPlugin } from "../src/index.js";
 import type { MdastNode } from "../src/types.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 import type { MdastPluginInstance } from "../src/mdast/mdast-visitor.js";
 
 // Helpers
-
-/** Full pipeline: markdown → HAST → HTML string (handle-based) */
-function markdownToHtml(source: string): string {
-  return parseToHtml(source);
-}
 
 /** Create a HAST reader from source (handle-based) */
 function makeHastReader(source: string): {
@@ -42,7 +37,7 @@ function markdownToHtmlWithMdastPlugins(
   const mdastPlugins = plugins.map((p) =>
     defineMdastPlugin({ name: p.name, createOnce: () => p.instance }),
   );
-  return compileMarkdownToHtml(source, { mdastPlugins }) as string;
+  return markdownToHtml(source, { mdastPlugins }) as string;
 }
 
 // PART 1: MDAST plugins that affect the Markdown → HTML result
@@ -395,7 +390,7 @@ describe("Handle-based HAST pipeline", () => {
 
 describe("combined MDAST + HAST plugin scenarios", () => {
   test("MDAST plugin removes heading, HAST tree reflects the removal", () => {
-    const html = compileMarkdownToHtml("# Gone\n\nStays", {
+    const html = markdownToHtml("# Gone\n\nStays", {
       mdastPlugins: [
         defineMdastPlugin({
           name: "remove-headings",
@@ -414,7 +409,7 @@ describe("combined MDAST + HAST plugin scenarios", () => {
   });
 
   test("MDAST plugin replaces heading → HAST sees paragraph instead of h1", () => {
-    const html = compileMarkdownToHtml("# Was Heading\n\nParagraph", {
+    const html = markdownToHtml("# Was Heading\n\nParagraph", {
       mdastPlugins: [
         defineMdastPlugin({
           name: "heading-to-paragraph",
@@ -434,7 +429,7 @@ describe("combined MDAST + HAST plugin scenarios", () => {
   });
 
   test("HAST visitor can inspect the result of MDAST plugin transforms", () => {
-    const html = compileMarkdownToHtml("See [link](https://example.com) here", {
+    const html = markdownToHtml("See [link](https://example.com) here", {
       mdastPlugins: [
         defineMdastPlugin({
           name: "remove-links",

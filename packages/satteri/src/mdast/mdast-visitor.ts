@@ -126,44 +126,48 @@ export class MdastVisitorContext {
     this.filename = filename;
   }
 
-  removeNode(node: MdastNode): void {
-    this.#commandBuffer.removeNode(nid(node));
+  removeNode(node: Readonly<MdastNode>): void {
+    this.#commandBuffer.removeNode(nid(node as MdastNode));
   }
 
-  insertBefore(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.insertBefore(nid(node), newNode);
+  insertBefore(node: Readonly<MdastNode>, newNode: MdastNode): void {
+    this.#commandBuffer.insertBefore(nid(node as MdastNode), newNode);
   }
 
-  insertAfter(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.insertAfter(nid(node), newNode);
+  insertAfter(node: Readonly<MdastNode>, newNode: MdastNode): void {
+    this.#commandBuffer.insertAfter(nid(node as MdastNode), newNode);
   }
 
-  wrapNode(node: MdastNode, parentNode: MdastNode): void {
-    this.#commandBuffer.wrapNode(nid(node), parentNode);
+  wrapNode(node: Readonly<MdastNode>, parentNode: MdastNode): void {
+    this.#commandBuffer.wrapNode(nid(node as MdastNode), parentNode);
   }
 
-  prependChild(node: MdastNode, childNode: MdastNode): void {
-    this.#commandBuffer.prependChild(nid(node), childNode);
+  prependChild(node: Readonly<MdastNode>, childNode: MdastNode): void {
+    this.#commandBuffer.prependChild(nid(node as MdastNode), childNode);
   }
 
-  appendChild(node: MdastNode, childNode: MdastNode): void {
-    this.#commandBuffer.appendChild(nid(node), childNode);
+  appendChild(node: Readonly<MdastNode>, childNode: MdastNode): void {
+    this.#commandBuffer.appendChild(nid(node as MdastNode), childNode);
   }
 
-  replaceNode(node: MdastNode, newNode: MdastNode): void {
-    this.#commandBuffer.replace(nid(node), newNode);
+  replaceNode(node: Readonly<MdastNode>, newNode: MdastNode): void {
+    this.#commandBuffer.replace(nid(node as MdastNode), newNode);
   }
 
-  setProperty(node: MdastNode, key: string, value: unknown): void {
-    this.#commandBuffer.setProperty(nid(node), key, value);
+  setProperty<N extends MdastNode, K extends keyof N & string>(
+    node: Readonly<N>,
+    key: K,
+    value: N[K],
+  ): void {
+    this.#commandBuffer.setProperty(nid(node as MdastNode), key, value);
   }
 
   /** Collect the concatenated text of all descendant text nodes (like mdast-util-to-string). */
   textContent(
-    node: MdastNode,
+    node: Readonly<MdastNode>,
     options?: { includeImageAlt?: boolean; includeHtml?: boolean },
   ): string {
-    return mdastTextContentHandle(this.#handle, nid(node), options);
+    return mdastTextContentHandle(this.#handle, nid(node as MdastNode), options);
   }
 
   report({
@@ -172,7 +176,7 @@ export class MdastVisitorContext {
     severity = "error",
   }: {
     message: string;
-    node?: MdastNode;
+    node?: Readonly<MdastNode>;
     severity?: "error" | "warning" | "info";
   }): void {
     this.#diagnostics.push({
@@ -202,7 +206,7 @@ type MdastVisitorResult =
   | void;
 
 type MdastVisitorFn<N extends MdastNode = MdastNode> = (
-  node: N,
+  node: Readonly<N>,
   context: MdastVisitorContext,
 ) => MdastVisitorResult | Promise<MdastVisitorResult>;
 

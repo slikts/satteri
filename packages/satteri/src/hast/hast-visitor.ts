@@ -62,17 +62,17 @@ export interface HastDiagnostic {
 export interface HastVisitorContext {
   readonly source: string;
   readonly filename: string;
-  removeNode(node: HastNode): void;
-  replaceNode(node: HastNode, newNode: HastNode): void;
-  insertBefore(node: HastNode, newNode: HastNode): void;
-  insertAfter(node: HastNode, newNode: HastNode): void;
-  wrapNode(node: HastNode, parentNode: HastNode): void;
-  prependChild(node: HastNode, childNode: HastNode): void;
-  appendChild(node: HastNode, childNode: HastNode): void;
-  setProperty(node: HastNode, key: string, value: unknown): void;
+  removeNode(node: Readonly<HastNode>): void;
+  replaceNode(node: Readonly<HastNode>, newNode: HastNode): void;
+  insertBefore(node: Readonly<HastNode>, newNode: HastNode): void;
+  insertAfter(node: Readonly<HastNode>, newNode: HastNode): void;
+  wrapNode(node: Readonly<HastNode>, parentNode: HastNode): void;
+  prependChild(node: Readonly<HastNode>, childNode: HastNode): void;
+  appendChild(node: Readonly<HastNode>, childNode: HastNode): void;
+  setProperty(node: Readonly<HastNode>, key: string, value: unknown): void;
   /** Collect the concatenated text of all descendant text nodes (like DOM textContent). */
-  textContent(node: HastNode): string;
-  report(opts: { message: string; node?: HastNode; severity?: "error" | "warning" | "info" }): void;
+  textContent(node: Readonly<HastNode>): string;
+  report(opts: { message: string; node?: Readonly<HastNode>; severity?: "error" | "warning" | "info" }): void;
   getDiagnostics(): HastDiagnostic[];
 }
 
@@ -200,11 +200,11 @@ class HastVisitorContextImpl implements HastVisitorContext {
 /** A filtered visitor: Rust filters by tag/component name, only matched nodes cross the boundary. */
 export interface HastFilteredVisitor<N extends HastNode = HastNode> {
   filter: string[];
-  visit(node: N, ctx: HastVisitorContext): HastNode | void | Promise<HastNode | void>;
+  visit(node: Readonly<N>, ctx: HastVisitorContext): HastNode | void | Promise<HastNode | void>;
 }
 
 type HastVisitorFn<N extends HastNode = HastNode> = (
-  node: N,
+  node: Readonly<N>,
   ctx: HastVisitorContext,
 ) => HastNode | void | Promise<HastNode | void>;
 
