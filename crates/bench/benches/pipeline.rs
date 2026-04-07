@@ -24,9 +24,7 @@ fn main() {
     divan::main();
 }
 
-// ---------------------------------------------------------------------------
 // Parse benchmarks
-// ---------------------------------------------------------------------------
 
 /// Parse Markdown source into an Arena.
 #[divan::bench]
@@ -45,9 +43,7 @@ fn parse_to_buffer(bencher: divan::Bencher) {
     });
 }
 
-// ---------------------------------------------------------------------------
 // pulldown-cmark comparison
-// ---------------------------------------------------------------------------
 
 /// pulldown-cmark: parse to events (GFM + Math extensions).
 #[divan::bench]
@@ -122,9 +118,7 @@ fn pulldown_mdx_parse(bencher: divan::Bencher) {
     });
 }
 
-// ---------------------------------------------------------------------------
 // HAST benchmarks
-// ---------------------------------------------------------------------------
 
 /// Full pipeline: Markdown source → Arena → HTML string.
 #[divan::bench]
@@ -132,7 +126,7 @@ fn full_pipeline_to_html(bencher: divan::Bencher) {
     let opts = satteri_pulldown_cmark::DEFAULT_OPTIONS;
     bencher.bench(|| {
         let (arena, _) = satteri_pulldown_cmark::parse(MARKDOWN, opts);
-        satteri_hast::mdast_to_html(&arena)
+        satteri_ast::mdast_to_html(&arena)
     });
 }
 
@@ -141,7 +135,7 @@ fn full_pipeline_to_html(bencher: divan::Bencher) {
 fn mdast_arena_to_hast_arena(bencher: divan::Bencher) {
     let (arena, _) =
         satteri_pulldown_cmark::parse(MARKDOWN, satteri_pulldown_cmark::DEFAULT_OPTIONS);
-    bencher.bench(|| satteri_hast::mdast_arena_to_hast_arena(&arena));
+    bencher.bench(|| satteri_ast::hast::mdast_arena_to_hast_arena(&arena));
 }
 
 /// Given a pre-built HAST arena, render to HTML (no buffer).
@@ -149,21 +143,17 @@ fn mdast_arena_to_hast_arena(bencher: divan::Bencher) {
 fn hast_arena_to_html(bencher: divan::Bencher) {
     let (arena, _) =
         satteri_pulldown_cmark::parse(MARKDOWN, satteri_pulldown_cmark::DEFAULT_OPTIONS);
-    let hast = satteri_hast::mdast_arena_to_hast_arena(&arena);
-    bencher.bench(|| satteri_hast::hast_arena_to_html(&hast));
+    let hast = satteri_ast::hast::mdast_arena_to_hast_arena(&arena);
+    bencher.bench(|| satteri_ast::hast::hast_arena_to_html(&hast));
 }
 
-// ---------------------------------------------------------------------------
-// MDX benchmarks — full pipeline and step-by-step breakdown
-// ---------------------------------------------------------------------------
+// MDX benchmarks: full pipeline and step-by-step breakdown
 
 /// Full pipeline: MDX source → JavaScript (parse + mdast→hast + hast→OXC + serialize).
 #[divan::bench]
 fn mdx_compile(bencher: divan::Bencher) {
     bencher.bench(|| satteri_mdxjs::compile(MDX, &satteri_mdxjs::Options::default()).unwrap());
 }
-
-// ---- Step-by-step breakdown ----
 
 /// Step 1 of MDX compile: parse MDX source into an Arena.
 #[divan::bench]
@@ -177,14 +167,14 @@ fn mdx_step1_parse(bencher: divan::Bencher) {
 fn mdx_step2_mdast_to_hast(bencher: divan::Bencher) {
     let (arena, _) = satteri_pulldown_cmark::parse(MDX, satteri_pulldown_cmark::MDX_OPTIONS);
 
-    bencher.bench(|| satteri_hast::mdast_arena_to_hast_arena(&arena));
+    bencher.bench(|| satteri_ast::hast::mdast_arena_to_hast_arena(&arena));
 }
 
 /// Step 3 of MDX compile: HAST arena → OXC ES AST → JavaScript.
 #[divan::bench]
 fn mdx_step3_hast_to_js(bencher: divan::Bencher) {
     let (arena, _) = satteri_pulldown_cmark::parse(MDX, satteri_pulldown_cmark::MDX_OPTIONS);
-    let hast_arena = satteri_hast::mdast_arena_to_hast_arena(&arena);
+    let hast_arena = satteri_ast::hast::mdast_arena_to_hast_arena(&arena);
     let opts = satteri_mdxjs::Options::default();
 
     bencher.bench(|| satteri_mdxjs::compile_hast_arena(&hast_arena, &opts).unwrap());

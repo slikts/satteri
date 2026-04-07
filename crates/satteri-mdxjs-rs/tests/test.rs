@@ -254,9 +254,7 @@ export default MDXContent;
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
 // optimize_static tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn optimize_static_default_off() -> Result<(), satteri_arena::mdx_types::Message> {
@@ -330,7 +328,7 @@ fn optimize_static_react_style() -> Result<(), satteri_arena::mdx_types::Message
 
 #[test]
 fn optimize_static_mixed_dynamic() -> Result<(), satteri_arena::mdx_types::Message> {
-    // Static content + dynamic MDX component — static parts should be collapsed,
+    // Static content + dynamic MDX component, static parts should be collapsed,
     // dynamic parts should remain as JSX.
     let result = compile(
         "# Hello\n\n<Component />\n\nWorld",
@@ -390,7 +388,7 @@ fn optimize_static_sibling_grouping() -> Result<(), satteri_arena::mdx_types::Me
     assert!(result.contains("<h1>A</h1>"), "should contain h1: {result}");
     assert!(result.contains("<h2>B</h2>"), "should contain h2: {result}");
     assert!(result.contains("<h3>C</h3>"), "should contain h3: {result}");
-    // Count occurrences of set:html — should be exactly 1 for fully static content
+    // Count occurrences of set:html, should be exactly 1 for fully static content
     let count = result.matches("set:html").count();
     assert_eq!(count, 1, "should have exactly one set:html group: {result}");
     Ok(())

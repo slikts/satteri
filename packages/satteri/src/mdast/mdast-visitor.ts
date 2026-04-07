@@ -7,6 +7,7 @@ import {
   serializeMdastHandle,
   getNodeData as napiGetNodeData,
   setNodeData,
+  mdastTextContentHandle,
 } from "../../index.js";
 import type {
   Blockquote,
@@ -115,10 +116,12 @@ function nid(node: MdastNode): number {
 export class MdastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: MdastDiagnostic[] = [];
+  readonly #handle: MdastHandle;
   readonly source: string;
   readonly filename: string;
 
-  constructor(source: string, filename: string) {
+  constructor(handle: MdastHandle, source: string, filename: string) {
+    this.#handle = handle;
     this.source = source;
     this.filename = filename;
   }
@@ -153,6 +156,14 @@ export class MdastVisitorContext {
 
   setProperty(node: MdastNode, key: string, value: unknown): void {
     this.#commandBuffer.setProperty(nid(node), key, value);
+  }
+
+  /** Collect the concatenated text of all descendant text nodes (like mdast-util-to-string). */
+  textContent(
+    node: MdastNode,
+    options?: { includeImageAlt?: boolean; includeHtml?: boolean },
+  ): string {
+    return mdastTextContentHandle(this.#handle, nid(node), options);
   }
 
   report({
@@ -263,9 +274,7 @@ function mergeAndReset(
   return { merged, hasMutations: totalLen > 0 };
 }
 
-// ---------------------------------------------------------------------------
 // Handle-based MDAST visitor (arena stays in Rust)
-// ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type MdastHandle = any;
@@ -377,7 +386,7 @@ function readMdastMatchedNode(
 ): MdastNode {
   let pos = dataOffset;
 
-  // Node data (JSON bytes) — always first
+  // Node data (JSON bytes), always first
   const dataJsonLen = ru32(view, pos);
   pos += 4;
   let initialData: Record<string, unknown> | null = null;
@@ -398,7 +407,7 @@ function readMdastMatchedNode(
   };
   pos += 24;
 
-  // Children — read IDs, materialize lazily via resolver
+  // Children, read IDs, materialize lazily via resolver
   const childCount = ru16(view, pos);
   pos += 2;
   const childIds: number[] = [];
@@ -687,7 +696,7 @@ export function visitMdastHandle(
   source: string,
   filename: string,
 ): MdastVisitResult | Promise<MdastVisitResult> {
-  const context = new MdastVisitorContext(source, filename);
+  const context = new MdastVisitorContext(handle, source, filename);
   const returnBuffer = new CommandBuffer();
   const dirtyData = new Map<number, Record<string, unknown>>();
   const resolver = new MdastLazyChildResolver(handle);

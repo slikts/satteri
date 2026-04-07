@@ -242,8 +242,6 @@ export class ArenaReader {
     );
   }
 
-  // ── Low-level helpers ──────────────────────────────────────────────────────
-
   /** Read a StringRef (offset: u32 LE, len: u32 LE) from type data. */
   readStringRef(typeData: Uint8Array, byteOffset = 0): StringRefRaw {
     const view = new DataView(typeData.buffer, typeData.byteOffset + byteOffset);
@@ -252,8 +250,6 @@ export class ArenaReader {
       len: view.getUint32(4, true),
     };
   }
-
-  // ── Type-specific data accessors ───────────────────────────────────────────
 
   /** HeadingData: depth u8 @ 0. */
   getHeadingDepth(nodeId: number): number {
@@ -515,8 +511,6 @@ export class ArenaReader {
     const valueRef = this.readStringRef(data, 0);
     return this.getString(valueRef.offset, valueRef.len);
   }
-
-  // ── Tree walking ──────────────────────────────────────────────────────────
 
   /**
    * Walk the tree depth-first. Return false from visitor to skip children.

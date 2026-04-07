@@ -81,7 +81,7 @@ impl DataMap {
 }
 
 /// Typed data map: stores strongly-typed data keyed by TypeId + node_id.
-/// Rust-only — never crosses to JS.
+/// Rust-only, never crosses to JS.
 pub struct TypedDataMap {
     inner: FxHashMap<(u32, TypeId), Box<dyn Any + Send + Sync>>,
 }

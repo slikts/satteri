@@ -18,17 +18,15 @@ function setup(source = "# Hello\n\nWorld") {
   return { handle, source: src };
 }
 
-// ---------------------------------------------------------------------------
 // Basic visitor behaviour (handle-based)
-// ---------------------------------------------------------------------------
 
-describe("visitHastHandle — basic behaviour", () => {
+describe("visitHastHandle - basic behaviour", () => {
   test("visitor with no subscriptions produces no mutations", () => {
     const { handle, source } = setup();
     const plugin = {};
     const subs = resolveSubscriptions(plugin);
     visitHastHandle(handle, plugin, subs, source, "<test>");
-    // No crash, no mutations — handle still renders
+    // No crash, no mutations, handle still renders
     expect(renderHandle(handle)).toContain("Hello");
   });
 
@@ -64,11 +62,9 @@ describe("visitHastHandle — basic behaviour", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Mutations (end-to-end via handle)
-// ---------------------------------------------------------------------------
 
-describe("visitHastHandle — mutations", () => {
+describe("visitHastHandle - mutations", () => {
   test("returning a node from element() creates a replace mutation", () => {
     const { handle, source } = setup();
     const plugin = {
@@ -265,7 +261,7 @@ describe("visitHastHandle — mutations", () => {
       element: {
         filter: ["h1"],
         visit(node: HastNode, ctx: HastVisitorContext) {
-          const textChild = node.children?.[0];
+          const textChild = "children" in node ? node.children?.[0] : undefined;
           if (textChild) {
             ctx.insertAfter(textChild, { type: "text", value: " World" } as unknown as HastNode);
           }
@@ -279,11 +275,9 @@ describe("visitHastHandle — mutations", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Diagnostics
-// ---------------------------------------------------------------------------
 
-describe("visitHastHandle — diagnostics", () => {
+describe("visitHastHandle - diagnostics", () => {
   test("context.report() collects diagnostics", () => {
     const { handle, source } = setup();
     let diags: { message: string; severity: string }[] = [];
@@ -304,11 +298,9 @@ describe("visitHastHandle — diagnostics", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Context properties
-// ---------------------------------------------------------------------------
 
-describe("visitHastHandle — context", () => {
+describe("visitHastHandle - context", () => {
   test("ctx.source and ctx.filename are available", () => {
     const handle = createHastHandle("# Hello\n\nWorld");
     // Pass the original source explicitly (the real pipeline does this)
@@ -391,9 +383,7 @@ describe("visitHastHandle — context", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Materialize (still uses buffer path — independent of visitor changes)
-// ---------------------------------------------------------------------------
+// Materialize (still uses buffer path, independent of visitor changes)
 
 describe("materializeHastTree", () => {
   test("materializes a tree from a HAST buffer", () => {
@@ -438,9 +428,7 @@ describe("materializeHastTree", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // MDX JSX attributes on HAST nodes
-// ---------------------------------------------------------------------------
 
 function findHastNode(node: HastNode, type: string): HastNode | null {
   if (node.type === type) return node;

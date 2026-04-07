@@ -5,9 +5,7 @@ use crate::{
     parse::{Item, ItemBody},
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /// Check if from `start` to the next newline (or EOF) there are only spaces/tabs.
 fn is_only_whitespace_to_eol(bytes: &[u8]) -> bool {
@@ -145,9 +143,7 @@ fn scan_mdx_jsx_tag_end(bytes: &[u8]) -> Option<usize> {
     None // Unclosed tag
 }
 
-// ---------------------------------------------------------------------------
 // Public scanners
-// ---------------------------------------------------------------------------
 
 /// Scan for an MDX ESM line (`import ...` or `export ...`).
 /// Returns the byte offset past the end of the line (including newline) if matched.
@@ -249,7 +245,7 @@ pub(crate) fn scan_mdx_jsx_block(bytes: &[u8]) -> Option<usize> {
             pos += 1;
         }
         if pos >= bytes.len() || bytes[pos] == b'\n' || bytes[pos] == b'\r' {
-            break; // EOL — valid flow
+            break; // EOL, valid flow
         }
         // Try another JSX tag
         if bytes[pos] == b'<' {
@@ -265,7 +261,7 @@ pub(crate) fn scan_mdx_jsx_block(bytes: &[u8]) -> Option<usize> {
                 continue;
             }
         }
-        // Something else follows — not a flow element
+        // Something else follows, not a flow element
         return None;
     }
 
@@ -527,9 +523,7 @@ pub(crate) fn scan_mdx_inline_jsx(bytes: &[u8]) -> Option<usize> {
     None
 }
 
-// ---------------------------------------------------------------------------
 // Block-level MDX parsers (methods on FirstPass)
-// ---------------------------------------------------------------------------
 
 impl<'a, 'b> FirstPass<'a, 'b> {
     pub(crate) fn parse_mdx_esm(&mut self, start_ix: usize, end_ix: usize) -> usize {
@@ -569,9 +563,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
     }
 }
 
-// ---------------------------------------------------------------------------
 // JSX tag parser: extracts name, attributes, and tag classification
-// ---------------------------------------------------------------------------
 
 use crate::parse::{JsxAttr, JsxElementData};
 
@@ -597,7 +589,7 @@ pub(crate) fn parse_jsx_tag<'a>(raw: &'a str) -> JsxElementData<'a> {
     // Self-closing: ends with />
     let ends_self_close = s.ends_with("/>");
 
-    // Extract name — skip leading '<'
+    // Extract name, skip leading '<'
     let name = extract_tag_name(&s[1..]);
 
     // Check for self-contained: <Name ...>...</Name> or <>...</>

@@ -1,13 +1,15 @@
 [package]
-name = "satteri-hast"
+name = "satteri-ast"
 version = "0.1.0"
 edition = "2021"
-description = "MDAST to HAST conversion and HTML serialization for Sätteri"
+description = "MDAST and HAST node types, codecs, tree operations, and conversion for Sätteri"
 license = "MIT"
 
 [dependencies]
 satteri-arena = { version = "0.1.0", path = "../satteri-arena" }
-satteri-mdast = { version = "0.1.0", path = "../satteri-mdast" }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 pulldown-cmark-escape = "0.11"
 
 [dev-dependencies]

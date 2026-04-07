@@ -3,9 +3,7 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-// ---------------------------------------------------------------------------
 // MDX compilation options (JS-facing)
-// ---------------------------------------------------------------------------
 
 /// Static optimization config passed from JavaScript.
 #[napi(object)]
@@ -43,9 +41,7 @@ fn js_options_to_rust(opts: Option<JsMdxOptions>) -> satteri_mdxjs::Options {
     options
 }
 
-// ---------------------------------------------------------------------------
 // MDX compilation
-// ---------------------------------------------------------------------------
 
 /// Compile MDX source directly to JavaScript.
 #[napi]
@@ -54,21 +50,20 @@ pub fn compile_mdx(source: String, options: Option<JsMdxOptions>) -> Result<Stri
     satteri_mdxjs::compile(&source, &opts).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-// ---------------------------------------------------------------------------
 // Direct rendering (no handle needed)
-// ---------------------------------------------------------------------------
 
 /// Parse Markdown source and return HTML string directly.
+/// Uses pulldown-cmark's streaming renderer, skipping the arena entirely.
 #[napi]
 pub fn parse_to_html(source: String) -> Result<String> {
-    let (arena, _) =
-        satteri_pulldown_cmark::parse(&source, satteri_pulldown_cmark::DEFAULT_OPTIONS);
-    Ok(satteri_hast::mdast_to_html(&arena))
+    let parser =
+        satteri_pulldown_cmark::Parser::new_ext(&source, satteri_pulldown_cmark::DEFAULT_OPTIONS);
+    let mut html = String::with_capacity(source.len());
+    satteri_pulldown_cmark::html::push_html(&mut html, parser);
+    Ok(html)
 }
 
-// ---------------------------------------------------------------------------
-// Handle-based API — arena stays in Rust, no buffer copies to JS
-// ---------------------------------------------------------------------------
+// Handle-based API: arena stays in Rust, no buffer copies to JS
 
 use std::sync::Mutex;
 
@@ -93,8 +88,6 @@ pub struct JsSubscription {
     pub node_type: u8,
     pub tag_filter: Vec<String>,
 }
-
-// ── MDAST handles ──────────────────────────────────────────────────────────
 
 /// Parse markdown source into an MDAST arena handle.
 #[napi]
@@ -151,18 +144,20 @@ pub fn walk_mdast_handle(
     let arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    let subs: Vec<satteri_mdast::Subscription> = subscriptions
+    let subs: Vec<satteri_ast::walk::Subscription> = subscriptions
         .into_iter()
-        .map(|s| satteri_mdast::Subscription {
+        .map(|s| satteri_ast::walk::Subscription {
             node_type: s.node_type,
             tag_filter: s.tag_filter,
         })
         .collect();
-    Ok(Uint8Array::new(satteri_mdast::walk_and_collect_with_mode(
-        &*arena,
-        &subs,
-        satteri_mdast::WalkMode::Mdast,
-    )))
+    Ok(Uint8Array::new(
+        satteri_ast::walk::walk_and_collect_with_mode(
+            &arena,
+            &subs,
+            satteri_ast::walk::WalkMode::Mdast,
+        ),
+    ))
 }
 
 /// Apply a command buffer to an MDAST handle in-place.
@@ -173,7 +168,7 @@ pub fn apply_commands_to_mdast_handle(handle: &ArenaHandle, command_buf: Uint8Ar
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
     let parse_markdown = make_parse_fn(arena.mdx);
     let owned = std::mem::replace(&mut *arena, satteri_arena::Arena::new(String::new()));
-    let new_arena = satteri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
+    let new_arena = satteri_plugin_api::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     *arena = new_arena;
     Ok(())
@@ -187,7 +182,7 @@ pub fn convert_mdast_to_hast_handle(handle: &ArenaHandle) -> Result<ArenaHandle>
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
     let mdx = arena.mdx;
     let owned = std::mem::replace(&mut *arena, satteri_arena::Arena::new(String::new()));
-    let mut hast = satteri_hast::mdast_arena_to_hast_arena(&owned);
+    let mut hast = satteri_ast::hast::mdast_arena_to_hast_arena(&owned);
     hast.mdx = mdx;
     Ok(External::new(Mutex::new(hast)))
 }
@@ -205,22 +200,20 @@ pub fn apply_commands_and_convert_to_hast_handle(
     let mdx = arena.mdx;
     let parse_markdown = make_parse_fn(mdx);
     let owned = std::mem::replace(&mut *arena, satteri_arena::Arena::new(String::new()));
-    let mutated = satteri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
+    let mutated = satteri_plugin_api::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
-    let mut hast_arena = satteri_hast::mdast_arena_to_hast_arena(&mutated);
+    let mut hast_arena = satteri_ast::hast::mdast_arena_to_hast_arena(&mutated);
     hast_arena.mdx = mdx;
     Ok(External::new(Mutex::new(hast_arena)))
 }
 
-// ── HAST handles ───────────────────────────────────────────────────────────
-
 /// Parse markdown source and convert to HAST. Returns an opaque handle.
-/// The arena stays in Rust memory — no buffer is copied to JS.
+/// The arena stays in Rust memory, no buffer is copied to JS.
 #[napi]
 pub fn create_hast_handle(source: String) -> Result<ArenaHandle> {
     let (mdast, _) =
         satteri_pulldown_cmark::parse(&source, satteri_pulldown_cmark::DEFAULT_OPTIONS);
-    let mut hast = satteri_hast::mdast_arena_to_hast_arena(&mdast);
+    let mut hast = satteri_ast::hast::mdast_arena_to_hast_arena(&mdast);
     hast.mdx = false;
     Ok(External::new(Mutex::new(hast)))
 }
@@ -229,7 +222,7 @@ pub fn create_hast_handle(source: String) -> Result<ArenaHandle> {
 #[napi]
 pub fn create_mdx_hast_handle(source: String) -> Result<ArenaHandle> {
     let (mdast, _) = satteri_pulldown_cmark::parse(&source, satteri_pulldown_cmark::MDX_OPTIONS);
-    let mut hast = satteri_hast::mdast_arena_to_hast_arena(&mdast);
+    let mut hast = satteri_ast::hast::mdast_arena_to_hast_arena(&mdast);
     hast.mdx = true;
     Ok(External::new(Mutex::new(hast)))
 }
@@ -240,15 +233,15 @@ pub fn walk_handle(handle: &ArenaHandle, subscriptions: Vec<JsSubscription>) -> 
     let arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    let subs: Vec<satteri_mdast::Subscription> = subscriptions
+    let subs: Vec<satteri_ast::walk::Subscription> = subscriptions
         .into_iter()
-        .map(|s| satteri_mdast::Subscription {
+        .map(|s| satteri_ast::walk::Subscription {
             node_type: s.node_type,
             tag_filter: s.tag_filter,
         })
         .collect();
-    Ok(Uint8Array::new(satteri_mdast::walk_and_collect(
-        &*arena, &subs,
+    Ok(Uint8Array::new(satteri_ast::walk::walk_and_collect(
+        &arena, &subs,
     )))
 }
 
@@ -263,7 +256,7 @@ pub fn apply_commands_to_handle(handle: &ArenaHandle, command_buf: Uint8Array) -
 
     // apply_commands takes ownership, so swap out the arena
     let owned = std::mem::replace(&mut *arena, satteri_arena::Arena::new(String::new()));
-    let new_arena = satteri_mdast::apply_commands(owned, &command_buf, &parse_markdown)
+    let new_arena = satteri_plugin_api::apply_commands(owned, &command_buf, &parse_markdown)
         .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     *arena = new_arena;
     Ok(())
@@ -284,7 +277,7 @@ pub fn render_handle(handle: &ArenaHandle) -> Result<String> {
     let arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    Ok(satteri_hast::hast_arena_to_html(&arena))
+    Ok(satteri_ast::hast::hast_arena_to_html(&arena))
 }
 
 /// Compile a handle's HAST arena to MDX JavaScript. Does not consume the handle.
@@ -326,14 +319,49 @@ pub fn get_node_data(handle: &ArenaHandle, node_id: u32) -> Option<String> {
     String::from_utf8(data.to_vec()).ok()
 }
 
-/// Collect the concatenated text content of a node and all its descendants.
-/// Walks entirely in Rust — no per-child NAPI round-trips.
+/// Collect the concatenated text content of a HAST node and all its descendants.
+/// Walks entirely in Rust, no per-child NAPI round-trips.
 #[napi]
 pub fn text_content_handle(handle: &ArenaHandle, node_id: u32) -> Result<String> {
     let arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    Ok(satteri_hast::text_content(&arena, node_id))
+    Ok(satteri_ast::hast::text_content(&arena, node_id))
+}
+
+/// Options for `mdast_text_content_handle`, matching `mdast-util-to-string`.
+#[napi(object)]
+pub struct JsTextContentOptions {
+    /// Include `alt` text from image nodes. Default: true.
+    pub include_image_alt: Option<bool>,
+    /// Include `value` from HTML nodes. Default: true.
+    pub include_html: Option<bool>,
+}
+
+/// Collect the concatenated text content of an MDAST node and all its descendants.
+/// Mirrors `mdast-util-to-string`: collects value from text nodes, alt from images.
+#[napi]
+pub fn mdast_text_content_handle(
+    handle: &ArenaHandle,
+    node_id: u32,
+    options: Option<JsTextContentOptions>,
+) -> Result<String> {
+    let arena = handle
+        .lock()
+        .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
+    let opts = satteri_ast::mdast::TextContentOptions {
+        include_image_alt: options
+            .as_ref()
+            .and_then(|o| o.include_image_alt)
+            .unwrap_or(true),
+        include_html: options
+            .as_ref()
+            .and_then(|o| o.include_html)
+            .unwrap_or(true),
+    };
+    Ok(satteri_ast::mdast::text_content_with_options(
+        &arena, node_id, &opts,
+    ))
 }
 
 /// Release the arena memory held by a handle. The handle becomes empty

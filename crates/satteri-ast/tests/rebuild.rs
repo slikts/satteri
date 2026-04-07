@@ -3,10 +3,8 @@
 //! Tests apply patches to the "# Hello\n\nWorld" arena and verify the resulting structure.
 
 use satteri_arena::{Arena, ArenaBuilder};
-use satteri_mdast::{
-    rebuild::{rebuild, Patch},
-    MdastNodeType,
-};
+use satteri_ast::mdast::MdastNodeType;
+use satteri_ast::rebuild::{rebuild, Patch};
 
 /// Tree structure:
 ///   Root (0)
@@ -16,7 +14,7 @@ use satteri_mdast::{
 ///       Text "World" (4)
 fn build_hello_world() -> Arena {
     use satteri_arena::StringRef;
-    use satteri_mdast::codec::{encode_heading_data, encode_string_ref_data};
+    use satteri_ast::mdast::codec::{encode_heading_data, encode_string_ref_data};
 
     let source = "# Hello\n\nWorld".to_string();
     let mut b = ArenaBuilder::new(source);

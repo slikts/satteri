@@ -1,5 +1,5 @@
 /**
- * Memory benchmark — measures heap allocation per pipeline path.
+ * Memory benchmark, measures heap allocation per pipeline path.
  *
  * Run:  node --expose-gc bench/memory.mjs
  */
@@ -26,8 +26,6 @@ console.log(
   `Doc sizes:  MD ${(LARGE_MD.length / 1024).toFixed(0)} KB  MDX ${(LARGE_MDX.length / 1024).toFixed(0)} KB`,
 );
 console.log(`Iterations: ${ITERATIONS}  Warmup: ${WARMUP}\n`);
-
-// -- Plugins ----------------------------------------------------------------
 
 const noopMdast = defineMdastPlugin({
   name: "noop-mdast",
@@ -56,8 +54,6 @@ const mutatingHast = defineHastPlugin({
     },
   }),
 });
-
-// -- Measure ----------------------------------------------------------------
 
 function gc() {
   if (hasGc) globalThis.gc();
@@ -91,10 +87,8 @@ function measure(name, fn) {
   };
 }
 
-// -- Scenarios --------------------------------------------------------------
-
-// Filtered (selective) plugins — Rust-side walk
-// Unfiltered element() that manually checks tagName — same work as filtered
+// Filtered (selective) plugins, Rust-side walk
+// Unfiltered element() that manually checks tagName, same work as filtered
 const unfilteredAOnly = defineHastPlugin({
   name: "unfiltered-a-only",
   createOnce: () => ({
@@ -153,53 +147,51 @@ const filteredHastMulti = defineHastPlugin({
 });
 
 const scenarios = [
-  ["HTML — pure Rust (no plugins)", () => compileMarkdownToHtml(LARGE_MD)],
-  ["HTML — no plugins", () => compileMarkdownToHtml(LARGE_MD)],
+  ["HTML - pure Rust (no plugins)", () => compileMarkdownToHtml(LARGE_MD)],
+  ["HTML - no plugins", () => compileMarkdownToHtml(LARGE_MD)],
   [
-    "HTML — noop mdast plugin",
+    "HTML - noop mdast plugin",
     () => compileMarkdownToHtml(LARGE_MD, { mdastPlugins: [noopMdast] }),
   ],
-  ["HTML — noop hast plugin", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [noopHast] })],
+  ["HTML - noop hast plugin", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [noopHast] })],
   [
-    "HTML — mutating mdast",
+    "HTML - mutating mdast",
     () => compileMarkdownToHtml(LARGE_MD, { mdastPlugins: [mutatingMdast] }),
   ],
   [
-    "HTML — mutating hast (bare fn)",
+    "HTML - mutating hast (bare fn)",
     () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [mutatingHast] }),
   ],
   [
-    "HTML — mutating hast (filter)",
+    "HTML - mutating hast (filter)",
     () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [mutatingHastFiltered] }),
   ],
   [
-    "HTML — element() if a",
+    "HTML - element() if a",
     () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [unfilteredAOnly] }),
   ],
-  ["HTML — filter: [a]", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [filteredHast] })],
+  ["HTML - filter: [a]", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [filteredHast] })],
   [
-    "HTML — filtered hast [a,h1-h3]",
+    "HTML - filtered hast [a,h1-h3]",
     () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [filteredHastMulti] }),
   ],
   [
-    "HTML — both (mutating)",
+    "HTML - both (mutating)",
     () =>
       compileMarkdownToHtml(LARGE_MD, {
         mdastPlugins: [mutatingMdast],
         hastPlugins: [mutatingHast],
       }),
   ],
-  ["MDX  — pure Rust (no plugins)", () => compileMdxToJs(LARGE_MDX)],
-  ["MDX  — no plugins", () => compileMdxToJs(LARGE_MDX)],
-  ["MDX  — noop mdast plugin", () => compileMdxToJs(LARGE_MDX, { mdastPlugins: [noopMdast] })],
-  ["MDX  — noop hast plugin", () => compileMdxToJs(LARGE_MDX, { hastPlugins: [noopHast] })],
+  ["MDX  - pure Rust (no plugins)", () => compileMdxToJs(LARGE_MDX)],
+  ["MDX  - no plugins", () => compileMdxToJs(LARGE_MDX)],
+  ["MDX  - noop mdast plugin", () => compileMdxToJs(LARGE_MDX, { mdastPlugins: [noopMdast] })],
+  ["MDX  - noop hast plugin", () => compileMdxToJs(LARGE_MDX, { hastPlugins: [noopHast] })],
   [
-    "MDX  — both (mutating)",
+    "MDX  - both (mutating)",
     () => compileMdxToJs(LARGE_MDX, { mdastPlugins: [mutatingMdast], hastPlugins: [mutatingHast] }),
   ],
 ];
-
-// -- Run & print ------------------------------------------------------------
 
 const col = (s, w) => String(s).padStart(w);
 const lft = (s, w) => String(s).padEnd(w);

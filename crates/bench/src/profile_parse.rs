@@ -11,7 +11,7 @@ fn main() {
         let _ = satteri_pulldown_cmark::parse(src, opts);
     }
 
-    // Profile window — enough iterations for ~5s of samples.
+    // Profile window, enough iterations for ~5s of samples.
     for _ in 0..50_000 {
         let arena = satteri_pulldown_cmark::parse(src, opts);
         std::hint::black_box(arena);

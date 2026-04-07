@@ -2,7 +2,7 @@
 //!
 //! Walks the arena depth-first and collects nodes that match a set of
 //! subscriptions into a single flat binary buffer. JS reads this with
-//! DataView — no per-node object allocation.
+//! DataView, no per-node object allocation.
 //!
 //! ## Result buffer format
 //!
@@ -34,7 +34,7 @@
 //! [lang_len: u16][lang: utf8...][meta_len: u16][meta: utf8...][value_len: u32][value: utf8...]
 //! ```
 
-use satteri_arena::ReadArena;
+use satteri_arena::Arena;
 use satteri_arena::StringRef;
 
 /// A single subscription: match nodes of a given type, optionally filtered
@@ -45,7 +45,9 @@ pub struct Subscription {
     pub tag_filter: Vec<String>,
 }
 
-const HAST_ELEMENT_TYPE: u8 = 1;
+use crate::hast::HastNodeType;
+
+const HAST_ELEMENT_TYPE: u8 = HastNodeType::Element as u8;
 
 /// Whether the arena contains HAST or MDAST node types.
 /// Needed because the same type numbers mean different things (e.g. 2 = HAST_TEXT vs MDAST_HEADING).
@@ -58,14 +60,14 @@ pub enum WalkMode {
 /// Walk the tree and return matched nodes as a flat binary buffer.
 ///
 /// Returns a `Vec<u8>` containing the match index + inline data section.
-/// JS reads this with DataView — zero per-node object allocation.
-pub fn walk_and_collect(arena: &dyn ReadArena, subscriptions: &[Subscription]) -> Vec<u8> {
+/// JS reads this with DataView, zero per-node object allocation.
+pub fn walk_and_collect(arena: &Arena, subscriptions: &[Subscription]) -> Vec<u8> {
     walk_and_collect_with_mode(arena, subscriptions, WalkMode::Hast)
 }
 
 /// Walk with explicit mode (HAST or MDAST).
 pub fn walk_and_collect_with_mode(
-    arena: &dyn ReadArena,
+    arena: &Arena,
     subscriptions: &[Subscription],
     mode: WalkMode,
 ) -> Vec<u8> {
@@ -146,7 +148,7 @@ pub fn walk_and_collect_with_mode(
     // Header
     out.extend_from_slice(&match_count.to_le_bytes());
 
-    // Index entries — adjust data_offset to account for header + index
+    // Index entries, adjust data_offset to account for header + index
     let data_base = (header_size + index_size) as u32;
     for i in 0..matches.len() {
         let (node_id, sub_idx) = matches[i];
@@ -168,12 +170,12 @@ pub fn walk_and_collect_with_mode(
 ///
 /// Format per matched node:
 /// ```text
-/// [position: 6×u32 (24 bytes)] — start_offset, end_offset, start_line, start_col, end_line, end_col
-/// [child_count: u16][child_ids: child_count × u32]  — for parent nodes
+/// [position: 6×u32 (24 bytes)]: start_offset, end_offset, start_line, start_col, end_line, end_col
+/// [child_count: u16][child_ids: child_count × u32]: for parent nodes
 /// [type-specific resolved data]
 /// ```
 fn serialize_mdast_node_inline(
-    arena: &dyn ReadArena,
+    arena: &Arena,
     node_id: u32,
     node_type: u8,
     type_data: &[u8],
@@ -181,7 +183,7 @@ fn serialize_mdast_node_inline(
 ) {
     let node = arena.get_node(node_id);
 
-    // Node data (JSON bytes) — length-prefixed, always first so JS can read it at a known offset
+    // Node data (JSON bytes), length-prefixed, always first so JS can read it at a known offset
     if let Some(data) = arena.get_node_data(node_id) {
         out.extend_from_slice(&(data.len() as u32).to_le_bytes());
         out.extend_from_slice(data);
@@ -363,7 +365,7 @@ fn read_string_ref(data: &[u8], offset: usize) -> StringRef {
 /// Write inline node data with all strings resolved (no StringRefs).
 /// Element data includes child node IDs so plugins can reference them.
 fn serialize_node_inline(
-    arena: &dyn ReadArena,
+    arena: &Arena,
     node_id: u32,
     node_type: u8,
     type_data: &[u8],
@@ -422,7 +424,7 @@ fn serialize_node_inline(
             }
         }
 
-        // MDX JSX elements (flow=10, text=11) — same layout as HAST element
+        // MDX JSX elements (flow=10, text=11), same layout as HAST element
         // but uses name + attributes instead of tagName + properties
         10 | 11 => {
             if type_data.len() < 16 {

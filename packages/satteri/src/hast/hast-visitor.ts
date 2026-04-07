@@ -26,7 +26,7 @@ import {
   parseExpression as napiParseExpression,
 } from "../../index.js";
 
-// Opaque handle type from NAPI — the arena lives in Rust memory.
+// Opaque handle type from NAPI, the arena lives in Rust memory.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HastHandle = any;
 
@@ -143,13 +143,13 @@ class HastVisitorContextImpl implements HastVisitorContext {
   setProperty(node: HastNode, key: string, value: unknown): void {
     const id = nid(node);
     if (node.type === "element") {
-      // Fast binary path — no materialization, no JSON serialization
+      // Fast binary path, no materialization, no JSON serialization
       this.#commandBuffer.setProperty(id, key, value);
       return;
     }
 
     if (node.type === "mdxJsxFlowElement" || node.type === "mdxJsxTextElement") {
-      // MDX JSX nodes use `attributes`, not `properties` — keep replaceNode path
+      // MDX JSX nodes use `attributes`, not `properties`, keep replaceNode path
       const current = this.#pendingNodes.get(id) ?? node;
       const updated: Record<string, unknown> = { ...current };
       const attrs = [...((updated.attributes as MdxJsxAttributeUnion[] | undefined) ?? [])];
@@ -167,7 +167,7 @@ class HastVisitorContextImpl implements HastVisitorContext {
       return;
     }
 
-    // Text-like nodes (text, comment, raw, expressions, esm) — fast binary path.
+    // Text-like nodes (text, comment, raw, expressions, esm), fast binary path.
     // Rust handles "value" setProperty directly on these types.
     this.#commandBuffer.setProperty(id, key, value);
   }
@@ -231,9 +231,7 @@ export interface HastVisitorInstance {
   mdxjsEsm?: HastVisitorFn<MdxjsEsmHast>;
 }
 
-// ---------------------------------------------------------------------------
 // Selective walk helpers
-// ---------------------------------------------------------------------------
 
 interface ResolvedSubscription {
   nodeType: number;
@@ -266,7 +264,7 @@ export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubsc
         });
       }
     } else {
-      // Bare function — empty filter matches all nodes of this type
+      // Bare function, empty filter matches all nodes of this type
       subs.push({ nodeType, tagFilter: [], visitFn: value as ResolvedSubscription["visitFn"] });
     }
   }
@@ -332,7 +330,7 @@ function decodeProperties(
 
 /**
  * Walk-path element node: uses prototype getters instead of per-instance
- * Object.defineProperty. V8 optimises shared hidden classes far better —
+ * Object.defineProperty. V8 optimises shared hidden classes far better,
  * this is ~16x faster for construction than the defineProperty approach.
  *
  * The buffer reference data is stored on private instance fields so the
@@ -428,7 +426,7 @@ function readElementFromBinary(
   const ids: number[] = [];
   for (let i = 0; i < childCount; i++) ids.push(view.getUint32(childIdsPos + i * 4, true));
 
-  // Build node using class (prototype getters — no per-instance defineProperty)
+  // Build node using class (prototype getters, no per-instance defineProperty)
   const node = new WalkElement();
   node.tagName = tagName;
   node._view = view;
@@ -566,12 +564,10 @@ function readMatchedNode(
   return node;
 }
 
-// ---------------------------------------------------------------------------
 // Shared helpers
-// ---------------------------------------------------------------------------
 
 /**
- * Lazy child materializer — serializes the handle's buffer once when first
+ * Lazy child materializer, serializes the handle's buffer once when first
  * child is accessed, then materializes children from it via HastReader.
  */
 class LazyChildResolver {
@@ -714,9 +710,7 @@ function mergeAndReset(
   return { merged, hasMutations: totalLen > 0 };
 }
 
-// ---------------------------------------------------------------------------
 // Handle-based visitor
-// ---------------------------------------------------------------------------
 
 /**
  * Walk a handle's arena in Rust, dispatch matched nodes to JS visitor functions,

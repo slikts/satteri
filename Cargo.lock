@@ -1058,8 +1058,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 name = "satteri"
 version = "0.1.0"
 dependencies = [
- "satteri-hast",
- "satteri-mdast",
+ "satteri-ast",
  "satteri-mdxjs",
  "satteri-pulldown-cmark",
 ]
@@ -1069,7 +1068,19 @@ name = "satteri-arena"
 version = "0.1.0"
 dependencies = [
  "rustc-hash",
- "unicode-id",
+ "unicode-id-start",
+]
+
+[[package]]
+name = "satteri-ast"
+version = "0.1.0"
+dependencies = [
+ "pulldown-cmark-escape",
+ "rustc-hash",
+ "satteri-arena",
+ "satteri-pulldown-cmark",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1079,29 +1090,9 @@ dependencies = [
  "codspeed-divan-compat",
  "oxc_allocator",
  "rustc-hash",
- "satteri-hast",
+ "satteri-ast",
  "satteri-mdxjs",
  "satteri-pulldown-cmark",
-]
-
-[[package]]
-name = "satteri-hast"
-version = "0.1.0"
-dependencies = [
- "pulldown-cmark-escape",
- "satteri-arena",
- "satteri-mdast",
- "satteri-pulldown-cmark",
-]
-
-[[package]]
-name = "satteri-mdast"
-version = "0.1.0"
-dependencies = [
- "rustc-hash",
- "satteri-arena",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1118,8 +1109,7 @@ dependencies = [
  "pretty_assertions",
  "rustc-hash",
  "satteri-arena",
- "satteri-hast",
- "satteri-mdast",
+ "satteri-ast",
  "satteri-pulldown-cmark",
  "serde",
 ]
@@ -1132,9 +1122,9 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "satteri-arena",
- "satteri-hast",
- "satteri-mdast",
+ "satteri-ast",
  "satteri-mdxjs",
+ "satteri-plugin-api",
  "satteri-pulldown-cmark",
 ]
 
@@ -1144,7 +1134,9 @@ version = "0.1.0"
 dependencies = [
  "rustc-hash",
  "satteri-arena",
- "satteri-mdast",
+ "satteri-ast",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1156,7 +1148,7 @@ dependencies = [
  "pulldown-cmark-escape",
  "rustc-hash",
  "satteri-arena",
- "satteri-mdast",
+ "satteri-ast",
  "serde",
  "unicase",
 ]
@@ -1349,12 +1341,6 @@ name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
-
-[[package]]
-name = "unicode-id"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70ba288e709927c043cbe476718d37be306be53fb1fafecd0dbe36d072be2580"
 
 [[package]]
 name = "unicode-id-start"

@@ -1,4 +1,4 @@
-//! `satteri` — high-level Rust API for the Sätteri markdown/MDX pipeline.
+//! `satteri`: high-level Rust API for the Sätteri markdown/MDX pipeline.
 //!
 //! # Quick start
 //!
@@ -10,7 +10,7 @@
 /// Parse Markdown source and render it directly to HTML.
 pub fn markdown_to_html(source: &str) -> String {
     let (arena, _) = satteri_pulldown_cmark::parse(source, satteri_pulldown_cmark::DEFAULT_OPTIONS);
-    satteri_hast::mdast_to_html(&arena)
+    satteri_ast::mdast_to_html(&arena)
 }
 
 /// Compile MDX source directly to JavaScript.

@@ -301,7 +301,7 @@ pub struct Options {
     /// Used when `development: true` to improve error messages.
     pub filepath: Option<String>,
 
-    /// Static subtree optimization (default: `None` — disabled).
+    /// Static subtree optimization (default: `None`, disabled).
     ///
     /// When enabled, fully-static subtrees are collapsed into raw HTML strings
     /// instead of nested `_jsx()` calls, reducing JS output size and runtime

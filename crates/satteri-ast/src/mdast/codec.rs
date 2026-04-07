@@ -312,12 +312,10 @@ impl ExpressionData {
     }
 }
 
-pub const MDX_ATTR_BOOLEAN_PROP: u8 = 0;
-pub const MDX_ATTR_LITERAL_PROP: u8 = 1;
-pub const MDX_ATTR_EXPRESSION_PROP: u8 = 2;
-pub const MDX_ATTR_SPREAD: u8 = 3;
-
-// ---- Encode functions (return Vec<u8>, used by non-hot paths) ----
+// MDX_ATTR_* constants are in crate::shared, re-export for backwards compat
+pub use crate::shared::{
+    MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
+};
 
 pub fn encode_heading_data(depth: u8) -> Vec<u8> {
     vec![depth]

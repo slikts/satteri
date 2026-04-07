@@ -14,13 +14,18 @@ harness = false
 name = "profile_parse"
 path = "src/profile_parse.rs"
 
+[[bin]]
+name = "html_compare"
+path = "src/html_compare.rs"
+
 
 [dependencies]
 satteri-pulldown-cmark = { path = "../satteri-pulldown-cmark" }
+satteri-ast = { path = "../satteri-ast" }
 
 [dev-dependencies]
 divan = { version = "4", package = "codspeed-divan-compat" }
-satteri-hast = { path = "../satteri-hast" }
+satteri-ast = { path = "../satteri-ast" }
 satteri-mdxjs = { path = "../satteri-mdxjs-rs" }
 oxc_allocator = { workspace = true }
 rustc-hash = "2"

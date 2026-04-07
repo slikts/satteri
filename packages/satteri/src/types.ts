@@ -27,8 +27,6 @@ import type { MdxJsxAttribute, MdxJsxExpressionAttribute } from "mdast-util-mdx-
 
 export type MdxJsxAttributeUnion = MdxJsxAttribute | MdxJsxExpressionAttribute;
 
-// ── Extension mdast node types (not covered by standard packages) ───────────
-
 export interface Toml extends MdastLiteral {
   type: "toml";
 }
@@ -59,7 +57,6 @@ declare module "mdast" {
   }
 }
 
-// ── Extension hast node types ───────────────────────────────────────────────
 // The standard mdx packages augment hast with mdxJsxFlowElement/
 // mdxJsxTextElement and mdxFlowExpression/mdxTextExpression. We only need
 // to register "raw" here since it has no standard package.
@@ -78,28 +75,24 @@ declare module "hast" {
   }
 }
 
-// ── Materialized node types ──────────────────────────────────────────────────
-
 /**
- * Materialized mdast node — a standard `mdast.Nodes` discriminated union.
+ * Materialized mdast node, a standard `mdast.Nodes` discriminated union.
  * Narrow by `node.type` to access type-specific properties
  * (e.g. `depth` on `"heading"`, `url` on `"link"`).
  */
 export type MdastNode = MdastStdNodes;
 
 /**
- * Materialized hast node — a standard `hast.Nodes` discriminated union.
+ * Materialized hast node, a standard `hast.Nodes` discriminated union.
  * Narrow by `node.type` to access type-specific properties
  * (e.g. `tagName` on `"element"`, `value` on `"text"`).
  */
 export type HastNode = HastStdNodes;
 
-/** @internal Node with arena tracking ID — only used inside the library. */
+/** @internal Node with arena tracking ID, only used inside the library. */
 export type MdastNodeInternal = MdastStdNodes & { _nodeId: number };
 /** @internal */
 export type HastNodeInternal = HastStdNodes & { _nodeId: number };
-
-// ── Internal binary format types ────────────────────────────────────────────
 
 export interface StringRefRaw {
   offset: number;

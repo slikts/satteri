@@ -42,7 +42,7 @@ pub enum Patch {
 
 /// Node IDs in the new arena are assigned fresh (monotonically increasing)
 /// but the structure is preserved. Sub-arena type_data bytes are copied
-/// verbatim — full StringRef remapping is deferred to Phase 8.
+/// verbatim; full StringRef remapping is deferred to Phase 8.
 pub fn rebuild(arena: &Arena, patches: &[Patch]) -> Arena {
     let mut patch_map: FxHashMap<u32, &Patch> = FxHashMap::default();
     for patch in patches {
@@ -316,18 +316,18 @@ fn remap_string_refs(data: &mut [u8], node_type: u8, base: u32) {
         100 | 101 => &[],
         // MdxFlowExpression, MdxTextExpression, MdxjsEsm: value(0)
         102..=104 => &[0],
-        // HAST_TEXT(2), HAST_COMMENT(3), HAST_RAW(5),
+        // HastNodeType::Text as u8(2), HAST_COMMENT(3), HAST_RAW(5),
         // HAST_MDX_FLOW_EXPRESSION(12), HAST_MDX_TEXT_EXPRESSION(14): single StringRef at 0
         // (HAST_MDX_ESM=13 is already covered by InlineCode=13 above)
         2 | 3 | 5 | 12 | 14 => &[0],
-        // Heading(depth u8), List, ListItem, Table, HAST_ROOT(0), HAST_DOCTYPE(4), etc.
+        // Heading(depth u8), List, ListItem, Table, HastNodeType::Root as u8(0), HAST_DOCTYPE(4), etc.
         _ => &[],
     };
 
     // HAST element types (1, 10, 11) have variable-length property/attribute data.
     // Handle them specially: tag/name StringRef at 0, then props/attrs at fixed stride.
     match node_type {
-        // HAST_ELEMENT: tag(0), then each prop: name at 16+i*20, value at 16+i*20+12
+        // HastNodeType::Element as u8: tag(0), then each prop: name at 16+i*20, value at 16+i*20+12
         1 => {
             remap_one_ref(data, 0, base);
             if data.len() >= 12 {
@@ -372,7 +372,7 @@ fn remap_one_ref(data: &mut [u8], off: usize, base: u32) {
 }
 
 /// Assumes parent_tree's root is the single wrapper node. Any children
-/// already present in parent_tree are ignored — the original node becomes
+/// already present in parent_tree are ignored, the original node becomes
 /// the sole child (Phase 6 simplification).
 fn emit_wrap_node(
     parent_tree: &Arena,
@@ -419,7 +419,7 @@ fn emit_wrap_node(
         }
     }
 
-    // Emit the original node as the child — copy it directly without
+    // Emit the original node as the child, copy it directly without
     // consulting the patch map (to avoid infinite recursion back into Wrap).
     copy_node_raw(original_node_id, orig, builder, patch_map, deleted);
 
@@ -469,12 +469,12 @@ fn copy_node_raw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MdastNodeType;
+    use crate::mdast::MdastNodeType;
     use satteri_arena::ArenaBuilder;
 
     /// Build the "# Hello\n\nWorld" arena for testing.
     fn build_hello_world() -> Arena {
-        use crate::codec::{encode_heading_data, encode_string_ref_data};
+        use crate::mdast::codec::{encode_heading_data, encode_string_ref_data};
         use satteri_arena::StringRef;
 
         let source = "# Hello\n\nWorld".to_string();
@@ -534,7 +534,7 @@ mod tests {
         // We should have 4 nodes: Root, Heading (now empty), Paragraph, Text(World)
         assert_eq!(rebuilt.len(), 4, "text under heading should be removed");
 
-        // Heading child in rebuilt arena — find heading
+        // Heading child in rebuilt arena, find heading
         let new_root_children = rebuilt.get_children(0);
         assert_eq!(new_root_children.len(), 2);
         let new_heading_id = new_root_children[0];
@@ -797,16 +797,13 @@ mod tests {
     #[test]
     fn wrap_hast_element() {
         // Build a minimal HAST arena: root(0) -> h1(1) -> text(2)
-        use crate::codec::encode_string_ref_data;
-
-        const HAST_ROOT: u8 = 0;
-        const HAST_ELEMENT: u8 = 1;
-        const HAST_TEXT: u8 = 2;
+        use crate::hast::HastNodeType;
+        use crate::mdast::codec::encode_string_ref_data;
 
         let mut b = ArenaBuilder::new(String::new());
-        b.open_node_raw(HAST_ROOT);
+        b.open_node_raw(HastNodeType::Root as u8);
 
-        b.open_node_raw(HAST_ELEMENT);
+        b.open_node_raw(HastNodeType::Element as u8);
         // Element type_data: tag_ref(0..8), prop_count(8..12), pad(12..16)
         let tag = b.alloc_string("h1");
         let mut td = vec![0u8; 16];
@@ -814,7 +811,7 @@ mod tests {
         td[4..8].copy_from_slice(&tag.len.to_le_bytes());
         b.set_data_current(&td);
 
-        b.open_node_raw(HAST_TEXT);
+        b.open_node_raw(HastNodeType::Text as u8);
         let text = b.alloc_string("Hello");
         b.set_data_current(&encode_string_ref_data(text));
         b.close_node(); // text
@@ -825,7 +822,7 @@ mod tests {
 
         // Build wrapper: div element
         let mut wb = ArenaBuilder::new(String::new());
-        wb.open_node_raw(HAST_ELEMENT);
+        wb.open_node_raw(HastNodeType::Element as u8);
         let div_tag = wb.alloc_string("div");
         let mut div_td = vec![0u8; 16];
         div_td[0..4].copy_from_slice(&div_tag.offset.to_le_bytes());
@@ -846,10 +843,16 @@ mod tests {
         let root_children = rebuilt.get_children(0);
         assert_eq!(root_children.len(), 1);
         let div_id = root_children[0];
-        assert_eq!(rebuilt.get_node(div_id).node_type, HAST_ELEMENT);
+        assert_eq!(
+            rebuilt.get_node(div_id).node_type,
+            HastNodeType::Element as u8
+        );
         let div_children = rebuilt.get_children(div_id);
         assert_eq!(div_children.len(), 1);
         let h1_id = div_children[0];
-        assert_eq!(rebuilt.get_node(h1_id).node_type, HAST_ELEMENT);
+        assert_eq!(
+            rebuilt.get_node(h1_id).node_type,
+            HastNodeType::Element as u8
+        );
     }
 }

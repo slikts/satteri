@@ -1,5 +1,5 @@
 use satteri_arena::{Arena, ArenaBuilder, StringRef};
-use satteri_mdast::{codec::*, MdastNodeType};
+use satteri_ast::mdast::{codec::*, MdastNodeType};
 use satteri_plugin_api::*;
 
 fn build_test_arena() -> Arena {
@@ -32,7 +32,7 @@ fn build_test_arena() -> Arena {
     b.finish()
 }
 
-/// 1. Empty plugin list — returns same arena unchanged, no mutations
+/// 1. Empty plugin list: returns same arena unchanged, no mutations
 #[test]
 fn empty_plugin_list_no_mutations() {
     let arena = build_test_arena();
@@ -47,7 +47,7 @@ fn empty_plugin_list_no_mutations() {
     assert_eq!(result.arena.len(), node_count);
 }
 
-/// 2. Single read-only plugin — no mutations, no diagnostics
+/// 2. Single read-only plugin, no mutations, no diagnostics
 #[test]
 fn single_read_only_plugin_no_mutations() {
     struct ReadOnly;
@@ -69,7 +69,7 @@ fn single_read_only_plugin_no_mutations() {
     assert!(result.diagnostics.is_empty());
 }
 
-/// 3. AddHeadingIds + LintHeadingDepth run in sequence — both work, data from first visible
+/// 3. AddHeadingIds + LintHeadingDepth run in sequence, both work, data from first visible
 fn slugify(text: &str) -> String {
     text.chars()
         .map(|c| {

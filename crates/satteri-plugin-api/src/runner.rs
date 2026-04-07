@@ -4,12 +4,12 @@ use crate::data::{DataMap, TypedDataMap};
 use crate::plugin::{NodeView, Plugin, VisitResult};
 use crate::typed_nodes::*;
 use satteri_arena::{Arena, ArenaBuilder};
-use satteri_mdast::rebuild::{rebuild, Patch};
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::MdastNodeType;
+use satteri_ast::rebuild::{rebuild, Patch};
 
 /// Result of running plugins against an arena.
 pub struct PluginRunResult {
-    /// The (possibly modified) arena — same instance if no mutations, rebuilt if mutations occurred.
+    /// The (possibly modified) arena, same instance if no mutations, rebuilt if mutations occurred.
     pub arena: Arena,
     pub commands: Vec<Command>,
     pub diagnostics: Vec<Diagnostic>,
@@ -90,7 +90,7 @@ impl PluginRunner {
                 }
                 all_commands.extend(commands);
             }
-            // else: skip optimization — current_arena passes through unchanged
+            // else: skip optimization, current_arena passes through unchanged
             // (Data mutations are already applied via data_map directly)
         }
 
@@ -154,7 +154,7 @@ fn commands_to_patches(commands: Vec<&Command>, arena: &Arena) -> Vec<Patch> {
                 child_tree: sub,
             }),
             Command::SetData { .. } => {
-                // Already applied via DataMap in PluginContext — no arena rebuild needed
+                // Already applied via DataMap in PluginContext, no arena rebuild needed
                 None
             }
         })

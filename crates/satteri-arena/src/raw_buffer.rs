@@ -45,7 +45,7 @@ impl Arena {
         buf.extend_from_slice(&source_offset.to_ne_bytes());
 
         // SAFETY: ArenaNode is #[repr(C)] with all fields explicitly defined
-        // (no implicit padding — _pad is explicit). The buffer is only read back
+        // (no implicit padding, _pad is explicit). The buffer is only read back
         // on the same platform via the JS DataView, never deserialized into Rust.
         let nodes_slice: &[u8] =
             unsafe { std::slice::from_raw_parts(self.nodes.as_ptr() as *const u8, nodes_bytes) };

@@ -2,11 +2,13 @@
 //! a `satteri_arena::Arena` without going through the Event iterator.
 
 use satteri_arena::{Arena, ArenaBuilder, LineIndex, StringRef};
-use satteri_mdast::{
+use satteri_ast::mdast::{
     encode_mdx_jsx_element_data, encode_table_data, CodeData, ColumnAlign, ExpressionData,
     FootnoteDefinitionData, ImageData, LinkData, ListData, ListItemData, MathData, MdastNodeType,
-    ReferenceData, MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP,
-    MDX_ATTR_SPREAD,
+    ReferenceData,
+};
+use satteri_ast::shared::{
+    MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
 };
 
 use crate::parse::{DefaultParserCallbacks, ItemBody, JsxAttr, ParserInner};
@@ -71,7 +73,7 @@ pub fn parse(source: &str, options: Options) -> (Arena, Vec<(usize, String)>) {
     loop {
         match inner.tree.cur() {
             None => {
-                // Backing out of a container — emit close.
+                // Backing out of a container, emit close.
                 let ix = match inner.tree.pop() {
                     Some(ix) => ix,
                     None => break, // Done: popped past root.
@@ -279,7 +281,6 @@ pub fn parse(source: &str, options: Options) -> (Arena, Vec<(usize, String)>) {
 
                 // Map ItemBody to arena node.
                 match item.body {
-                    // ---- Container nodes: open_node + push ----
                     ItemBody::Paragraph => {
                         builder.open_node(MdastNodeType::Paragraph as u8);
                         builder.set_position_current(
@@ -601,7 +602,6 @@ pub fn parse(source: &str, options: Options) -> (Arena, Vec<(usize, String)>) {
                         inner.tree.push();
                     }
 
-                    // ---- Leaf nodes: add_leaf_full + next_sibling ----
                     ItemBody::Text { .. } => {
                         let sr = StringRef::new(start, end - start);
                         builder.add_leaf_full(
@@ -856,7 +856,7 @@ pub fn parse(source: &str, options: Options) -> (Arena, Vec<(usize, String)>) {
                         inner.tree.next_sibling(cur_ix);
                     }
 
-                    // Unresolved inline markers — should have been resolved by handle_inline.
+                    // Unresolved inline markers, should have been resolved by handle_inline.
                     ItemBody::MaybeEmphasis(..)
                     | ItemBody::MaybeMath(..)
                     | ItemBody::MaybeSmartQuote(..)
@@ -913,8 +913,6 @@ pub fn parse(source: &str, options: Options) -> (Arena, Vec<(usize, String)>) {
     builder.close_node();
     (builder.finish(), mdx_errors)
 }
-
-// ---- Helper functions ----
 
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {
     match level {

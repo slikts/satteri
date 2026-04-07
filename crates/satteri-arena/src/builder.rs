@@ -52,7 +52,7 @@ impl ArenaBuilder {
         node_id
     }
 
-    /// Alias for `open_node` — kept for call-site clarity in HAST code.
+    /// Alias for `open_node`, kept for call-site clarity in HAST code.
     pub fn open_node_raw(&mut self, node_type: u8) -> u32 {
         self.open_node(node_type)
     }
@@ -101,7 +101,7 @@ impl ArenaBuilder {
         node_id
     }
 
-    /// Alias for `add_leaf` — kept for call-site clarity in HAST code.
+    /// Alias for `add_leaf`, kept for call-site clarity in HAST code.
     pub fn add_leaf_raw(&mut self, node_type: u8) -> u32 {
         self.add_leaf(node_type)
     }
@@ -266,7 +266,7 @@ mod tests {
         builder.open_node(0);
         builder.open_node(1);
         builder.add_leaf(10);
-        // Do NOT close explicitly — finish() should handle it.
+        // Do NOT close explicitly. finish() should handle it.
         let arena = builder.finish();
         assert_eq!(arena.len(), 3);
     }

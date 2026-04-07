@@ -56,7 +56,7 @@ const t2 = time("2. convertMdastToHastHandle (Rust)", () => {
 });
 
 // Measure just the visitor with a noop plugin
-const t3 = await timeAsync("3. visitHast — noop plugin (JS walk + materialize)", async () => {
+const t3 = await timeAsync("3. visitHast - noop plugin (JS walk + materialize)", async () => {
   const reader = new HastReader(hastBuf);
   const dataMap = new DataMap();
   await visitHast(reader, { element() {} }, dataMap);

@@ -1,8 +1,7 @@
 [dependencies]
 satteri-arena = { version = "0.1.0", path = "../satteri-arena" }
-satteri-mdast = { version = "0.1.0", path = "../satteri-mdast" }
+satteri-ast = { version = "0.1.0", path = "../satteri-ast" }
 satteri-pulldown-cmark = { version = "0.1.0", path = "../satteri-pulldown-cmark" }
-satteri-hast = { version = "0.1.0", path = "../satteri-hast" }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 oxc_allocator = { workspace = true }

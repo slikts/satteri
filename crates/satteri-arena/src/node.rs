@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-/// A reference into the source string — no allocation, just offsets.
+/// A reference into the source string, no allocation, just offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(C)]
 pub struct StringRef {
@@ -93,7 +93,7 @@ mod tests {
         assert_eq!(
             size_of::<ArenaNode>(),
             52,
-            "ArenaNode size changed — update NODE_STRUCT_SIZE callers"
+            "ArenaNode size changed, update NODE_STRUCT_SIZE callers"
         );
     }
 

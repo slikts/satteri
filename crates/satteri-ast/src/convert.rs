@@ -1,19 +1,19 @@
 //! Convert an MDAST arena to a HAST arena.
 
-use satteri_arena::{decode_string_ref_data, Arena, ArenaBuilder, ReadArena, StringRef};
-use satteri_mdast::{
+use satteri_arena::{decode_string_ref_data, Arena, ArenaBuilder, StringRef};
+
+use crate::hast::codec::encode_element_data_into;
+use crate::hast::HastNodeType;
+use crate::mdast::{
     decode_code_data, decode_definition_data, decode_expression_data, decode_heading_data,
     decode_image_data, decode_link_data, decode_list_data, decode_list_item_data, decode_math_data,
     decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name,
-    decode_reference_data, MdastNodeType,
+    decode_reference_data, encode_mdx_jsx_element_data, MdastNodeType,
 };
-
-use crate::codec::encode_element_data_into;
-use crate::node_types::*;
-use satteri_mdast::encode_mdx_jsx_element_data;
+use crate::shared::{PROP_BOOL_TRUE, PROP_SPACE_SEP, PROP_STRING};
 
 /// Convert an MDAST arena directly to a HAST arena.
-pub fn mdast_arena_to_hast_arena(source: &dyn ReadArena) -> Arena {
+pub fn mdast_arena_to_hast_arena(source: &Arena) -> Arena {
     let src = source.source();
     let mut builder = ArenaBuilder::new(src.to_string());
     // Pre-allocate based on source arena size.
@@ -26,14 +26,14 @@ pub fn mdast_arena_to_hast_arena(source: &dyn ReadArena) -> Arena {
     builder.finish()
 }
 
-/// Definition data stored as StringRefs into the MDAST source — avoids cloning strings.
+/// Definition data stored as StringRefs into the MDAST source, avoids cloning strings.
 struct Definition {
     identifier: StringRef,
     url: StringRef,
     title: StringRef, // empty = no title
 }
 
-fn collect_definitions(view: &dyn ReadArena) -> Vec<Definition> {
+fn collect_definitions(view: &Arena) -> Vec<Definition> {
     let mut defs = Vec::new();
     for id in 0..view.len() as u32 {
         let node = view.get_node(id);
@@ -52,11 +52,7 @@ fn collect_definitions(view: &dyn ReadArena) -> Vec<Definition> {
     defs
 }
 
-fn find_def<'a>(
-    defs: &'a [Definition],
-    view: &dyn ReadArena,
-    identifier: &str,
-) -> Option<&'a Definition> {
+fn find_def<'a>(defs: &'a [Definition], view: &Arena, identifier: &str) -> Option<&'a Definition> {
     defs.iter()
         .find(|d| view.get_str(d.identifier) == identifier)
 }
@@ -93,7 +89,7 @@ fn write_element_data(builder: &mut ArenaBuilder, tag_ref: StringRef, props: &[P
 }
 
 fn open_element(builder: &mut ArenaBuilder, tag: &str) -> u32 {
-    let id = builder.open_node_raw(HAST_ELEMENT);
+    let id = builder.open_node_raw(HastNodeType::Element as u8);
     let tag_ref = builder.alloc_string(tag);
     let writer = builder.begin_data_current();
     encode_element_data_into(tag_ref, &[], &mut builder.arena_mut().type_data);
@@ -102,14 +98,14 @@ fn open_element(builder: &mut ArenaBuilder, tag: &str) -> u32 {
 }
 
 fn open_element_with_props(builder: &mut ArenaBuilder, tag: &str, props: &[PropData]) -> u32 {
-    let id = builder.open_node_raw(HAST_ELEMENT);
+    let id = builder.open_node_raw(HastNodeType::Element as u8);
     let tag_ref = builder.alloc_string(tag);
     write_element_data(builder, tag_ref, props);
     id
 }
 
 fn add_void_element(builder: &mut ArenaBuilder, tag: &str) {
-    builder.open_node_raw(HAST_ELEMENT);
+    builder.open_node_raw(HastNodeType::Element as u8);
     let tag_ref = builder.alloc_string(tag);
     let writer = builder.begin_data_current();
     encode_element_data_into(tag_ref, &[], &mut builder.arena_mut().type_data);
@@ -118,7 +114,7 @@ fn add_void_element(builder: &mut ArenaBuilder, tag: &str) {
 }
 
 fn add_void_element_with_props(builder: &mut ArenaBuilder, tag: &str, props: &[PropData]) {
-    builder.open_node_raw(HAST_ELEMENT);
+    builder.open_node_raw(HastNodeType::Element as u8);
     let tag_ref = builder.alloc_string(tag);
     write_element_data(builder, tag_ref, props);
     builder.close_node();
@@ -126,7 +122,7 @@ fn add_void_element_with_props(builder: &mut ArenaBuilder, tag: &str, props: &[P
 
 fn add_text_node(builder: &mut ArenaBuilder, text: &str) {
     let text_ref = builder.alloc_string(text);
-    let leaf_id = builder.add_leaf_raw(HAST_TEXT);
+    let leaf_id = builder.add_leaf_raw(HastNodeType::Text as u8);
     builder
         .arena_mut()
         .set_type_data(leaf_id, &text_ref.as_bytes());
@@ -134,7 +130,7 @@ fn add_text_node(builder: &mut ArenaBuilder, text: &str) {
 
 fn add_raw_node(builder: &mut ArenaBuilder, html: &str) {
     let html_ref = builder.alloc_string(html);
-    let leaf_id = builder.add_leaf_raw(HAST_RAW);
+    let leaf_id = builder.add_leaf_raw(HastNodeType::Raw as u8);
     builder
         .arena_mut()
         .set_type_data(leaf_id, &html_ref.as_bytes());
@@ -142,7 +138,7 @@ fn add_raw_node(builder: &mut ArenaBuilder, html: &str) {
 
 /// Encode lang and meta as a JSON object for the code element's node_data.
 fn encode_code_node_data(lang: &str, meta: &str) -> Vec<u8> {
-    // Manual JSON construction — avoids serde_json dep.
+    // Manual JSON construction, avoids serde_json dep.
     // Both lang and meta come from markdown source, so we need to escape
     // backslashes, double quotes, and control characters.
     fn json_escape(s: &str, out: &mut Vec<u8>) {
@@ -173,7 +169,7 @@ fn encode_code_node_data(lang: &str, meta: &str) -> Vec<u8> {
     buf
 }
 
-fn copy_position(node_id: u32, view: &dyn ReadArena, builder: &mut ArenaBuilder) {
+fn copy_position(node_id: u32, view: &Arena, builder: &mut ArenaBuilder) {
     let node = view.get_node(node_id);
     if node.start_line > 0 || node.start_offset > 0 {
         builder.set_position_current(
@@ -187,18 +183,13 @@ fn copy_position(node_id: u32, view: &dyn ReadArena, builder: &mut ArenaBuilder)
     }
 }
 
-fn convert_node(
-    node_id: u32,
-    view: &dyn ReadArena,
-    builder: &mut ArenaBuilder,
-    defs: &[Definition],
-) {
+fn convert_node(node_id: u32, view: &Arena, builder: &mut ArenaBuilder, defs: &[Definition]) {
     let node = view.get_node(node_id);
     let raw_type = node.node_type;
 
     match MdastNodeType::from_u8(raw_type) {
         Some(MdastNodeType::Root) => {
-            builder.open_node_raw(HAST_ROOT);
+            builder.open_node_raw(HastNodeType::Root as u8);
             convert_children_wrapped(node_id, view, builder, defs);
             builder.close_node();
         }
@@ -264,7 +255,7 @@ fn convert_node(
             if !data.is_empty() {
                 let item_data = decode_list_item_data(data);
                 if item_data.checked != 2 {
-                    // Task list item — add disabled checkbox
+                    // Task list item, add disabled checkbox
                     let type_ref = builder.alloc_string("checkbox");
                     if item_data.checked == 1 {
                         let props = build_props(
@@ -527,10 +518,22 @@ fn convert_node(
         }
 
         Some(MdastNodeType::MdxJsxFlowElement) => {
-            convert_mdx_jsx_element(node_id, view, builder, defs, HAST_MDX_JSX_ELEMENT);
+            convert_mdx_jsx_element(
+                node_id,
+                view,
+                builder,
+                defs,
+                HastNodeType::MdxJsxElement as u8,
+            );
         }
         Some(MdastNodeType::MdxJsxTextElement) => {
-            convert_mdx_jsx_element(node_id, view, builder, defs, HAST_MDX_JSX_TEXT_ELEMENT);
+            convert_mdx_jsx_element(
+                node_id,
+                view,
+                builder,
+                defs,
+                HastNodeType::MdxJsxTextElement as u8,
+            );
         }
 
         Some(MdastNodeType::MdxFlowExpression) => {
@@ -542,7 +545,7 @@ fn convert_node(
                 view.get_str(d.value)
             };
             let value_ref = builder.alloc_string(value);
-            let leaf_id = builder.add_leaf_raw(HAST_MDX_FLOW_EXPRESSION);
+            let leaf_id = builder.add_leaf_raw(HastNodeType::MdxFlowExpression as u8);
             builder
                 .arena_mut()
                 .set_type_data(leaf_id, &value_ref.as_bytes());
@@ -567,7 +570,7 @@ fn convert_node(
                 view.get_str(d.value)
             };
             let value_ref = builder.alloc_string(value);
-            let leaf_id = builder.add_leaf_raw(HAST_MDX_TEXT_EXPRESSION);
+            let leaf_id = builder.add_leaf_raw(HastNodeType::MdxTextExpression as u8);
             builder
                 .arena_mut()
                 .set_type_data(leaf_id, &value_ref.as_bytes());
@@ -592,7 +595,7 @@ fn convert_node(
                 view.get_str(d.value)
             };
             let value_ref = builder.alloc_string(value);
-            let leaf_id = builder.add_leaf_raw(HAST_MDX_ESM);
+            let leaf_id = builder.add_leaf_raw(HastNodeType::MdxEsm as u8);
             builder
                 .arena_mut()
                 .set_type_data(leaf_id, &value_ref.as_bytes());
@@ -615,24 +618,19 @@ fn convert_node(
     }
 }
 
-fn convert_children(
-    node_id: u32,
-    view: &dyn ReadArena,
-    builder: &mut ArenaBuilder,
-    defs: &[Definition],
-) {
+fn convert_children(node_id: u32, view: &Arena, builder: &mut ArenaBuilder, defs: &[Definition]) {
     let children = view.get_children(node_id);
     for &child_id in children {
         convert_node(child_id, view, builder, defs);
     }
 }
 
-/// Convert children with `\n` text nodes inserted between them (wrap behavior).
-/// Also handles Fragment results from paragraph unraveling by splicing
-/// the unraveled children into the parent with `\n` between them.
+/// Convert children with `\n` text nodes inserted between them.
+/// These are needed by the MDX compilation path (JSX children spacing).
+/// The HTML renderer skips whitespace-only text nodes between block elements.
 fn convert_children_wrapped(
     node_id: u32,
-    view: &dyn ReadArena,
+    view: &Arena,
     builder: &mut ArenaBuilder,
     defs: &[Definition],
 ) {
@@ -645,7 +643,6 @@ fn convert_children_wrapped(
             && is_mdx_only_paragraph(child_id, view);
 
         if is_unraveled_paragraph {
-            // Paragraph unraveled — emit its children with \n between them
             let para_children = view.get_children(child_id);
             for &para_child_id in para_children {
                 if !first {
@@ -666,7 +663,7 @@ fn convert_children_wrapped(
 
 fn convert_table_row(
     row_id: u32,
-    view: &dyn ReadArena,
+    view: &Arena,
     builder: &mut ArenaBuilder,
     defs: &[Definition],
     is_header: bool,
@@ -684,7 +681,7 @@ fn convert_table_row(
 
 /// Check if a paragraph contains only MDX nodes and/or whitespace text.
 /// If so, the paragraph should be "unraveled" (children output without `<p>`).
-fn is_mdx_only_paragraph(node_id: u32, view: &dyn ReadArena) -> bool {
+fn is_mdx_only_paragraph(node_id: u32, view: &Arena) -> bool {
     let children = view.get_children(node_id);
     if children.is_empty() {
         return false;
@@ -722,7 +719,7 @@ fn is_mdx_only_paragraph(node_id: u32, view: &dyn ReadArena) -> bool {
 
 fn convert_mdx_jsx_element(
     node_id: u32,
-    view: &dyn ReadArena,
+    view: &Arena,
     builder: &mut ArenaBuilder,
     defs: &[Definition],
     hast_type: u8,
@@ -772,13 +769,13 @@ fn convert_mdx_jsx_element(
     builder.close_node();
 }
 
-fn extract_text_content(node_id: u32, view: &dyn ReadArena) -> String {
+fn extract_text_content(node_id: u32, view: &Arena) -> String {
     let mut out = String::new();
     extract_text_recursive(node_id, view, &mut out);
     out
 }
 
-fn extract_text_recursive(node_id: u32, view: &dyn ReadArena, out: &mut String) {
+fn extract_text_recursive(node_id: u32, view: &Arena, out: &mut String) {
     let node = view.get_node(node_id);
     if node.node_type == MdastNodeType::Text as u8 {
         let data = view.get_type_data(node_id);

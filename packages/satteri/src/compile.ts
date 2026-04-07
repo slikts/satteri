@@ -1,5 +1,5 @@
 /**
- * Top-level compile functions — the primary public API.
+ * Top-level compile functions, the primary public API.
  *
  * Both MDAST and HAST arenas stay in Rust memory via opaque handles.
  * Only matched nodes and mutation commands cross the NAPI boundary.
@@ -29,9 +29,7 @@ import {
   getHandleSource,
 } from "../index.js";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function initPlugins<T>(
   plugins: { name: string; createOnce(): T }[],
@@ -42,9 +40,7 @@ function initPlugins<T>(
   }));
 }
 
-// ---------------------------------------------------------------------------
 // MDAST plugin runner (handle-based)
-// ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MdastHandle = any;
@@ -104,9 +100,7 @@ function runMdastPluginsOnHandle(
   return runNext();
 }
 
-// ---------------------------------------------------------------------------
 // HAST plugin runner (handle-based)
-// ---------------------------------------------------------------------------
 
 function runHastPluginsOnHandle(
   handle: HastHandle,
@@ -135,9 +129,7 @@ function runHastPluginsOnHandle(
   return runNext();
 }
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /** Configuration for static subtree collapsing during MDX compilation. */
 export interface OptimizeStaticConfig {
@@ -219,10 +211,8 @@ export function compileMdxToJs(
   return finish(handleResult);
 }
 
-// ---------------------------------------------------------------------------
 // Pipeline: parse → mdast plugins → hast conversion → hast plugins
 // All arenas stay in Rust. No intermediate buffer copies to JS.
-// ---------------------------------------------------------------------------
 
 /** Parse + mdast plugins + convert to HAST handle. */
 function createHastHandleFromMdast(

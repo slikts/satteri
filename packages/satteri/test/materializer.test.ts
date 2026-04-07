@@ -101,9 +101,7 @@ test("children are lazily evaluated (getter replaced by plain array after access
   expect("value" in (afterDesc ?? {})).toBe(true);
 });
 
-// ---------------------------------------------------------------------------
 // MDX JSX attribute tests
-// ---------------------------------------------------------------------------
 
 function mdxSetup(source: string) {
   const buf = serializeMdastHandle(createMdxMdastHandle(source)) as Uint8Array;

@@ -1,9 +1,8 @@
 [workspace]
 members = [
   "crates/satteri-arena",
-  "crates/satteri-mdast",
+  "crates/satteri-ast",
   "crates/bench",
-  "crates/satteri-hast",
   "crates/satteri-napi-binding",
   "crates/satteri-plugin-api",
   "crates/satteri-mdxjs-rs",

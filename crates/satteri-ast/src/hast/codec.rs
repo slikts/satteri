@@ -87,14 +87,14 @@ mod tests {
         let tag = StringRef::new(0, 1);
         let name = StringRef::new(5, 4);
         let value = StringRef::new(10, 6);
-        let props = vec![(name, crate::node_types::PROP_STRING, value)];
+        let props = vec![(name, crate::shared::PROP_STRING, value)];
         let data = encode_element_data(tag, &props);
         assert_eq!(data.len(), 36); // 16 + 20
         assert_eq!(decode_element_prop_count(&data), 1);
         let (n, kind, v) = decode_element_prop(&data, 0);
         assert_eq!(n.offset, 5);
         assert_eq!(n.len, 4);
-        assert_eq!(kind, crate::node_types::PROP_STRING);
+        assert_eq!(kind, crate::shared::PROP_STRING);
         assert_eq!(v.offset, 10);
         assert_eq!(v.len, 6);
     }

@@ -1,8 +1,6 @@
 use satteri_arena::{Arena, ArenaBuilder, StringRef};
-use satteri_mdast::{codec::*, MdastNodeType};
+use satteri_ast::mdast::{codec::*, MdastNodeType};
 use satteri_plugin_api::*;
-
-// ── Test arena builder ────────────────────────────────────────────────────────
 
 /// Build a simple arena:
 ///   Root (0)
@@ -49,8 +47,6 @@ fn build_test_arena() -> Arena {
 
     b.finish()
 }
-
-// ── Plugins used in tests ─────────────────────────────────────────────────────
 
 fn slugify(text: &str) -> String {
     text.chars()
@@ -119,8 +115,6 @@ impl Plugin for CountNodes {
         VisitResult::NoChange
     }
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// 1. A plugin that implements nothing compiles and runs without error
 #[test]

@@ -23,7 +23,7 @@ export declare function convertMdastToHastHandle(handle: ArenaHandle): ArenaHand
 
 /**
  * Parse markdown source and convert to HAST. Returns an opaque handle.
- * The arena stays in Rust memory — no buffer is copied to JS.
+ * The arena stays in Rust memory, no buffer is copied to JS.
  */
 export declare function createHastHandle(source: string): ArenaHandle
 
@@ -75,13 +75,30 @@ export interface JsSubscription {
   tagFilter: Array<string>
 }
 
+/** Options for `mdast_text_content_handle`, matching `mdast-util-to-string`. */
+export interface JsTextContentOptions {
+  /** Include `alt` text from image nodes. Default: true. */
+  includeImageAlt?: boolean
+  /** Include `value` from HTML nodes. Default: true. */
+  includeHtml?: boolean
+}
+
+/**
+ * Collect the concatenated text content of an MDAST node and all its descendants.
+ * Mirrors `mdast-util-to-string`: collects value from text nodes, alt from images.
+ */
+export declare function mdastTextContentHandle(handle: ArenaHandle, nodeId: number, options?: JsTextContentOptions | undefined | null): string
+
 /**
  * Parse a JavaScript expression and return its ESTree-compatible AST as a JSON string.
  * Returns null if parsing fails. The JS layer calls JSON.parse (faster than serde_json → NAPI).
  */
 export declare function parseExpression(source: string): string | null
 
-/** Parse Markdown source and return HTML string directly. */
+/**
+ * Parse Markdown source and return HTML string directly.
+ * Uses pulldown-cmark's streaming renderer, skipping the arena entirely.
+ */
 export declare function parseToHtml(source: string): string
 
 /** Render a handle's HAST arena to HTML. Does not consume the handle. */
@@ -97,8 +114,8 @@ export declare function serializeMdastHandle(handle: ArenaHandle): Uint8Array
 export declare function setNodeData(handle: ArenaHandle, nodeId: number, json: Uint8Array): void
 
 /**
- * Collect the concatenated text content of a node and all its descendants.
- * Walks entirely in Rust — no per-child NAPI round-trips.
+ * Collect the concatenated text content of a HAST node and all its descendants.
+ * Walks entirely in Rust, no per-child NAPI round-trips.
  */
 export declare function textContentHandle(handle: ArenaHandle, nodeId: number): string
 

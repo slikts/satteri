@@ -3,7 +3,7 @@
 use satteri_arena::{
     decode_string_ref_data, encode_string_ref_data, Arena, ArenaBuilder, StringRef,
 };
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::MdastNodeType;
 
 #[test]
 fn store_and_read_back_string_ref() {

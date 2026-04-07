@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
 
-// ── Worker mode: run a single scenario ──────────────────────────────────────
 if (process.env.RAM_BENCH_SCENARIO) {
   if (typeof globalThis.gc !== "function") {
     console.error("worker must run with --expose-gc");
@@ -53,8 +52,6 @@ if (process.env.RAM_BENCH_SCENARIO) {
   process.stdout.write(JSON.stringify(result));
   process.exit(0);
 }
-
-// ── Coordinator mode ────────────────────────────────────────────────────────
 
 async function buildScenario(name, md) {
   const {
@@ -129,7 +126,7 @@ async function buildScenario(name, md) {
     }
 
     case "html-many-plugins": {
-      // 3 mdast + 4 hast plugins — realistic Astro-like setup
+      // 3 mdast + 4 hast plugins, realistic Astro-like setup
       const mdastPlugins = [
         defineMdastPlugin({
           name: "demote-h1",
@@ -300,12 +297,12 @@ const lft = (s, w) => String(s).padEnd(w);
 
 const scenarios = [
   ["parseToHtml (pure Rust)", "pure-rust"],
-  ["HTML — no plugins", "html-no-plugins"],
-  ["HTML — 2 plugins (1+1)", "html-with-plugins"],
-  ["HTML — 7 plugins (3+4)", "html-many-plugins"],
-  ["MDX  — no plugins", "mdx-no-plugins"],
-  ["MDX  — 2 plugins (1+1)", "mdx-with-plugins"],
-  ["MDX  — 7 plugins (3+4)", "mdx-many-plugins"],
+  ["HTML - no plugins", "html-no-plugins"],
+  ["HTML - 2 plugins (1+1)", "html-with-plugins"],
+  ["HTML - 7 plugins (3+4)", "html-many-plugins"],
+  ["MDX  - no plugins", "mdx-no-plugins"],
+  ["MDX  - 2 plugins (1+1)", "mdx-with-plugins"],
+  ["MDX  - 7 plugins (3+4)", "mdx-many-plugins"],
 ];
 
 const SCALES = process.env.RAM_BENCH_SCALES

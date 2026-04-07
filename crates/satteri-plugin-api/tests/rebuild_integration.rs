@@ -2,7 +2,7 @@
 //! when structural commands are issued.
 
 use satteri_arena::{Arena, ArenaBuilder, StringRef};
-use satteri_mdast::{codec::*, MdastNodeType};
+use satteri_ast::mdast::{codec::*, MdastNodeType};
 use satteri_plugin_api::*;
 
 fn build_test_arena() -> Arena {
@@ -35,8 +35,6 @@ fn build_test_arena() -> Arena {
 
     b.finish()
 }
-
-// ── Test 1: Remove returns VisitResult → Text nodes gone from arena ─────────
 
 /// A plugin that removes all Text nodes by returning VisitResult::Remove.
 struct RemoveAllText;
@@ -85,8 +83,6 @@ fn remove_text_via_visit_result_removes_from_arena() {
     }
 }
 
-// ── Test 2: Replace returns VisitResult → heading replaced in arena ─────────
-
 /// A plugin that replaces the heading with a paragraph via VisitResult::Replace.
 struct ReplaceHeadingWithParagraph;
 
@@ -120,8 +116,6 @@ fn replace_heading_via_visit_result_updates_arena() {
     let root_children = result.arena.get_children(0);
     assert!(!root_children.is_empty(), "root should still have children");
 }
-
-// ── Test 3: Read-only plugin — arena unchanged ───────────────────────────────
 
 /// A read-only plugin that only observes nodes.
 struct ReadOnlyPlugin;
@@ -160,8 +154,6 @@ fn read_only_plugin_does_not_rebuild_arena() {
     assert_eq!(result.arena.len(), original_count, "node count unchanged");
     assert!(result.commands.is_empty(), "no commands recorded");
 }
-
-// ── Test 4: Data-only plugin — no rebuild, SetData not in commands ──────────
 
 /// AddHeadingIds writes to the DataMap but issues no structural commands.
 fn slugify(text: &str) -> String {
@@ -203,7 +195,7 @@ fn data_only_plugin_does_not_trigger_rebuild() {
     let mut typed_data = TypedDataMap::new();
     let result = runner.run(arena, &mut data_map, &mut typed_data);
 
-    // Data written to DataMap — but no structural arena commands
+    // Data written to DataMap, but no structural arena commands
     assert!(
         !result.has_mutations,
         "data-only plugin should not set has_mutations"
@@ -219,8 +211,6 @@ fn data_only_plugin_does_not_trigger_rebuild() {
     let id_val = data_map.get(1, "id").unwrap();
     assert_eq!(id_val.as_str().unwrap(), "hello");
 }
-
-// ── Test 5: ctx.remove_node() (explicit command) removes node from arena ────
 
 struct RemoveHeadingExplicit;
 
@@ -254,8 +244,6 @@ fn explicit_remove_command_rebuilds_arena() {
     // Should have 3 nodes: Root + Paragraph + Text(World)
     assert_eq!(result.arena.len(), 3);
 }
-
-// ── Test 6: Two plugins sequentially — second sees rebuilt arena ─────────────
 
 /// Plugin 1 removes the heading. Plugin 2 counts nodes.
 struct CounterPlugin {

@@ -1,10 +1,9 @@
-//! `satteri-arena` — generic arena-allocated tree structure.
+//! `satteri-arena`: generic arena-allocated tree structure.
 //!
 //! Provides the core data structures shared by MDAST and HAST:
 //! - `Arena` for owning all nodes and associated data
 //! - `ArenaBuilder` for incremental tree construction
 //! - `ArenaNode` and `StringRef` for zero-copy node representation
-//! - `ReadArena` trait for read-only access
 //! - Raw buffer export/import for binary transfer
 //! - `LineIndex` for offset→(line, column) conversion
 
@@ -15,11 +14,8 @@ pub mod line_index;
 pub mod mdx_types;
 pub mod node;
 pub mod raw_buffer;
-pub mod read_arena;
-
 pub use arena::{Arena, TypeDataWriter};
 pub use builder::ArenaBuilder;
 pub use codec::{decode_string_ref_data, encode_string_ref_data};
 pub use line_index::{LineIndex, LineIndexCursor};
 pub use node::{ArenaNode, StringRef, NODE_STRUCT_SIZE};
-pub use read_arena::ReadArena;

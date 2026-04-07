@@ -17,9 +17,7 @@ import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 import type { MdastPluginInstance } from "../src/mdast/mdast-visitor.js";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Full pipeline: markdown → HAST → HTML string (handle-based) */
 function markdownToHtml(source: string): string {
@@ -47,9 +45,7 @@ function markdownToHtmlWithMdastPlugins(
   return compileMarkdownToHtml(source, { mdastPlugins }) as string;
 }
 
-// =========================================================================
 // PART 1: MDAST plugins that affect the Markdown → HTML result
-// =========================================================================
 
 describe("MDAST plugins affecting HTML output", () => {
   test("no plugins: simple markdown renders correct HTML", () => {
@@ -60,7 +56,7 @@ describe("MDAST plugins affecting HTML output", () => {
     expect(html).toContain("World");
   });
 
-  test("MDAST plugin that removes headings — heading disappears from HTML", () => {
+  test("MDAST plugin that removes headings - heading disappears from HTML", () => {
     const removeHeadings = {
       heading(_node: MdastNode, ctx: { removeNode(n: MdastNode): void }) {
         ctx.removeNode(_node);
@@ -75,7 +71,7 @@ describe("MDAST plugins affecting HTML output", () => {
     expect(html).toContain("Keep this paragraph");
   });
 
-  test("MDAST plugin that replaces heading with paragraph — h1 becomes p in HTML", () => {
+  test("MDAST plugin that replaces heading with paragraph - h1 becomes p in HTML", () => {
     const replaceHeading = {
       heading(node: MdastNode) {
         if (node.type === "heading") {
@@ -119,7 +115,7 @@ describe("MDAST plugins affecting HTML output", () => {
         node.data = { id: "survives-rebuild" };
       },
       text(node: MdastNode, ctx: { setProperty(n: MdastNode, k: string, v: unknown): void }) {
-        // Mutating text forces a rebuild — node IDs change
+        // Mutating text forces a rebuild, node IDs change
         ctx.setProperty(node, "value", "mutated");
       },
     };
@@ -136,7 +132,7 @@ describe("MDAST plugins affecting HTML output", () => {
     expect(seenIdInPlugin2).toBe("survives-rebuild");
   });
 
-  test("MDAST plugin removing a link — anchor disappears from HTML", () => {
+  test("MDAST plugin removing a link - anchor disappears from HTML", () => {
     const removeLinks = {
       link(_node: MdastNode, ctx: { removeNode(n: MdastNode): void }) {
         ctx.removeNode(_node);
@@ -151,9 +147,7 @@ describe("MDAST plugins affecting HTML output", () => {
   });
 });
 
-// =========================================================================
 // PART 2: HAST plugins that affect the HTML result
-// =========================================================================
 
 describe("HAST plugins affecting HTML output", () => {
   test("no HAST plugin: basic rendering is correct", () => {
@@ -325,9 +319,7 @@ describe("HAST plugins affecting HTML output", () => {
   });
 });
 
-// =========================================================================
 // PART 3: Handle-based HAST pipeline
-// =========================================================================
 
 describe("Handle-based HAST pipeline", () => {
   test("serializeHandle returns valid HAST binary", () => {
@@ -399,9 +391,7 @@ describe("Handle-based HAST pipeline", () => {
   });
 });
 
-// =========================================================================
 // PART 4: Combined MDAST + HAST plugin scenarios
-// =========================================================================
 
 describe("combined MDAST + HAST plugin scenarios", () => {
   test("MDAST plugin removes heading, HAST tree reflects the removal", () => {

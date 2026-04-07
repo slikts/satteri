@@ -70,6 +70,7 @@ export const createMdxMdastHandle = __napiModule.exports.createMdxMdastHandle
 export const dropHandle = __napiModule.exports.dropHandle
 export const getHandleSource = __napiModule.exports.getHandleSource
 export const getNodeData = __napiModule.exports.getNodeData
+export const mdastTextContentHandle = __napiModule.exports.mdastTextContentHandle
 export const parseExpression = __napiModule.exports.parseExpression
 export const parseToHtml = __napiModule.exports.parseToHtml
 export const renderHandle = __napiModule.exports.renderHandle

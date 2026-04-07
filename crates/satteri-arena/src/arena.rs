@@ -4,7 +4,7 @@ use crate::node::{ArenaNode, StringRef};
 
 /// The central arena that owns all nodes and associated data for one parse.
 ///
-/// Strings are NOT copied — the arena holds the source and nodes reference it
+/// Strings are NOT copied. The arena holds the source and nodes reference it
 /// via `StringRef` (byte offset + length into `source`).
 #[derive(Debug, Clone)]
 pub struct Arena {
@@ -77,7 +77,7 @@ impl Arena {
         node.end_column = end_column;
     }
 
-    /// Appends to the shared flat children array — calling this more than
+    /// Appends to the shared flat children array, calling this more than
     /// once on the same node orphans the previous entries.
     pub fn set_children(&mut self, node_id: u32, child_ids: &[u32]) {
         let start = self.children.len() as u32;

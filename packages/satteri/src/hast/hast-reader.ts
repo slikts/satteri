@@ -35,7 +35,7 @@ export interface HastProperty {
   value: string | boolean | string[];
 }
 
-// HastNode field offsets (same layout as MDAST — shared binary format)
+// HastNode field offsets (same layout as MDAST, shared binary format)
 //   id: u32          @ 0
 //   node_type: u8    @ 4
 //   _pad: [u8; 3]    @ 5

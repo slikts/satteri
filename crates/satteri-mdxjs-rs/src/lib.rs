@@ -1,6 +1,6 @@
 //! Public API of `mdxjs-rs`.
 //!
-//! *   [`compile()`][] — turn MDX into JavaScript
+//! *   [`compile()`][]: turn MDX into JavaScript
 #![deny(clippy::pedantic)]
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::cast_possible_truncation)]
@@ -98,7 +98,7 @@ pub fn compile(value: &str, options: &Options) -> Result<String, message::Messag
             source: Box::new("mdx-jsx".into()),
         });
     }
-    let hast_arena = satteri_hast::mdast_arena_to_hast_arena(&arena);
+    let hast_arena = satteri_ast::hast::mdast_arena_to_hast_arena(&arena);
     compile_hast_arena(&hast_arena, options)
 }
 
@@ -147,8 +147,8 @@ pub fn compile_hast_arena(
 /// - Collapsed by `optimizeStatic` into `set:html`
 /// - Rendered to HTML by `render_node`
 pub fn simplify_plain_mdx_nodes(arena: &mut satteri_arena::Arena, ignore_elements: &[String]) {
-    use satteri_hast::node_types::{HAST_ELEMENT, HAST_MDX_JSX_ELEMENT, HAST_MDX_JSX_TEXT_ELEMENT};
-    use satteri_mdast::{decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name};
+    use satteri_ast::hast::HastNodeType;
+    use satteri_ast::mdast::codec::{decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name};
 
     let node_count = arena.len();
     for i in 0..node_count {
@@ -156,7 +156,10 @@ pub fn simplify_plain_mdx_nodes(arena: &mut satteri_arena::Arena, ignore_element
         let node = arena.get_node(node_id);
         let nt = node.node_type;
 
-        if nt != HAST_MDX_JSX_ELEMENT && nt != HAST_MDX_JSX_TEXT_ELEMENT {
+        if !matches!(
+            HastNodeType::from_u8(nt),
+            Some(HastNodeType::MdxJsxElement | HastNodeType::MdxJsxTextElement)
+        ) {
             continue;
         }
 
@@ -193,7 +196,7 @@ pub fn simplify_plain_mdx_nodes(arena: &mut satteri_arena::Arena, ignore_element
         // Element format: [tag_name: StringRef(8B)][prop_count: u32(4B)][_pad: u32(4B)]
         // The layout is the same! name_ref is already at offset 0, and attr_count (0) becomes prop_count (0).
         // We only need to change the node_type byte.
-        arena.get_node_mut(node_id).node_type = HAST_ELEMENT;
+        arena.get_node_mut(node_id).node_type = HastNodeType::Element as u8;
     }
 }
 

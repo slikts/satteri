@@ -11,9 +11,7 @@ import type { MdastNode } from "../src/types.js";
 import type { Element } from "hast";
 import type { MdxJsxTextElementHast } from "mdast-util-mdx-jsx";
 
-// ---------------------------------------------------------------------------
-// compileMarkdownToHtml — no plugins
-// ---------------------------------------------------------------------------
+// compileMarkdownToHtml - no plugins
 
 describe("compileMarkdownToHtml", () => {
   test("basic markdown to HTML", () => {
@@ -46,9 +44,7 @@ describe("compileMarkdownToHtml", () => {
     expect(html).toContain("console.log(1)");
   });
 
-  // ---------------------------------------------------------------------------
   // with MDAST plugins only
-  // ---------------------------------------------------------------------------
 
   test("MDAST plugin removes headings", () => {
     const removeHeadings = defineMdastPlugin({
@@ -85,9 +81,7 @@ describe("compileMarkdownToHtml", () => {
     expect(html).not.toContain("Original");
   });
 
-  // ---------------------------------------------------------------------------
   // with HAST plugins only
-  // ---------------------------------------------------------------------------
 
   test("HAST plugin adds class to all elements", () => {
     const addClasses = defineHastPlugin({
@@ -181,7 +175,7 @@ describe("compileMarkdownToHtml", () => {
     expect(html).toContain('id="main-title"');
   });
 
-  test("no mutations — fast Rust path still works", () => {
+  test("no mutations - fast Rust path still works", () => {
     const noopPlugin = defineHastPlugin({
       name: "noop",
       createOnce: () => ({
@@ -202,9 +196,7 @@ describe("compileMarkdownToHtml", () => {
     expect(html).toContain("<p>");
   });
 
-  // ---------------------------------------------------------------------------
   // with both MDAST and HAST plugins
-  // ---------------------------------------------------------------------------
 
   test("MDAST plugin removes headings, HAST plugin adds class", () => {
     const removeHeadings = defineMdastPlugin({
@@ -272,9 +264,7 @@ describe("compileMarkdownToHtml", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // compileMdxToJs
-// ---------------------------------------------------------------------------
 
 describe("compileMdxToJs", () => {
   test("basic MDX compilation", () => {
@@ -428,7 +418,7 @@ describe("compileMdxToJs", () => {
     expect(js).toContain('"client:component-hydration": ""');
   });
 
-  test("HAST plugin setProperty on MDX JSX element — no-op plugin preserves all attributes", () => {
+  test("HAST plugin setProperty on MDX JSX element - no-op plugin preserves all attributes", () => {
     const noop = defineHastPlugin({
       name: "noop",
       createOnce: () => ({
@@ -471,9 +461,7 @@ describe("compileMdxToJs", () => {
     expect(js).not.toContain('"bar"');
   });
 
-  // ---------------------------------------------------------------------------
   // optimizeStatic
-  // ---------------------------------------------------------------------------
 
   test("optimizeStatic collapses static subtrees (Astro-style)", () => {
     const js = compileMdxToJs("# Hello\n\nWorld", {
@@ -601,11 +589,9 @@ describe("compileMdxToJs", () => {
     expect(html).toContain('class="added"');
   });
 
-  // -------------------------------------------------------------------------
   // Filtered (selective) HAST visitors
-  // -------------------------------------------------------------------------
 
-  test("filtered element visitor — single tag", () => {
+  test("filtered element visitor - single tag", () => {
     const plugin = defineHastPlugin({
       name: "link-class",
       createOnce: () => ({
@@ -627,7 +613,7 @@ describe("compileMdxToJs", () => {
     expect(html).toMatch(/<h1>Hello<\/h1>/);
   });
 
-  test("filtered element visitor — multiple tags", () => {
+  test("filtered element visitor - multiple tags", () => {
     const plugin = defineHastPlugin({
       name: "heading-class",
       createOnce: () => ({
@@ -648,7 +634,7 @@ describe("compileMdxToJs", () => {
     expect(html).not.toContain('<p class="heading">');
   });
 
-  test("filtered element visitor — array of filter groups", () => {
+  test("filtered element visitor - array of filter groups", () => {
     const plugin = defineHastPlugin({
       name: "multi-filter",
       createOnce: () => ({
@@ -678,7 +664,7 @@ describe("compileMdxToJs", () => {
 
   test("filtered visitor mixed with unfiltered falls back to JS walk", () => {
     // This plugin has a bare `text` function (unfiltered), so it should
-    // fall back to the JS walk path — but still produce correct results.
+    // fall back to the JS walk path, but still produce correct results.
     const plugin = defineHastPlugin({
       name: "mixed",
       createOnce: () => ({
@@ -689,7 +675,7 @@ describe("compileMdxToJs", () => {
           },
         },
         text(node: HastNode, _ctx: HastVisitorContext) {
-          // noop — but being a bare function forces JS-walk fallback
+          // noop, but being a bare function forces JS-walk fallback
         },
       }),
     });
@@ -701,11 +687,9 @@ describe("compileMdxToJs", () => {
     expect(html).toContain("Hello");
   });
 
-  // -----------------------------------------------------------------------
   // Async visitors
-  // -----------------------------------------------------------------------
 
-  test("async MDAST visitor — replaces code block after await", async () => {
+  test("async MDAST visitor - replaces code block after await", async () => {
     const plugin = defineMdastPlugin({
       name: "async-code",
       createOnce: () => ({
@@ -736,7 +720,7 @@ describe("compileMdxToJs", () => {
     expect(typeof result).toBe("string");
   });
 
-  test("async HAST visitor — replaces element after await", async () => {
+  test("async HAST visitor - replaces element after await", async () => {
     const plugin = defineHastPlugin({
       name: "async-replace",
       createOnce: () => ({
@@ -757,7 +741,7 @@ describe("compileMdxToJs", () => {
     expect(html).toContain("highlighted");
   });
 
-  test("async HAST visitor — multiple async visitors run in parallel", async () => {
+  test("async HAST visitor - multiple async visitors run in parallel", async () => {
     const order: string[] = [];
     const plugin = defineHastPlugin({
       name: "async-parallel",
@@ -782,7 +766,7 @@ describe("compileMdxToJs", () => {
     expect(order[1]).toBe("start:h2");
   });
 
-  test("mixed sync and async plugins — sync has zero overhead", async () => {
+  test("mixed sync and async plugins - sync has zero overhead", async () => {
     const syncPlugin = defineHastPlugin({
       name: "sync-class",
       createOnce: () => ({

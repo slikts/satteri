@@ -53,7 +53,7 @@ impl LineIndexCursor<'_> {
                 idx += 1;
             }
         } else {
-            // Offset went backwards — scan backwards from current position.
+            // Offset went backwards, scan backwards from current position.
             while idx > 0 && offsets[idx] > offset {
                 idx -= 1;
             }

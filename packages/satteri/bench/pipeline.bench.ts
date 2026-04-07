@@ -21,8 +21,6 @@ import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
 const MARKDOWN = readFileSync(new URL("./fixtures/markdown.md", import.meta.url), "utf8");
 const MDX = readFileSync(new URL("./fixtures/document.mdx", import.meta.url), "utf8");
 
-// -- Plugins ----------------------------------------------------------------
-
 const noopHastPlugin = defineHastPlugin({
   name: "noop",
   createOnce: () => ({
@@ -56,8 +54,6 @@ const noopMdastPlugin = defineMdastPlugin({
   name: "noop-mdast",
   createOnce: () => ({ heading() {} }),
 });
-
-// -- Benchmarks -------------------------------------------------------------
 
 describe("compileMarkdownToHtml", () => {
   bench("no plugins", () => {

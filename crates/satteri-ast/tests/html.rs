@@ -1,7 +1,7 @@
 //! HTML output tests: verify that mdast_to_html produces correct HTML
 //! for all supported Markdown constructs.
 
-use satteri_hast::mdast_to_html;
+use satteri_ast::mdast_to_html;
 
 fn html(md: &str) -> String {
     let (arena, _errors) =
@@ -11,29 +11,29 @@ fn html(md: &str) -> String {
 
 #[test]
 fn heading_h1() {
-    assert_eq!(html("# Heading 1"), "<h1>Heading 1</h1>");
+    assert_eq!(html("# Heading 1"), "<h1>Heading 1</h1>\n");
 }
 
 #[test]
 fn heading_h2() {
-    assert_eq!(html("## Heading 2"), "<h2>Heading 2</h2>");
+    assert_eq!(html("## Heading 2"), "<h2>Heading 2</h2>\n");
 }
 
 #[test]
 fn heading_h6() {
-    assert_eq!(html("###### Heading 6"), "<h6>Heading 6</h6>");
+    assert_eq!(html("###### Heading 6"), "<h6>Heading 6</h6>\n");
 }
 
 #[test]
 fn paragraph() {
-    assert_eq!(html("A simple paragraph."), "<p>A simple paragraph.</p>");
+    assert_eq!(html("A simple paragraph."), "<p>A simple paragraph.</p>\n");
 }
 
 #[test]
 fn emphasis() {
     assert_eq!(
         html("Some *emphasized* text."),
-        "<p>Some <em>emphasized</em> text.</p>"
+        "<p>Some <em>emphasized</em> text.</p>\n"
     );
 }
 
@@ -41,7 +41,7 @@ fn emphasis() {
 fn strong() {
     assert_eq!(
         html("Some **strong** text."),
-        "<p>Some <strong>strong</strong> text.</p>"
+        "<p>Some <strong>strong</strong> text.</p>\n"
     );
 }
 
@@ -49,7 +49,7 @@ fn strong() {
 fn inline_code() {
     assert_eq!(
         html("Use `inline code` here."),
-        "<p>Use <code>inline code</code> here.</p>"
+        "<p>Use <code>inline code</code> here.</p>\n"
     );
 }
 
@@ -57,7 +57,7 @@ fn inline_code() {
 fn link_without_title() {
     assert_eq!(
         html("[example](https://example.com)"),
-        "<p><a href=\"https://example.com\">example</a></p>"
+        "<p><a href=\"https://example.com\">example</a></p>\n"
     );
 }
 
@@ -65,7 +65,7 @@ fn link_without_title() {
 fn link_with_title() {
     assert_eq!(
         html("[example](https://example.com \"Example Title\")"),
-        "<p><a href=\"https://example.com\" title=\"Example Title\">example</a></p>"
+        "<p><a href=\"https://example.com\" title=\"Example Title\">example</a></p>\n"
     );
 }
 
@@ -73,7 +73,7 @@ fn link_with_title() {
 fn image_without_title() {
     assert_eq!(
         html("![alt text](image.png)"),
-        "<p><img src=\"image.png\" alt=\"alt text\"></p>"
+        "<p><img src=\"image.png\" alt=\"alt text\"></p>\n"
     );
 }
 
@@ -81,7 +81,7 @@ fn image_without_title() {
 fn fenced_code_block() {
     assert_eq!(
         html("```rust\nfn main() {}\n```"),
-        "<pre><code class=\"language-rust\">fn main() {}\n</code></pre>"
+        "<pre><code class=\"language-rust\">fn main() {}\n</code></pre>\n"
     );
 }
 
@@ -89,7 +89,7 @@ fn fenced_code_block() {
 fn code_block_no_language() {
     assert_eq!(
         html("```\nplain code\n```"),
-        "<pre><code>plain code\n</code></pre>"
+        "<pre><code>plain code\n</code></pre>\n"
     );
 }
 
@@ -97,7 +97,7 @@ fn code_block_no_language() {
 fn blockquote() {
     assert_eq!(
         html("> This is a blockquote."),
-        "<blockquote><p>This is a blockquote.</p></blockquote>"
+        "<blockquote>\n<p>This is a blockquote.</p>\n</blockquote>\n"
     );
 }
 
@@ -105,7 +105,7 @@ fn blockquote() {
 fn unordered_list() {
     assert_eq!(
         html("- Item 1\n- Item 2\n- Item 3"),
-        "<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>"
+        "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n<li>Item 3</li>\n</ul>\n"
     );
 }
 
@@ -113,7 +113,7 @@ fn unordered_list() {
 fn ordered_list() {
     assert_eq!(
         html("1. First\n2. Second\n3. Third"),
-        "<ol><li>First</li><li>Second</li><li>Third</li></ol>"
+        "<ol>\n<li>First</li>\n<li>Second</li>\n<li>Third</li>\n</ol>\n"
     );
 }
 
@@ -127,22 +127,26 @@ fn table() {
 
 #[test]
 fn thematic_break() {
-    assert_eq!(html("---"), "<hr>");
+    assert_eq!(html("---"), "<hr>\n");
 }
 
 #[test]
 fn hard_line_break() {
-    assert_eq!(html("Line one  \nLine two"), "<p>Line one<br>Line two</p>");
+    assert_eq!(
+        html("Line one  \nLine two"),
+        "<p>Line one<br>Line two</p>\n"
+    );
 }
 
 #[test]
 fn text_escaping() {
-    assert_eq!(html("a < b & c > d"), "<p>a &lt; b &amp; c &gt; d</p>");
+    assert_eq!(html("a < b & c > d"), "<p>a &lt; b &amp; c &gt; d</p>\n");
 }
 
 #[test]
 fn multiple_paragraphs() {
-    let result = html("First paragraph.\n\nSecond paragraph.");
-    assert!(result.contains("<p>First paragraph.</p>"));
-    assert!(result.contains("<p>Second paragraph.</p>"));
+    assert_eq!(
+        html("First paragraph.\n\nSecond paragraph."),
+        "<p>First paragraph.</p>\n<p>Second paragraph.</p>\n"
+    );
 }

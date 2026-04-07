@@ -11,9 +11,7 @@
 
 import type { MdastNode } from "./types.js";
 
-// ---------------------------------------------------------------------------
 // Command bytes (0x01–0x0F)
-// ---------------------------------------------------------------------------
 
 const CMD_REMOVE = 0x01;
 const CMD_INSERT_BEFORE = 0x05;
@@ -24,17 +22,13 @@ const CMD_WRAP = 0x09;
 const CMD_REPLACE = 0x0b;
 const CMD_SET_PROPERTY = 0x0c;
 
-// ---------------------------------------------------------------------------
 // Payload types (0x10+, distinct range from commands)
-// ---------------------------------------------------------------------------
 
 const PAYLOAD_RAW_MARKDOWN = 0x10;
 const PAYLOAD_RAW_HTML = 0x11;
 const PAYLOAD_SERDE_JSON = 0x12;
 
-// ---------------------------------------------------------------------------
 // Value types for CMD_SET_PROPERTY (must match commands.rs PROP_* constants)
-// ---------------------------------------------------------------------------
 
 const PROP_STRING = 0;
 const PROP_BOOL_TRUE = 1;
@@ -43,9 +37,7 @@ const PROP_SPACE_SEP = 3;
 const PROP_INT = 4;
 const PROP_NULL = 5;
 
-// ---------------------------------------------------------------------------
 // Return value classification
-// ---------------------------------------------------------------------------
 
 type ReturnClass = "no_change" | "raw_markdown" | "raw_html" | "structured_node";
 
@@ -58,9 +50,7 @@ export function classifyReturn(value: unknown): ReturnClass {
   throw new Error("Invalid return value from visitor: must have raw, rawHtml, or type");
 }
 
-// ---------------------------------------------------------------------------
 // CommandBuffer
-// ---------------------------------------------------------------------------
 
 const INITIAL_SIZE = 4096;
 const encoder = new TextEncoder();
@@ -77,8 +67,6 @@ export class CommandBuffer {
     this.view = new DataView(this.buffer);
     this.bytes = new Uint8Array(this.buffer);
   }
-
-  // -- Public command methods -----------------------------------------------
 
   removeNode(nodeId: number): void {
     this.ensureCapacity(5);
@@ -183,8 +171,6 @@ export class CommandBuffer {
     this.writeBytes(encoded);
   }
 
-  // -- Result accessors -----------------------------------------------------
-
   /** Return a Uint8Array view of the written bytes (no copy). */
   getBuffer(): Uint8Array {
     return new Uint8Array(this.buffer, 0, this.offset);
@@ -202,8 +188,6 @@ export class CommandBuffer {
     this.bytes = new Uint8Array(this.buffer);
     this.offset = 0;
   }
-
-  // -- Private helpers ------------------------------------------------------
 
   private writeStructuralCommand(cmd: number, nodeId: number, node: unknown): void {
     const v = node as Record<string, unknown>;
@@ -224,7 +208,7 @@ export class CommandBuffer {
       this.writeU32(encoded.length);
       this.writeBytes(encoded);
     } else {
-      // Structured node — serialize as JSON
+      // Structured node, serialize as JSON
       const json = JSON.stringify(node);
       const encoded = encoder.encode(json);
       this.ensureCapacity(10 + encoded.length);

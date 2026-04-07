@@ -30,7 +30,7 @@ console.log(`\n--- Benchmark (${ITERATIONS} iterations, ${WARMUP} warmup) ---\n`
 
 await bench("parseToHtml (pure Rust baseline)", () => parseToHtml(MARKDOWN));
 
-await bench("compileMarkdownToHtml — no plugins", () => compileMarkdownToHtml(MARKDOWN));
+await bench("compileMarkdownToHtml - no plugins", () => compileMarkdownToHtml(MARKDOWN));
 
 const noopPlugin = defineHastPlugin({
   name: "sync-noop",
@@ -38,7 +38,7 @@ const noopPlugin = defineHastPlugin({
     element() {},
   }),
 });
-await bench("compileMarkdownToHtml — sync noop plugin", () =>
+await bench("compileMarkdownToHtml - sync noop plugin", () =>
   compileMarkdownToHtml(MARKDOWN, { hastPlugins: [noopPlugin] }));
 
 console.log("");

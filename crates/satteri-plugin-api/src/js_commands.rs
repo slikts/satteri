@@ -18,51 +18,44 @@
 //!   0x0C  SET_PROPERTY     [nodeId: u32][valueType: u8][nameLen: u32][name...][valueLen: u32][value...]
 //!
 //! Value types for SET_PROPERTY:
-//!   0  STRING     — UTF-8 value
-//!   1  BOOL_TRUE  — no value bytes
-//!   2  BOOL_FALSE — no value bytes
-//!   3  SPACE_SEP  — space-separated list (UTF-8)
-//!   4  INT        — value is decimal string, parsed to i64
-//!   5  NULL       — no value bytes
+//!   0  STRING     : UTF-8 value
+//!   1  BOOL_TRUE  : no value bytes
+//!   2  BOOL_FALSE : no value bytes
+//!   3  SPACE_SEP  : space-separated list (UTF-8)
+//!   4  INT        : value is decimal string, parsed to i64
+//!   5  NULL       : no value bytes
 //!
 //! Payload types:
 //!   0x10  RAW_MARKDOWN     [len: u32][utf8...]
 //!   0x11  RAW_HTML         [len: u32][utf8...]
 //!   0x12  SERDE_JSON       [len: u32][utf8...]
 
-use crate::codec::*;
-use crate::rebuild::Patch;
-use crate::MdastNodeType;
-use satteri_arena::StringRef;
-use satteri_arena::{Arena, ArenaBuilder};
-
-use serde::Deserialize;
+use satteri_arena::{Arena, ArenaBuilder, StringRef};
+use satteri_ast::commands::{CommandError, JsNode};
+use satteri_ast::hast::HastNodeType;
+use satteri_ast::mdast::codec::*;
+use satteri_ast::mdast::MdastNodeType;
+use satteri_ast::rebuild::Patch;
+use satteri_ast::shared::{
+    encode_js_jsx_attrs, PROP_BOOL_FALSE, PROP_BOOL_TRUE, PROP_INT, PROP_NULL, PROP_SPACE_SEP,
+    PROP_STRING,
+};
 
 // Must match packages/satteri/src/command-buffer.ts
-pub const CMD_REMOVE: u8 = 0x01;
-pub const CMD_INSERT_BEFORE: u8 = 0x05;
-pub const CMD_INSERT_AFTER: u8 = 0x06;
-pub const CMD_PREPEND_CHILD: u8 = 0x07;
-pub const CMD_APPEND_CHILD: u8 = 0x08;
-pub const CMD_WRAP: u8 = 0x09;
-pub const CMD_REPLACE: u8 = 0x0B;
-/// Unified set-property command for both MDAST and HAST nodes.
-/// Wire format: [nodeId: u32][valueType: u8][nameLen: u32][name...][valueLen: u32][value...]
-pub const CMD_SET_PROPERTY: u8 = 0x0C;
+const CMD_REMOVE: u8 = 0x01;
+const CMD_INSERT_BEFORE: u8 = 0x05;
+const CMD_INSERT_AFTER: u8 = 0x06;
+const CMD_PREPEND_CHILD: u8 = 0x07;
+const CMD_APPEND_CHILD: u8 = 0x08;
+const CMD_WRAP: u8 = 0x09;
+const CMD_REPLACE: u8 = 0x0B;
+const CMD_SET_PROPERTY: u8 = 0x0C;
 
-// Value type constants for CMD_SET_PROPERTY (also used as HAST property kinds)
-pub const PROP_STRING: u8 = 0;
-pub const PROP_BOOL_TRUE: u8 = 1;
-pub const PROP_BOOL_FALSE: u8 = 2;
-pub const PROP_SPACE_SEP: u8 = 3;
-pub const PROP_INT: u8 = 4;
-pub const PROP_NULL: u8 = 5;
+const PAYLOAD_RAW_MARKDOWN: u8 = 0x10;
+const PAYLOAD_RAW_HTML: u8 = 0x11;
+const PAYLOAD_SERDE_JSON: u8 = 0x12;
 
-pub const PAYLOAD_RAW_MARKDOWN: u8 = 0x10;
-pub const PAYLOAD_RAW_HTML: u8 = 0x11;
-pub const PAYLOAD_SERDE_JSON: u8 = 0x12;
-
-// MDAST field IDs — internal to the set_string_ref / resolve_mdast_field dispatch
+// MDAST field IDs: internal to the set_string_ref / resolve_mdast_field dispatch
 const FIELD_DEPTH: u16 = 0x0001;
 const FIELD_URL: u16 = 0x0010;
 const FIELD_TITLE: u16 = 0x0011;
@@ -78,99 +71,6 @@ const FIELD_IDENTIFIER: u16 = 0x0060;
 const FIELD_LABEL: u16 = 0x0061;
 const FIELD_REFERENCE_TYPE: u16 = 0x0062;
 const FIELD_NAME: u16 = 0x0070;
-
-#[derive(Debug, Deserialize)]
-pub struct JsNode {
-    #[serde(rename = "type")]
-    pub node_type: String,
-    #[serde(default)]
-    pub children: Option<Vec<JsNode>>,
-    pub depth: Option<u8>,
-    pub value: Option<String>,
-    pub url: Option<String>,
-    pub title: Option<String>,
-    pub alt: Option<String>,
-    pub lang: Option<String>,
-    pub meta: Option<String>,
-    pub ordered: Option<bool>,
-    pub start: Option<u32>,
-    pub spread: Option<bool>,
-    pub checked: Option<bool>,
-    pub identifier: Option<String>,
-    pub label: Option<String>,
-    #[serde(rename = "referenceType")]
-    pub reference_type: Option<String>,
-    pub name: Option<String>,
-    #[serde(default)]
-    pub attributes: Option<Vec<JsNodeAttribute>>,
-    // HAST-specific fields
-    #[serde(rename = "tagName")]
-    pub tag_name: Option<String>,
-    #[serde(default)]
-    pub properties: Option<serde_json::Map<String, serde_json::Value>>,
-    /// Marker: when true, this node is a HAST node (not MDAST).
-    #[serde(rename = "_hast", default)]
-    pub is_hast: bool,
-    /// When true, keep the original node's children instead of replacing them.
-    #[serde(rename = "_keepChildren", default)]
-    pub keep_children: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-pub enum JsNodeAttribute {
-    #[serde(rename = "mdxJsxAttribute")]
-    Attribute {
-        name: String,
-        /// null → boolean, string → literal, object with `value` → expression
-        value: Option<serde_json::Value>,
-    },
-    #[serde(rename = "mdxJsxExpressionAttribute")]
-    ExpressionAttribute { value: String },
-}
-
-// ---------------------------------------------------------------------------
-// HAST node type constants (duplicated from node_types.rs to avoid dependency)
-// ---------------------------------------------------------------------------
-
-const HAST_ROOT_TYPE: u8 = 0;
-const HAST_ELEMENT_TYPE: u8 = 1;
-const HAST_TEXT_TYPE: u8 = 2;
-const HAST_COMMENT_TYPE: u8 = 3;
-const HAST_DOCTYPE_TYPE: u8 = 4;
-const HAST_RAW_TYPE: u8 = 5;
-const HAST_MDX_JSX_ELEMENT_TYPE: u8 = 10;
-const HAST_MDX_JSX_TEXT_ELEMENT_TYPE: u8 = 11;
-const HAST_MDX_FLOW_EXPRESSION_TYPE: u8 = 12;
-const HAST_MDX_TEXT_EXPRESSION_TYPE: u8 = 14;
-const HAST_MDX_ESM_TYPE: u8 = 13;
-
-#[derive(Debug)]
-pub enum CommandError {
-    UnexpectedEof,
-    UnknownCommand(u8),
-    UnknownPayloadType(u8),
-    InvalidUtf8,
-    InvalidJson(String),
-    UnknownNodeType(String),
-    UnknownField(u16),
-}
-
-impl std::fmt::Display for CommandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnexpectedEof => write!(f, "unexpected end of command buffer"),
-            Self::UnknownCommand(c) => write!(f, "unknown command byte: 0x{c:02x}"),
-            Self::UnknownPayloadType(p) => write!(f, "unknown payload type: 0x{p:02x}"),
-            Self::InvalidUtf8 => write!(f, "invalid UTF-8 in command buffer"),
-            Self::InvalidJson(e) => write!(f, "invalid JSON in command payload: {e}"),
-            Self::UnknownNodeType(t) => write!(f, "unknown node type in JSON: {t}"),
-            Self::UnknownField(f_id) => write!(f, "unknown field ID: 0x{f_id:04x}"),
-        }
-    }
-}
-
-impl std::error::Error for CommandError {}
 
 struct BufReader<'a> {
     data: &'a [u8],
@@ -260,39 +160,14 @@ fn apply_set_property(
     value_type: u8,
     value_str: &str,
 ) -> Result<(), CommandError> {
-    let node = arena.get_node(node_id);
-    let node_type = node.node_type;
-
-    // HAST element — use the property array path
-    if node_type == HAST_ELEMENT_TYPE {
-        return apply_hast_element_property(arena, node_id, prop_name, value_type, value_str);
-    }
-
-    // HAST text/comment/raw/expression — "value" stored as StringRef at type_data[0..8]
-    if matches!(
-        node_type,
-        HAST_TEXT_TYPE
-            | HAST_COMMENT_TYPE
-            | HAST_RAW_TYPE
-            | HAST_MDX_FLOW_EXPRESSION_TYPE
-            | HAST_MDX_TEXT_EXPRESSION_TYPE
-            | HAST_MDX_ESM_TYPE
-    ) && prop_name == "value"
+    // Try HAST path first
+    if let Some(result) = apply_hast_set_property(arena, node_id, prop_name, value_type, value_str)
     {
-        let sref = arena.alloc_string(value_str);
-        let data = arena.get_type_data(node_id);
-        if data.len() >= 8 {
-            let data_offset = arena.get_node(node_id).data_offset as usize;
-            arena.type_data[data_offset..data_offset + 4]
-                .copy_from_slice(&sref.offset.to_le_bytes());
-            arena.type_data[data_offset + 4..data_offset + 8]
-                .copy_from_slice(&sref.len.to_le_bytes());
-            return Ok(());
-        }
-        return Err(CommandError::UnknownField(0));
+        return result;
     }
 
-    // MDAST node — resolve name to field and apply
+    // MDAST node, resolve name to field and apply
+    let node_type = arena.get_node(node_id).node_type;
     let field_id =
         resolve_mdast_field(node_type, prop_name).ok_or(CommandError::UnknownField(0))?;
 
@@ -446,81 +321,6 @@ fn set_string_ref(
     Ok(())
 }
 
-/// Set or add a single property on a HAST element node.
-///
-/// If a property with `prop_name` already exists, its value is updated.
-/// If it doesn't exist, a new 20-byte property slot is appended.
-fn apply_hast_element_property(
-    arena: &mut Arena,
-    node_id: u32,
-    prop_name: &str,
-    value_type: u8,
-    value_str: &str,
-) -> Result<(), CommandError> {
-    let old_data = arena.get_type_data(node_id).to_vec();
-    if old_data.len() < 16 {
-        return Err(CommandError::UnexpectedEof);
-    }
-
-    let old_prop_count = u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
-
-    // Scan existing properties for a name match
-    let mut found_index: Option<usize> = None;
-    for i in 0..old_prop_count {
-        let base = 16 + i * 20;
-        let name_off = u32::from_le_bytes(old_data[base..base + 4].try_into().unwrap());
-        let name_len = u32::from_le_bytes(old_data[base + 4..base + 8].try_into().unwrap());
-        let existing_name = arena.get_str(StringRef::new(name_off, name_len));
-        if existing_name == prop_name {
-            found_index = Some(i);
-            break;
-        }
-    }
-
-    // Allocate new strings (appends to arena.source, so old offsets remain valid)
-    let name_ref = arena.alloc_string(prop_name);
-    let val_ref = if value_str.is_empty() {
-        StringRef::empty()
-    } else {
-        arena.alloc_string(value_str)
-    };
-
-    if let Some(idx) = found_index {
-        // Property exists — clone type_data, patch the slot
-        let mut new_data = old_data;
-        let base = 16 + idx * 20;
-        new_data[base..base + 4].copy_from_slice(&name_ref.offset.to_le_bytes());
-        new_data[base + 4..base + 8].copy_from_slice(&name_ref.len.to_le_bytes());
-        new_data[base + 8] = value_type;
-        new_data[base + 9..base + 12].copy_from_slice(&[0u8; 3]);
-        new_data[base + 12..base + 16].copy_from_slice(&val_ref.offset.to_le_bytes());
-        new_data[base + 16..base + 20].copy_from_slice(&val_ref.len.to_le_bytes());
-        arena.set_type_data(node_id, &new_data);
-    } else {
-        // Property doesn't exist — rebuild with prop_count+1
-        let new_prop_count = (old_prop_count + 1) as u32;
-        let mut new_data = Vec::with_capacity(16 + new_prop_count as usize * 20);
-        // Header: keep tag, update prop_count
-        new_data.extend_from_slice(&old_data[0..8]); // tag StringRef
-        new_data.extend_from_slice(&new_prop_count.to_le_bytes());
-        new_data.extend_from_slice(&0u32.to_le_bytes()); // pad
-                                                         // Copy existing properties
-        if old_prop_count > 0 {
-            new_data.extend_from_slice(&old_data[16..16 + old_prop_count * 20]);
-        }
-        // Append new property
-        new_data.extend_from_slice(&name_ref.offset.to_le_bytes());
-        new_data.extend_from_slice(&name_ref.len.to_le_bytes());
-        new_data.push(value_type);
-        new_data.extend_from_slice(&[0u8; 3]); // pad
-        new_data.extend_from_slice(&val_ref.offset.to_le_bytes());
-        new_data.extend_from_slice(&val_ref.len.to_le_bytes());
-        arena.set_type_data(node_id, &new_data);
-    }
-
-    Ok(())
-}
-
 fn parse_raw_markdown(markdown: &str, parse_markdown: &dyn Fn(&str) -> Arena) -> Arena {
     parse_markdown(markdown)
 }
@@ -528,7 +328,7 @@ fn parse_raw_markdown(markdown: &str, parse_markdown: &dyn Fn(&str) -> Arena) ->
 /// Escape `{` and `}` in HTML text content so they are not interpreted as MDX
 /// expressions when the HTML is re-parsed through the MDX parser.
 ///
-/// Only braces in **text content** (outside of HTML tags) are escaped — braces
+/// Only braces in **text content** (outside of HTML tags) are escaped; braces
 /// inside quoted attribute values are left untouched. The escape form `{'{'}` /
 /// `{'}'}` produces a valid MDX expression that evaluates to the literal brace
 /// character.
@@ -596,132 +396,6 @@ fn emit_js_node(js_node: &JsNode, builder: &mut ArenaBuilder) -> Result<(), Comm
 
     builder.close_node();
     Ok(())
-}
-
-fn emit_hast_js_node(js_node: &JsNode, builder: &mut ArenaBuilder) -> Result<(), CommandError> {
-    let raw_type = name_to_hast_raw_type(&js_node.node_type)
-        .ok_or_else(|| CommandError::UnknownNodeType(js_node.node_type.clone()))?;
-    builder.open_node_raw(raw_type);
-
-    let type_data = encode_hast_js_node_data(js_node, raw_type, builder);
-    if !type_data.is_empty() {
-        builder.set_data_current(&type_data);
-    }
-
-    if let Some(children) = &js_node.children {
-        for child in children {
-            emit_hast_js_node(child, builder)?;
-        }
-    }
-
-    builder.close_node();
-    Ok(())
-}
-
-fn name_to_hast_raw_type(name: &str) -> Option<u8> {
-    match name {
-        "root" => Some(HAST_ROOT_TYPE),
-        "element" => Some(HAST_ELEMENT_TYPE),
-        "text" => Some(HAST_TEXT_TYPE),
-        "comment" => Some(HAST_COMMENT_TYPE),
-        "doctype" => Some(HAST_DOCTYPE_TYPE),
-        "raw" => Some(HAST_RAW_TYPE),
-        "mdxJsxFlowElement" => Some(HAST_MDX_JSX_ELEMENT_TYPE),
-        "mdxJsxTextElement" => Some(HAST_MDX_JSX_TEXT_ELEMENT_TYPE),
-        "mdxFlowExpression" => Some(HAST_MDX_FLOW_EXPRESSION_TYPE),
-        "mdxTextExpression" => Some(HAST_MDX_TEXT_EXPRESSION_TYPE),
-        "mdxjsEsm" => Some(HAST_MDX_ESM_TYPE),
-        _ => None,
-    }
-}
-
-fn encode_hast_js_node_data(js_node: &JsNode, raw_type: u8, builder: &mut ArenaBuilder) -> Vec<u8> {
-    match raw_type {
-        HAST_ELEMENT_TYPE => {
-            let tag = js_node.tag_name.as_deref().unwrap_or("div");
-            let tag_ref = builder.alloc_string(tag);
-
-            // Encode properties
-            let mut props: Vec<(StringRef, u8, StringRef)> = Vec::new();
-            if let Some(properties) = &js_node.properties {
-                for (key, value) in properties {
-                    let name_ref = builder.alloc_string(key);
-                    match value {
-                        serde_json::Value::Bool(true) => {
-                            props.push((name_ref, PROP_BOOL_TRUE, StringRef::empty()));
-                        }
-                        serde_json::Value::Bool(false) => {
-                            props.push((name_ref, PROP_BOOL_FALSE, StringRef::empty()));
-                        }
-                        serde_json::Value::String(s) => {
-                            let val_ref = builder.alloc_string(s);
-                            props.push((name_ref, PROP_STRING, val_ref));
-                        }
-                        serde_json::Value::Array(arr) => {
-                            // Space-separated list
-                            let joined: String = arr
-                                .iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            let val_ref = builder.alloc_string(&joined);
-                            props.push((name_ref, PROP_SPACE_SEP, val_ref));
-                        }
-                        _ => {} // skip null/number/object
-                    }
-                }
-            }
-
-            // Layout: [tag: StringRef(8)][prop_count: u32(4)][pad: u32(4)]
-            //   + prop_count * [name: StringRef(8)][kind: u8][pad: 3][value: StringRef(8)]
-            let mut out = Vec::with_capacity(16 + props.len() * 20);
-            out.extend_from_slice(&tag_ref.offset.to_le_bytes());
-            out.extend_from_slice(&tag_ref.len.to_le_bytes());
-            out.extend_from_slice(&(props.len() as u32).to_le_bytes());
-            out.extend_from_slice(&0u32.to_le_bytes());
-            for (name_ref, kind, val_ref) in &props {
-                out.extend_from_slice(&name_ref.offset.to_le_bytes());
-                out.extend_from_slice(&name_ref.len.to_le_bytes());
-                out.push(*kind);
-                out.extend_from_slice(&[0u8; 3]);
-                out.extend_from_slice(&val_ref.offset.to_le_bytes());
-                out.extend_from_slice(&val_ref.len.to_le_bytes());
-            }
-            out
-        }
-
-        HAST_TEXT_TYPE | HAST_COMMENT_TYPE | HAST_RAW_TYPE => {
-            let value = js_node.value.as_deref().unwrap_or("");
-            let sref = builder.alloc_string(value);
-            let mut out = [0u8; 8];
-            out[0..4].copy_from_slice(&sref.offset.to_le_bytes());
-            out[4..8].copy_from_slice(&sref.len.to_le_bytes());
-            out.to_vec()
-        }
-
-        HAST_MDX_JSX_ELEMENT_TYPE | HAST_MDX_JSX_TEXT_ELEMENT_TYPE => {
-            let name = js_node
-                .name
-                .as_deref()
-                .or(js_node.tag_name.as_deref())
-                .unwrap_or("");
-            let name_ref = builder.alloc_string(name);
-            let attr_tuples = encode_js_jsx_attrs(builder, js_node.attributes.as_deref());
-            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
-        }
-
-        HAST_MDX_FLOW_EXPRESSION_TYPE | HAST_MDX_TEXT_EXPRESSION_TYPE | HAST_MDX_ESM_TYPE => {
-            let value = js_node.value.as_deref().unwrap_or("");
-            let sref = builder.alloc_string(value);
-            let mut out = [0u8; 8];
-            out[0..4].copy_from_slice(&sref.offset.to_le_bytes());
-            out[4..8].copy_from_slice(&sref.len.to_le_bytes());
-            out.to_vec()
-        }
-
-        // root, doctype: no type_data
-        _ => Vec::new(),
-    }
 }
 
 fn encode_js_node_data(
@@ -821,40 +495,6 @@ fn encode_js_node_data(
     }
 }
 
-fn encode_js_jsx_attrs(
-    builder: &mut ArenaBuilder,
-    attrs: Option<&[JsNodeAttribute]>,
-) -> Vec<(u8, StringRef, StringRef)> {
-    let Some(attrs) = attrs else {
-        return Vec::new();
-    };
-    attrs
-        .iter()
-        .map(|attr| match attr {
-            JsNodeAttribute::Attribute { name, value } => {
-                let n = builder.alloc_string(name);
-                match value {
-                    None => (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty()),
-                    Some(serde_json::Value::String(s)) => {
-                        let v = builder.alloc_string(s);
-                        (MDX_ATTR_LITERAL_PROP, n, v)
-                    }
-                    Some(serde_json::Value::Object(obj)) => {
-                        let expr = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                        let v = builder.alloc_string(expr);
-                        (MDX_ATTR_EXPRESSION_PROP, n, v)
-                    }
-                    _ => (MDX_ATTR_BOOLEAN_PROP, n, StringRef::empty()),
-                }
-            }
-            JsNodeAttribute::ExpressionAttribute { value } => {
-                let v = builder.alloc_string(value);
-                (MDX_ATTR_SPREAD, StringRef::empty(), v)
-            }
-        })
-        .collect()
-}
-
 fn alloc_opt_str(builder: &mut ArenaBuilder, s: Option<&str>) -> StringRef {
     match s {
         Some(v) if !v.is_empty() => builder.alloc_string(v),
@@ -899,6 +539,246 @@ fn name_to_node_type(name: &str) -> Result<MdastNodeType, CommandError> {
         "mdxTextExpression" => Ok(MdastNodeType::MdxTextExpression),
         "mdxjsEsm" => Ok(MdastNodeType::MdxjsEsm),
         other => Err(CommandError::UnknownNodeType(other.to_string())),
+    }
+}
+
+// HAST command handlers
+
+/// Try to handle a set-property command for a HAST node.
+///
+/// Returns `Some(Ok(()))` if the node was a known HAST type and the property
+/// was applied.  Returns `Some(Err(...))` on error.  Returns `None` if the
+/// node type is not a HAST type (caller should fall through to MDAST handling).
+fn apply_hast_set_property(
+    arena: &mut Arena,
+    node_id: u32,
+    prop_name: &str,
+    value_type: u8,
+    value_str: &str,
+) -> Option<Result<(), CommandError>> {
+    let node_type = HastNodeType::from_u8(arena.get_node(node_id).node_type)?;
+
+    match node_type {
+        HastNodeType::Element => Some(apply_hast_element_property(
+            arena, node_id, prop_name, value_type, value_str,
+        )),
+
+        HastNodeType::Text
+        | HastNodeType::Comment
+        | HastNodeType::Raw
+        | HastNodeType::MdxFlowExpression
+        | HastNodeType::MdxTextExpression
+        | HastNodeType::MdxEsm
+            if prop_name == "value" =>
+        {
+            let sref = arena.alloc_string(value_str);
+            let data = arena.get_type_data(node_id);
+            if data.len() >= 8 {
+                let data_offset = arena.get_node(node_id).data_offset as usize;
+                arena.type_data[data_offset..data_offset + 4]
+                    .copy_from_slice(&sref.offset.to_le_bytes());
+                arena.type_data[data_offset + 4..data_offset + 8]
+                    .copy_from_slice(&sref.len.to_le_bytes());
+                Some(Ok(()))
+            } else {
+                Some(Err(CommandError::UnknownField(0)))
+            }
+        }
+
+        _ => None,
+    }
+}
+
+/// Set or add a single property on a HAST element node.
+fn apply_hast_element_property(
+    arena: &mut Arena,
+    node_id: u32,
+    prop_name: &str,
+    value_type: u8,
+    value_str: &str,
+) -> Result<(), CommandError> {
+    let old_data = arena.get_type_data(node_id).to_vec();
+    if old_data.len() < 16 {
+        return Err(CommandError::UnexpectedEof);
+    }
+
+    let old_prop_count = u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
+
+    let mut found_index: Option<usize> = None;
+    for i in 0..old_prop_count {
+        let base = 16 + i * 20;
+        let name_off = u32::from_le_bytes(old_data[base..base + 4].try_into().unwrap());
+        let name_len = u32::from_le_bytes(old_data[base + 4..base + 8].try_into().unwrap());
+        let existing_name = arena.get_str(StringRef::new(name_off, name_len));
+        if existing_name == prop_name {
+            found_index = Some(i);
+            break;
+        }
+    }
+
+    let name_ref = arena.alloc_string(prop_name);
+    let val_ref = if value_str.is_empty() {
+        StringRef::empty()
+    } else {
+        arena.alloc_string(value_str)
+    };
+
+    if let Some(idx) = found_index {
+        let mut new_data = old_data;
+        let base = 16 + idx * 20;
+        new_data[base..base + 4].copy_from_slice(&name_ref.offset.to_le_bytes());
+        new_data[base + 4..base + 8].copy_from_slice(&name_ref.len.to_le_bytes());
+        new_data[base + 8] = value_type;
+        new_data[base + 9..base + 12].copy_from_slice(&[0u8; 3]);
+        new_data[base + 12..base + 16].copy_from_slice(&val_ref.offset.to_le_bytes());
+        new_data[base + 16..base + 20].copy_from_slice(&val_ref.len.to_le_bytes());
+        arena.set_type_data(node_id, &new_data);
+    } else {
+        let new_prop_count = (old_prop_count + 1) as u32;
+        let mut new_data = Vec::with_capacity(16 + new_prop_count as usize * 20);
+        new_data.extend_from_slice(&old_data[0..8]);
+        new_data.extend_from_slice(&new_prop_count.to_le_bytes());
+        new_data.extend_from_slice(&0u32.to_le_bytes());
+        if old_prop_count > 0 {
+            new_data.extend_from_slice(&old_data[16..16 + old_prop_count * 20]);
+        }
+        new_data.extend_from_slice(&name_ref.offset.to_le_bytes());
+        new_data.extend_from_slice(&name_ref.len.to_le_bytes());
+        new_data.push(value_type);
+        new_data.extend_from_slice(&[0u8; 3]);
+        new_data.extend_from_slice(&val_ref.offset.to_le_bytes());
+        new_data.extend_from_slice(&val_ref.len.to_le_bytes());
+        arena.set_type_data(node_id, &new_data);
+    }
+
+    Ok(())
+}
+
+/// Emit a HAST JS node (from plugin JSON) into an ArenaBuilder.
+fn emit_hast_js_node(js_node: &JsNode, builder: &mut ArenaBuilder) -> Result<(), CommandError> {
+    let raw_type = name_to_hast_type(&js_node.node_type)
+        .ok_or_else(|| CommandError::UnknownNodeType(js_node.node_type.clone()))?;
+    builder.open_node_raw(raw_type as u8);
+
+    let type_data = encode_hast_js_node_data(js_node, raw_type, builder);
+    if !type_data.is_empty() {
+        builder.set_data_current(&type_data);
+    }
+
+    if let Some(children) = &js_node.children {
+        for child in children {
+            emit_hast_js_node(child, builder)?;
+        }
+    }
+
+    builder.close_node();
+    Ok(())
+}
+
+fn name_to_hast_type(name: &str) -> Option<HastNodeType> {
+    match name {
+        "root" => Some(HastNodeType::Root),
+        "element" => Some(HastNodeType::Element),
+        "text" => Some(HastNodeType::Text),
+        "comment" => Some(HastNodeType::Comment),
+        "doctype" => Some(HastNodeType::Doctype),
+        "raw" => Some(HastNodeType::Raw),
+        "mdxJsxFlowElement" => Some(HastNodeType::MdxJsxElement),
+        "mdxJsxTextElement" => Some(HastNodeType::MdxJsxTextElement),
+        "mdxFlowExpression" => Some(HastNodeType::MdxFlowExpression),
+        "mdxTextExpression" => Some(HastNodeType::MdxTextExpression),
+        "mdxjsEsm" => Some(HastNodeType::MdxEsm),
+        _ => None,
+    }
+}
+
+fn encode_hast_js_node_data(
+    js_node: &JsNode,
+    node_type: HastNodeType,
+    builder: &mut ArenaBuilder,
+) -> Vec<u8> {
+    match node_type {
+        HastNodeType::Element => {
+            let tag = js_node.tag_name.as_deref().unwrap_or("div");
+            let tag_ref = builder.alloc_string(tag);
+
+            let mut props: Vec<(StringRef, u8, StringRef)> = Vec::new();
+            if let Some(properties) = &js_node.properties {
+                for (key, value) in properties {
+                    let name_ref = builder.alloc_string(key);
+                    match value {
+                        serde_json::Value::Bool(true) => {
+                            props.push((name_ref, PROP_BOOL_TRUE, StringRef::empty()));
+                        }
+                        serde_json::Value::Bool(false) => {
+                            props.push((name_ref, PROP_BOOL_FALSE, StringRef::empty()));
+                        }
+                        serde_json::Value::String(s) => {
+                            let val_ref = builder.alloc_string(s);
+                            props.push((name_ref, PROP_STRING, val_ref));
+                        }
+                        serde_json::Value::Array(arr) => {
+                            let joined: String = arr
+                                .iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            let val_ref = builder.alloc_string(&joined);
+                            props.push((name_ref, PROP_SPACE_SEP, val_ref));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let mut out = Vec::with_capacity(16 + props.len() * 20);
+            out.extend_from_slice(&tag_ref.offset.to_le_bytes());
+            out.extend_from_slice(&tag_ref.len.to_le_bytes());
+            out.extend_from_slice(&(props.len() as u32).to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            for (name_ref, kind, val_ref) in &props {
+                out.extend_from_slice(&name_ref.offset.to_le_bytes());
+                out.extend_from_slice(&name_ref.len.to_le_bytes());
+                out.push(*kind);
+                out.extend_from_slice(&[0u8; 3]);
+                out.extend_from_slice(&val_ref.offset.to_le_bytes());
+                out.extend_from_slice(&val_ref.len.to_le_bytes());
+            }
+            out
+        }
+
+        HastNodeType::Text | HastNodeType::Comment | HastNodeType::Raw => {
+            let value = js_node.value.as_deref().unwrap_or("");
+            let sref = builder.alloc_string(value);
+            let mut out = [0u8; 8];
+            out[0..4].copy_from_slice(&sref.offset.to_le_bytes());
+            out[4..8].copy_from_slice(&sref.len.to_le_bytes());
+            out.to_vec()
+        }
+
+        HastNodeType::MdxJsxElement | HastNodeType::MdxJsxTextElement => {
+            let name = js_node
+                .name
+                .as_deref()
+                .or(js_node.tag_name.as_deref())
+                .unwrap_or("");
+            let name_ref = builder.alloc_string(name);
+            let attr_tuples = encode_js_jsx_attrs(builder, js_node.attributes.as_deref());
+            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
+        }
+
+        HastNodeType::MdxFlowExpression
+        | HastNodeType::MdxTextExpression
+        | HastNodeType::MdxEsm => {
+            let value = js_node.value.as_deref().unwrap_or("");
+            let sref = builder.alloc_string(value);
+            let mut out = [0u8; 8];
+            out[0..4].copy_from_slice(&sref.offset.to_le_bytes());
+            out[4..8].copy_from_slice(&sref.len.to_le_bytes());
+            out.to_vec()
+        }
+
+        _ => Vec::new(),
     }
 }
 
@@ -1022,13 +902,14 @@ pub fn apply_commands(
     if patches.is_empty() {
         Ok(arena)
     } else {
-        Ok(crate::rebuild::rebuild(&arena, &patches))
+        Ok(satteri_ast::rebuild::rebuild(&arena, &patches))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use satteri_ast::shared::PROP_INT;
 
     fn test_parse_markdown(source: &str) -> Arena {
         let mut b = ArenaBuilder::new(String::new());
@@ -1059,8 +940,7 @@ mod tests {
     }
 
     fn build_hello_world() -> Arena {
-        use crate::codec::{encode_heading_data, encode_string_ref_data};
-        use satteri_arena::StringRef;
+        use satteri_ast::mdast::codec::{encode_heading_data, encode_string_ref_data};
 
         let source = "# Hello\n\nWorld".to_string();
         let mut b = ArenaBuilder::new(source);
@@ -1103,14 +983,12 @@ mod tests {
     #[test]
     fn remove_command() {
         let arena = build_hello_world();
-        // Remove heading (node 1)
-        let heading_id = arena.get_children(0)[0]; // 1
+        let heading_id = arena.get_children(0)[0];
         let mut buf = Vec::new();
         buf.push(CMD_REMOVE);
         push_u32(&mut buf, heading_id);
 
         let result = apply_commands(arena.clone(), &buf, &test_parse_markdown).unwrap();
-        // Root should now have 1 child (paragraph only)
         assert_eq!(result.get_children(0).len(), 1);
         assert_eq!(
             result.get_node(result.get_children(0)[0]).node_type,
@@ -1162,10 +1040,6 @@ mod tests {
 
         let result = apply_commands(arena.clone(), &buf, &test_parse_markdown).unwrap();
         let root_children = result.get_children(0);
-        // The raw markdown "## New Heading" parses to a Root with one Heading child.
-        // The Patch::Replace uses the whole parsed arena (rooted at Root).
-        // So root's first child should be a Root (from the sub-arena).
-        // Actually, let's just check the node count changed and the heading is replaced.
         assert!(root_children.len() >= 2);
     }
 
@@ -1227,7 +1101,7 @@ mod tests {
         let result = apply_commands(arena.clone(), &buf, &test_parse_markdown).unwrap();
         let text_data = result.get_type_data(text_id);
         let sref = decode_string_ref_data(text_data);
-        assert_eq!(sref.len, 0); // empty StringRef
+        assert_eq!(sref.len, 0);
     }
 
     #[test]
@@ -1281,7 +1155,7 @@ mod tests {
         };
 
         let (arena, _keep) = js_node_to_arena(&js).unwrap();
-        assert_eq!(arena.len(), 2); // heading + text
+        assert_eq!(arena.len(), 2);
         assert_eq!(arena.get_node(0).node_type, MdastNodeType::Heading as u8);
         assert_eq!(arena.get_children(0).len(), 1);
         let text_id = arena.get_children(0)[0];
@@ -1290,7 +1164,6 @@ mod tests {
 
     #[test]
     fn escape_braces_in_html_text_basic() {
-        // Braces in text content should be escaped
         assert_eq!(
             escape_braces_in_html_text("<span>{foo: 1}</span>"),
             "<span>{'{'}foo: 1{'}'}</span>"
@@ -1299,12 +1172,6 @@ mod tests {
 
     #[test]
     fn escape_braces_preserves_attributes() {
-        // Braces inside quoted attribute values should NOT be escaped
-        assert_eq!(
-            escape_braces_in_html_text(r#"<span data-x="{a}">{b}</span>"#),
-            r#"<span data-x="{a}">{'{'} b{'}'}</span>"#.replace(" b", "b") // just {'{'}b{'}'}
-        );
-        // More direct test
         let result = escape_braces_in_html_text(r#"<span data-x="{a}">{b}</span>"#);
         assert!(
             result.contains(r#"data-x="{a}""#),
@@ -1315,7 +1182,6 @@ mod tests {
 
     #[test]
     fn escape_braces_no_braces() {
-        // No braces → no change
         let html = r#"<pre class="shiki"><code><span style="color:red">hello</span></code></pre>"#;
         assert_eq!(escape_braces_in_html_text(html), html);
     }
@@ -1324,7 +1190,6 @@ mod tests {
     fn escape_braces_shiki_output() {
         let html = r#"<pre class="shiki"><code><span style="color:#E1E4E8">const x = </span><span style="color:#B392F0">{</span><span style="color:#E1E4E8">foo: 1</span><span style="color:#B392F0">}</span></code></pre>"#;
         let escaped = escape_braces_in_html_text(html);
-        // The lone { and } between spans should be escaped
         assert!(
             !escaped.contains(">{<"),
             "bare braces in text should be escaped"
@@ -1333,48 +1198,8 @@ mod tests {
             !escaped.contains(">}<"),
             "bare braces in text should be escaped"
         );
-        // Attributes should be untouched
         assert!(escaped.contains(r#"class="shiki""#));
         assert!(escaped.contains(r#"style="color:#E1E4E8""#));
-    }
-
-    /// Build a minimal HAST element arena: root(type 0) → element(type 1, tag "div")
-    fn build_hast_element(props: &[(&str, u8, &str)]) -> Arena {
-        let mut b = ArenaBuilder::new(String::new());
-        // Root node
-        b.open_node_raw(HAST_ROOT_TYPE);
-        // Element node
-        b.open_node_raw(HAST_ELEMENT_TYPE);
-        let tag_ref = b.alloc_string("div");
-        let prop_tuples: Vec<(StringRef, u8, StringRef)> = props
-            .iter()
-            .map(|(name, kind, value)| {
-                let n = b.alloc_string(name);
-                let v = if value.is_empty() {
-                    StringRef::empty()
-                } else {
-                    b.alloc_string(value)
-                };
-                (n, *kind, v)
-            })
-            .collect();
-        let mut type_data = Vec::with_capacity(16 + prop_tuples.len() * 20);
-        type_data.extend_from_slice(&tag_ref.offset.to_le_bytes());
-        type_data.extend_from_slice(&tag_ref.len.to_le_bytes());
-        type_data.extend_from_slice(&(prop_tuples.len() as u32).to_le_bytes());
-        type_data.extend_from_slice(&0u32.to_le_bytes());
-        for (n, kind, v) in &prop_tuples {
-            type_data.extend_from_slice(&n.offset.to_le_bytes());
-            type_data.extend_from_slice(&n.len.to_le_bytes());
-            type_data.push(*kind);
-            type_data.extend_from_slice(&[0u8; 3]);
-            type_data.extend_from_slice(&v.offset.to_le_bytes());
-            type_data.extend_from_slice(&v.len.to_le_bytes());
-        }
-        b.set_data_current(&type_data);
-        b.close_node(); // element
-        b.close_node(); // root
-        b.finish()
     }
 
     #[test]
@@ -1449,5 +1274,44 @@ mod tests {
         let data = result.get_type_data(element_id);
         let prop_count = u32::from_le_bytes(data[8..12].try_into().unwrap());
         assert_eq!(prop_count, 2);
+    }
+
+    /// Build a minimal HAST element arena: root(type 0) → element(type 1, tag "div")
+    fn build_hast_element(props: &[(&str, u8, &str)]) -> Arena {
+        use satteri_ast::hast::node::HastNodeType;
+
+        let mut b = ArenaBuilder::new(String::new());
+        b.open_node_raw(HastNodeType::Root as u8);
+        b.open_node_raw(HastNodeType::Element as u8);
+        let tag_ref = b.alloc_string("div");
+        let prop_tuples: Vec<(StringRef, u8, StringRef)> = props
+            .iter()
+            .map(|(name, kind, value)| {
+                let n = b.alloc_string(name);
+                let v = if value.is_empty() {
+                    StringRef::empty()
+                } else {
+                    b.alloc_string(value)
+                };
+                (n, *kind, v)
+            })
+            .collect();
+        let mut type_data = Vec::with_capacity(16 + prop_tuples.len() * 20);
+        type_data.extend_from_slice(&tag_ref.offset.to_le_bytes());
+        type_data.extend_from_slice(&tag_ref.len.to_le_bytes());
+        type_data.extend_from_slice(&(prop_tuples.len() as u32).to_le_bytes());
+        type_data.extend_from_slice(&0u32.to_le_bytes());
+        for (n, kind, v) in &prop_tuples {
+            type_data.extend_from_slice(&n.offset.to_le_bytes());
+            type_data.extend_from_slice(&n.len.to_le_bytes());
+            type_data.push(*kind);
+            type_data.extend_from_slice(&[0u8; 3]);
+            type_data.extend_from_slice(&v.offset.to_le_bytes());
+            type_data.extend_from_slice(&v.len.to_le_bytes());
+        }
+        b.set_data_current(&type_data);
+        b.close_node();
+        b.close_node();
+        b.finish()
     }
 }

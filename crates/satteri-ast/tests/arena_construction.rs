@@ -1,7 +1,7 @@
 //! Integration tests for arena construction.
 
 use satteri_arena::{Arena, ArenaBuilder};
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::MdastNodeType;
 
 #[test]
 fn heading_with_text_child() {

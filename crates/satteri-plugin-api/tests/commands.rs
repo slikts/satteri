@@ -1,5 +1,5 @@
 use satteri_arena::{Arena, ArenaBuilder, StringRef};
-use satteri_mdast::{codec::*, MdastNodeType};
+use satteri_ast::mdast::{codec::*, MdastNodeType};
 use satteri_plugin_api::*;
 
 fn build_test_arena() -> Arena {
@@ -131,7 +131,7 @@ fn node_builder_heading_produces_built_node() {
         NewNode::Built(built) => {
             assert_eq!(built.node_type, MdastNodeType::Heading);
             // Verify depth encoded correctly
-            let depth = satteri_mdast::codec::decode_heading_data(&built.data_bytes).depth;
+            let depth = satteri_ast::mdast::codec::decode_heading_data(&built.data_bytes).depth;
             assert_eq!(depth, 1);
         }
         NewNode::Raw(_) => panic!("expected Built node, got Raw"),

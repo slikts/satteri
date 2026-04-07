@@ -1,12 +1,12 @@
 //! Render a HAST arena to an HTML string.
 
-use satteri_arena::{Arena, ReadArena};
+use satteri_arena::Arena;
 
-use crate::codec::{
+use crate::hast::codec::{
     decode_element_prop, decode_element_prop_count, decode_element_tag, decode_text_data,
 };
-use crate::html::is_void_element;
-use crate::node_types::*;
+use crate::hast::HastNodeType;
+use crate::shared::{PROP_BOOL_FALSE, PROP_BOOL_TRUE, PROP_COMMA_SEP, PROP_SPACE_SEP, PROP_STRING};
 
 /// Render HTML from an arena.
 pub fn hast_arena_to_html(arena: &Arena) -> String {
@@ -15,23 +15,27 @@ pub fn hast_arena_to_html(arena: &Arena) -> String {
     out
 }
 
-/// Render a HAST node subtree to HTML. Works with both `MdastView` (zero-copy)
-/// and `Arena` (owned) via the `ReadArena` trait.
-pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut String) {
+/// Render a HAST node subtree to HTML.
+pub fn render_node(node_id: u32, view: &Arena, out: &mut String) {
     let node = view.get_node(node_id);
-    let raw_type = node.node_type;
 
-    match raw_type {
-        HAST_ROOT => {
+    let Some(node_type) = HastNodeType::from_u8(node.node_type) else {
+        for &child_id in view.get_children(node_id) {
+            render_node(child_id, view, out);
+        }
+        return;
+    };
+
+    match node_type {
+        HastNodeType::Root => {
             for &child_id in view.get_children(node_id) {
                 render_node(child_id, view, out);
             }
         }
 
-        HAST_ELEMENT => {
+        HastNodeType::Element => {
             let data = view.get_type_data(node_id);
             if data.len() < 16 {
-                // malformed — skip
                 return;
             }
             let tag_ref = decode_element_tag(data);
@@ -66,6 +70,10 @@ pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut Stri
                 out.push('>');
             } else {
                 out.push('>');
+                // Block containers emit \n after opening tag
+                if is_block_container(tag) {
+                    out.push('\n');
+                }
                 for &child_id in view.get_children(node_id) {
                     render_node(child_id, view, out);
                 }
@@ -73,18 +81,26 @@ pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut Stri
                 out.push_str(tag);
                 out.push('>');
             }
+            // Block elements emit \n after closing tag
+            if is_block_element(tag) {
+                out.push('\n');
+            }
         }
 
-        HAST_TEXT => {
+        HastNodeType::Text => {
             let data = view.get_type_data(node_id);
             if data.len() >= 8 {
                 let sr = decode_text_data(data);
                 let text = view.get_str(sr);
-                pulldown_cmark_escape::escape_html_body_text(&mut *out, text).unwrap();
+                // Skip newline-only text nodes inserted by the mdast->hast converter
+                // as spacing between block siblings (needed for MDX, not for HTML)
+                if !text.chars().all(|c| c == '\n') {
+                    pulldown_cmark_escape::escape_html_body_text(&mut *out, text).unwrap();
+                }
             }
         }
 
-        HAST_COMMENT => {
+        HastNodeType::Comment => {
             let data = view.get_type_data(node_id);
             if data.len() >= 8 {
                 let sr = decode_text_data(data);
@@ -95,11 +111,11 @@ pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut Stri
             }
         }
 
-        HAST_DOCTYPE => {
+        HastNodeType::Doctype => {
             out.push_str("<!doctype html>");
         }
 
-        HAST_RAW => {
+        HastNodeType::Raw => {
             let data = view.get_type_data(node_id);
             if data.len() >= 8 {
                 let sr = decode_text_data(data);
@@ -108,20 +124,61 @@ pub fn render_node<R: ReadArena + ?Sized>(node_id: u32, view: &R, out: &mut Stri
             }
         }
 
-        HAST_MDX_JSX_ELEMENT
-        | HAST_MDX_JSX_TEXT_ELEMENT
-        | HAST_MDX_FLOW_EXPRESSION
-        | HAST_MDX_TEXT_EXPRESSION
-        | HAST_MDX_ESM => {
-            // MDX nodes have no HTML representation — they're only used
-            // in the MDX→JS compilation path.
-        }
-
-        _ => {
-            // Unknown node type — recurse into children if any
-            for &child_id in view.get_children(node_id) {
-                render_node(child_id, view, out);
-            }
-        }
+        HastNodeType::MdxJsxElement
+        | HastNodeType::MdxJsxTextElement
+        | HastNodeType::MdxFlowExpression
+        | HastNodeType::MdxTextExpression
+        | HastNodeType::MdxEsm => {}
     }
+}
+
+fn is_void_element(tag: &str) -> bool {
+    matches!(
+        tag,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+/// Block elements that emit \n after their closing tag.
+fn is_block_element(tag: &str) -> bool {
+    matches!(
+        tag,
+        "blockquote"
+            | "dd"
+            | "details"
+            | "div"
+            | "dl"
+            | "dt"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "hr"
+            | "li"
+            | "ol"
+            | "p"
+            | "pre"
+            | "table"
+            | "ul"
+    )
+}
+
+/// Block containers that emit \n after their opening tag.
+fn is_block_container(tag: &str) -> bool {
+    matches!(tag, "blockquote" | "ol" | "ul" | "dl")
 }

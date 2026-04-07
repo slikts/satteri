@@ -1,4 +1,4 @@
-// Public API — compile functions
+// Public API: compile functions
 export { compileMarkdownToHtml, compileMdxToJs } from "./compile.js";
 export type { CompileOptions, OptimizeStaticConfig } from "./compile.js";
 

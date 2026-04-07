@@ -40,16 +40,14 @@ impl<'a> PluginContext<'a> {
         }
     }
 
-    // ── Arena access ──────────────────────────────────────────────────────────
-
     pub fn arena(&self) -> &Arena {
         self.arena
     }
 
     /// Extract all text content from a subtree (depth-first concatenation)
     pub fn extract_text(&self, node_id: u32) -> String {
-        use satteri_mdast::codec::decode_string_ref_data;
-        use satteri_mdast::MdastNodeType;
+        use satteri_ast::mdast::codec::decode_string_ref_data;
+        use satteri_ast::mdast::MdastNodeType;
         let node = self.arena.get_node(node_id);
         if node.node_type == MdastNodeType::Text as u8
             || node.node_type == MdastNodeType::InlineCode as u8
@@ -69,8 +67,6 @@ impl<'a> PluginContext<'a> {
             .join("")
     }
 
-    // ── Untyped data (interoperable with JS node.data) ────────────────────────
-
     pub fn set_data(&mut self, node_id: u32, key: &str, value: DataValue) {
         self.data_map.set(node_id, key, value);
     }
@@ -79,8 +75,6 @@ impl<'a> PluginContext<'a> {
         self.data_map.get(node_id, key)
     }
 
-    // ── Typed data (Rust-only, fast) ──────────────────────────────────────────
-
     pub fn set_typed_data<T: std::any::Any + Send + Sync>(&mut self, node_id: u32, value: T) {
         self.typed_data.set(node_id, value);
     }
@@ -88,8 +82,6 @@ impl<'a> PluginContext<'a> {
     pub fn get_typed_data<T: std::any::Any + Send + Sync>(&self, node_id: u32) -> Option<&T> {
         self.typed_data.get(node_id)
     }
-
-    // ── Structural mutation commands ──────────────────────────────────────────
 
     pub fn replace_node(&mut self, node_id: u32, new_node: NewNode) {
         self.commands.push(Command::Replace { node_id, new_node });
@@ -130,8 +122,6 @@ impl<'a> PluginContext<'a> {
         });
     }
 
-    // ── Diagnostics ───────────────────────────────────────────────────────────
-
     pub fn report(&mut self, message: impl Into<String>, node_id: Option<u32>, severity: Severity) {
         self.diagnostics.push(Diagnostic {
             message: message.into(),
@@ -147,8 +137,6 @@ impl<'a> PluginContext<'a> {
     pub fn warn(&mut self, message: impl Into<String>, node_id: Option<u32>) {
         self.report(message, node_id, Severity::Warning);
     }
-
-    // ── Take results ─────────────────────────────────────────────────────────
 
     pub(crate) fn take_commands(self) -> (Vec<Command>, Vec<Diagnostic>) {
         (self.commands, self.diagnostics)

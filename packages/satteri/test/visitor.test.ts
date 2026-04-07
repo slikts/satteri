@@ -42,7 +42,7 @@ test("visitor with no subscriptions produces no mutations, no diagnostics", () =
   expect((result as { hasMutations: boolean }).hasMutations).toBe(false);
 });
 
-test("visiting heading nodes — callback fires once for the test doc", () => {
+test("visiting heading nodes - callback fires once for the test doc", () => {
   const { handle, source } = setup();
   let callCount = 0;
   const plugin = {
@@ -123,7 +123,7 @@ test("context.report creates a diagnostic entry", () => {
   expect(result.diagnostics[0]!.severity).toBe("warning");
 });
 
-test("multiple subscribed types — all fire", () => {
+test("multiple subscribed types - all fire", () => {
   const { handle, source } = setup();
   const fired: string[] = [];
   const plugin = {
@@ -208,9 +208,7 @@ test("setProperty + returning the same node does not drop the mutation", () => {
   expect(result.hasMutations).toBe(true);
 });
 
-// ---------------------------------------------------------------------------
 // End-to-end structural mutation tests
-// ---------------------------------------------------------------------------
 
 test("context.insertBefore() inserts a node before the target", () => {
   const html = visitAndRender("# Hello\n\nWorld", {

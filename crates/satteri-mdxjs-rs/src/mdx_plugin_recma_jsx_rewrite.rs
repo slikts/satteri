@@ -224,7 +224,7 @@ pub fn mdx_plugin_recma_jsx_rewrite<'a>(
                     // Destructure from _components (already declared above)
                     prepend.push(create_destructure_from_components(allocator, &all_names));
                 } else {
-                    // No _components — destructure directly from props.components || {} or provider merge
+                    // No _components, destructure directly from props.components || {} or provider merge
                     prepend.push(create_destructure_from_props(
                         allocator,
                         &all_names,
@@ -568,7 +568,7 @@ fn collect_jsx_refs_in_element(
 
     match &elem.opening_element.name {
         JSXElementName::Identifier(ident) => {
-            // Lowercase identifier like `h1`, `p`, `div` — it's a literal tag.
+            // Lowercase identifier like `h1`, `p`, `div`, it's a literal tag.
             let name = ident.name.as_str();
             if is_literal_name(name) {
                 let entry = info
@@ -599,7 +599,7 @@ fn collect_jsx_refs_in_element(
             }
         }
         JSXElementName::MemberExpression(member_expr) => {
-            // Something like `Foo.Bar` — track the root object
+            // Something like `Foo.Bar`, track the root object
             let parts = jsx_member_to_parts(member_expr);
             if let Some(root) = parts.first()
                 && *root != "this"

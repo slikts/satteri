@@ -1,6 +1,6 @@
 use satteri_arena::{Arena, ArenaNode};
-use satteri_mdast::codec::*;
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::codec::*;
+use satteri_ast::mdast::MdastNodeType;
 
 /// Position info extracted from an ArenaNode
 #[derive(Debug, Clone, Copy)]

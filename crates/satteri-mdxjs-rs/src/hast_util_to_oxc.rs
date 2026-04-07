@@ -1,6 +1,6 @@
 //! Turn a HAST arena into a JavaScript AST.
 //!
-//! Reads from any `ReadArena` implementation (owned arena or binary view).
+//! Reads from an `Arena` (owned arena).
 
 use crate::configuration::OptimizeStaticConfig;
 use crate::oxc::{parse_esm_to_tree, parse_expression_to_tree, serialize};
@@ -21,22 +21,23 @@ use oxc_ast::ast::{
 use oxc_span::{Atom, SPAN, Span};
 use oxc_syntax::node::NodeId;
 use rustc_hash::FxHashSet;
-use satteri_arena::ReadArena;
+use satteri_arena::Arena;
 use satteri_arena::mdx_types::{self as message, Location, MdxExpressionKind};
-use satteri_hast::codec::{
+use satteri_ast::hast::HastNodeType;
+use satteri_ast::hast::codec::{
     decode_element_prop, decode_element_prop_count, decode_element_tag, decode_text_data,
 };
-use satteri_hast::node_types::{
-    HAST_COMMENT, HAST_ELEMENT, HAST_MDX_ESM, HAST_MDX_FLOW_EXPRESSION, HAST_MDX_JSX_ELEMENT,
-    HAST_MDX_JSX_TEXT_ELEMENT, HAST_MDX_TEXT_EXPRESSION, HAST_RAW, HAST_ROOT, HAST_TEXT,
+use satteri_ast::mdast::codec::{
+    decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name,
+};
+use satteri_ast::shared::{
     MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
     PROP_BOOL_TRUE, PROP_COMMA_SEP, PROP_SPACE_SEP, PROP_STRING,
 };
-use satteri_mdast::{decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name};
 
 /// Get a Span from a HAST binary node's position data.
 /// Uses offset+1 convention so that (0,0) remains SPAN (dummy).
-fn node_span(view: &dyn ReadArena, node_id: u32) -> Span {
+fn node_span(view: &Arena, node_id: u32) -> Span {
     let node = view.get_node(node_id);
     if node.start_offset == 0 && node.end_offset == 0 && node.start_line == 0 {
         SPAN
@@ -96,13 +97,13 @@ struct Context<'a> {
     esm: Vec<Statement<'a>>,
     location: Option<&'a Location>,
     allocator: &'a Allocator,
-    view: &'a dyn ReadArena,
+    view: &'a Arena,
     optimize_static: Option<&'a OptimizeStaticConfig>,
 }
 
 /// Compile a HAST into OXC's ES AST.
 pub fn hast_util_to_oxc<'a>(
-    view: &'a dyn ReadArena,
+    view: &'a Arena,
     path: Option<String>,
     location: Option<&'a Location>,
     explicit_jsxs: &mut FxHashSet<Span>,
@@ -176,18 +177,18 @@ fn one<'a>(
     let node = context.view.get_node(node_id);
     let raw_type = node.node_type;
 
-    match raw_type {
-        HAST_ROOT => transform_root(context, node_id, explicit_jsxs),
-        HAST_ELEMENT => transform_element(context, node_id, explicit_jsxs),
-        HAST_TEXT | HAST_RAW => Ok(transform_text(context, node_id)),
-        HAST_COMMENT => Ok(Some(transform_comment(context, node_id))),
-        HAST_MDX_JSX_ELEMENT | HAST_MDX_JSX_TEXT_ELEMENT => {
+    match HastNodeType::from_u8(raw_type) {
+        Some(HastNodeType::Root) => transform_root(context, node_id, explicit_jsxs),
+        Some(HastNodeType::Element) => transform_element(context, node_id, explicit_jsxs),
+        Some(HastNodeType::Text | HastNodeType::Raw) => Ok(transform_text(context, node_id)),
+        Some(HastNodeType::Comment) => Ok(Some(transform_comment(context, node_id))),
+        Some(HastNodeType::MdxJsxElement | HastNodeType::MdxJsxTextElement) => {
             transform_mdx_jsx_element(context, node_id, explicit_jsxs)
         }
-        HAST_MDX_FLOW_EXPRESSION | HAST_MDX_TEXT_EXPRESSION => {
+        Some(HastNodeType::MdxFlowExpression | HastNodeType::MdxTextExpression) => {
             transform_mdx_expression(context, node_id)
         }
-        HAST_MDX_ESM => transform_mdxjs_esm(context, node_id),
+        Some(HastNodeType::MdxEsm) => transform_mdxjs_esm(context, node_id),
         _ => Ok(None),
     }
 }
@@ -196,13 +197,13 @@ fn one<'a>(
 ///
 /// Returns `false` for any subtree containing MDX nodes (components, expressions, ESM)
 /// or elements whose tag name is in the ignore list.
-fn is_static_subtree(view: &dyn ReadArena, node_id: u32, config: &OptimizeStaticConfig) -> bool {
+fn is_static_subtree(view: &Arena, node_id: u32, config: &OptimizeStaticConfig) -> bool {
     let node = view.get_node(node_id);
     let raw_type = node.node_type;
 
-    match raw_type {
-        HAST_TEXT | HAST_RAW | HAST_COMMENT => true,
-        HAST_ELEMENT => {
+    match HastNodeType::from_u8(raw_type) {
+        Some(HastNodeType::Text | HastNodeType::Raw | HastNodeType::Comment) => true,
+        Some(HastNodeType::Element) => {
             let data = view.get_type_data(node_id);
             if data.len() < 16 {
                 return false;
@@ -228,7 +229,7 @@ fn is_static_subtree(view: &dyn ReadArena, node_id: u32, config: &OptimizeStatic
 
 /// Try to render a static subtree to an HTML string. Returns false if not static.
 fn try_render_static(
-    view: &dyn ReadArena,
+    view: &Arena,
     node_id: u32,
     config: &OptimizeStaticConfig,
     out: &mut String,
@@ -236,7 +237,7 @@ fn try_render_static(
     if !is_static_subtree(view, node_id, config) {
         return false;
     }
-    satteri_hast::render_node(node_id, view, out);
+    satteri_ast::hast::render_node(node_id, view, out);
     true
 }
 

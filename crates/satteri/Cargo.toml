@@ -6,7 +6,6 @@ description = "High-level Rust API for the Sätteri markdown/MDX pipeline"
 license = "MIT"
 
 [dependencies]
-satteri-mdast = { version = "0.1.0", path = "../satteri-mdast" }
-satteri-hast = { version = "0.1.0", path = "../satteri-hast" }
+satteri-ast = { version = "0.1.0", path = "../satteri-ast" }
 satteri-mdxjs = { version = "0.1.0", path = "../satteri-mdxjs-rs" }
 satteri-pulldown-cmark = { version = "0.1.0", path = "../satteri-pulldown-cmark" }

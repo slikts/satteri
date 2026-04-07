@@ -1,4 +1,4 @@
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::MdastNodeType;
 
 /// A structural mutation command queued during plugin execution.
 /// Applied after the plugin finishes (same as JS).
@@ -96,7 +96,7 @@ impl NodeBuilder {
 /// Convenience constructors
 impl NodeBuilder {
     pub fn heading(depth: u8) -> Self {
-        use satteri_mdast::codec::encode_heading_data;
+        use satteri_ast::mdast::codec::encode_heading_data;
         Self::new(MdastNodeType::Heading).data_bytes(encode_heading_data(depth))
     }
 

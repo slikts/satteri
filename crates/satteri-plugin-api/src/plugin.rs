@@ -1,7 +1,7 @@
 use crate::context::PluginContext;
 use crate::typed_nodes::*;
 use satteri_arena::Arena;
-use satteri_mdast::MdastNodeType;
+use satteri_ast::mdast::MdastNodeType;
 
 /// Metadata about a plugin.
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ impl PluginMeta {
     }
 }
 
-/// The result of a visitor method — either no change, or a replacement.
+/// The result of a visitor method: either no change, or a replacement.
 pub enum VisitResult {
     /// No structural change (plugin may have written to data_map via ctx)
     NoChange,
@@ -58,8 +58,6 @@ pub trait Plugin: Send + Sync {
 
     /// Called after each file.
     fn after(&mut self, _arena: &Arena, _ctx: &mut PluginContext) {}
-
-    // ── Node visitors — implement only what you need ──────────────────────────
 
     fn visit_heading(&mut self, _node: &Heading, _ctx: &mut PluginContext) -> VisitResult {
         VisitResult::NoChange

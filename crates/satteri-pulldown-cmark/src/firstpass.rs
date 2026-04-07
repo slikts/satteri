@@ -445,7 +445,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             }
         }
 
-        // MDX blocks — must be checked before HTML blocks since JSX looks like HTML.
+        // MDX blocks, must be checked before HTML blocks since JSX looks like HTML.
         if self.options.contains(Options::ENABLE_MDX) {
             // MDX ESM: lines starting with `import` or `export`.
             // ESM is only valid at the document root (not inside containers).
@@ -473,7 +473,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
             }
         }
 
-        // HTML Blocks — completely disabled in MDX mode (all tags are JSX).
+        // HTML Blocks, completely disabled in MDX mode (all tags are JSX).
         if bytes[ix] == b'<' && !self.options.contains(Options::ENABLE_MDX) {
             // Types 1-5 are all detected by one function and all end with the same
             // pattern
