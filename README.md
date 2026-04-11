@@ -4,7 +4,7 @@
 
 High-performance Markdown and MDX processing. Parses and compiles in Rust, runs your plugins in JavaScript.
 
-Check out the npm package's [documentation](./packages/satteri/README.md) for installation instructions, API reference, and usage examples.
+Check out the npm package's [documentation](./packages/satteri/README.md) for installation instructions, API reference, and usage examples, or [try it online on the playground](https://satteri.erika.florist).
 
 > Sätteri is an open-source project born from [Bruits](https://bruits.org/), a Rust-focused collective 💛
 
