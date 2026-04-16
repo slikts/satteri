@@ -50,6 +50,9 @@ pub struct OptimizeStaticConfig {
     /// Element tag names to exclude from collapsing (e.g. `["h1", "p"]`).
     /// These elements will remain as JSX calls even in static subtrees,
     /// useful when they may be overridden by a component mapping at runtime.
+    ///
+    /// `export const components = { … }` declarations in the MDX source are
+    /// auto-detected and their keys merged into this list.
     pub ignore_elements: Vec<String>,
 }
 

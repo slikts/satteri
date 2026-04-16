@@ -427,3 +427,167 @@ fn optimize_static_nested_dynamic_prevents_collapse()
     );
     Ok(())
 }
+
+// optimize_static component override detection tests
+
+#[test]
+fn optimize_static_detects_component_overrides() -> Result<(), satteri_arena::mdx_types::Message> {
+    // A file declaring `export const components = { h1: Custom }` must not
+    // collapse its <h1> subtree, otherwise the runtime override never fires.
+    let result = compile(
+        "import Custom from './c.js'\nexport const components = { h1: Custom }\n\n# Heading\n\nPara",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("\"h1\""),
+        "h1 should remain as JSX call: {result}"
+    );
+    assert!(
+        !result.contains("<h1>"),
+        "h1 should not appear inside raw HTML: {result}"
+    );
+    assert!(
+        result.contains("set:html"),
+        "other static content should still collapse: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_shorthand() -> Result<(), satteri_arena::mdx_types::Message> {
+    // Shorthand `{ h1, p }` resolves to keys "h1" and "p".
+    let result = compile(
+        "import h1 from './h1.js'\nimport p from './p.js'\nexport const components = { h1, p }\n\n# Heading\n\nPara",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(result.contains("\"h1\""), "h1 should remain JSX: {result}");
+    assert!(result.contains("\"p\""), "p should remain JSX: {result}");
+    assert!(
+        !result.contains("<h1>"),
+        "h1 should not be inlined as HTML: {result}"
+    );
+    assert!(
+        !result.contains("<p>"),
+        "p should not be inlined as HTML: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_mixed() -> Result<(), satteri_arena::mdx_types::Message> {
+    // `{ h1, p: Custom }` — shorthand + explicit mapped both collected.
+    let result = compile(
+        "import h1 from './h1.js'\nimport Custom from './c.js'\nexport const components = { h1, p: Custom }\n\n# Heading\n\nPara",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(result.contains("\"h1\""), "h1 should remain JSX: {result}");
+    assert!(result.contains("\"p\""), "p should remain JSX: {result}");
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_spread_ignored() -> Result<(), satteri_arena::mdx_types::Message>
+{
+    // Spread elements (`...base`) are silently skipped; only identifier keys
+    // are collected. Here `h1` still counts, but `base`'s contents don't.
+    let result = compile(
+        "import base from './b.js'\nimport Custom from './c.js'\nexport const components = { ...base, h1: Custom }\n\n# Heading\n\nPara",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("\"h1\""),
+        "h1 should remain JSX despite spread sibling: {result}"
+    );
+    // The paragraph isn't referenced by any identifier key, so it must still
+    // collapse — confirms spreads don't implicitly ignore everything.
+    assert!(
+        result.contains("set:html") && result.contains("<p>Para</p>"),
+        "p should still collapse: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_string_keys_ignored()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    // Non-identifier literal keys (`"h1": Custom`) are intentionally skipped
+    // (matches the astro plugin's behavior). Documents the v1 limitation.
+    let result = compile(
+        "import Custom from './c.js'\nexport const components = { \"h1\": Custom }\n\n# Heading",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("<h1>Heading</h1>"),
+        "h1 should collapse because string-literal key wasn't detected: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_no_declaration()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    // Files without `export const components` behave identically to the
+    // pre-feature optimizer — the prepass costs only a substring gate.
+    let result = compile(
+        "# Heading\n\nPara",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("<h1>Heading</h1>"),
+        "h1 should collapse normally: {result}"
+    );
+    assert!(
+        result.contains("<p>Para</p>"),
+        "p should collapse normally: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn optimize_static_detect_overrides_first_wins() -> Result<(), satteri_arena::mdx_types::Message> {
+    // Two `export const components` blocks are ill-formed JS, but our
+    // detection follows first-wins semantics (matches the astro plugin).
+    // The first declares `{ h1: A }`, so h1 stays JSX; the second declares
+    // `{ h2: B }` and is ignored — h2 should still collapse.
+    let result = compile(
+        "import A from './a.js'\nexport const components = { h1: A }\n\n# Heading\n\n## Sub\n\nimport B from './b.js'\nexport const components = { h2: B }\n",
+        &Options {
+            optimize_static: Some(OptimizeStaticConfig::default()),
+            ..Default::default()
+        },
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("\"h1\""),
+        "h1 should remain JSX (first block wins): {result}"
+    );
+    assert!(
+        result.contains("<h2>Sub</h2>"),
+        "h2 should still collapse (second block ignored): {result}"
+    );
+    Ok(())
+}

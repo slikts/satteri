@@ -10,17 +10,19 @@ use crate::oxc_utils::{
 };
 use core::str;
 use std::cell::Cell;
+use std::rc::Rc;
 
 use oxc_allocator::{Allocator, Box as OxcBox, Vec as OxcVec};
 use oxc_ast::ast::{
-    Expression, ExpressionStatement, JSXAttribute, JSXAttributeItem, JSXAttributeValue, JSXChild,
-    JSXClosingElement, JSXClosingFragment, JSXElement, JSXEmptyExpression, JSXExpression,
-    JSXExpressionContainer, JSXFragment, JSXOpeningElement, JSXOpeningFragment, JSXSpreadAttribute,
-    Program, Statement, StringLiteral,
+    BindingPattern, Declaration, Expression, ExpressionStatement, JSXAttribute, JSXAttributeItem,
+    JSXAttributeValue, JSXChild, JSXClosingElement, JSXClosingFragment, JSXElement,
+    JSXEmptyExpression, JSXExpression, JSXExpressionContainer, JSXFragment, JSXOpeningElement,
+    JSXOpeningFragment, JSXSpreadAttribute, ObjectPropertyKind, Program, PropertyKey, Statement,
+    StringLiteral, VariableDeclarationKind,
 };
 use oxc_span::{Atom, SPAN, Span};
 use oxc_syntax::node::NodeId;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use satteri_arena::Arena;
 use satteri_arena::mdx_types::{self as message, Location, MdxExpressionKind};
 use satteri_ast::hast::HastNodeType;
@@ -98,7 +100,12 @@ struct Context<'a> {
     location: Option<&'a Location>,
     allocator: &'a Allocator,
     view: &'a Arena,
-    optimize_static: Option<&'a OptimizeStaticConfig>,
+    /// Behind `Rc` because `all()` needs to hold the config while mutably
+    /// re-borrowing the rest of Context for recursive `one()` calls.
+    optimize_static: Option<Rc<OptimizeStaticConfig>>,
+    /// Populated by the component-override prepass so `transform_mdxjs_esm`
+    /// can reuse already-parsed programs instead of parsing the same source twice.
+    pre_parsed_esm: FxHashMap<u32, Program<'a>>,
 }
 
 /// Compile a HAST into OXC's ES AST.
@@ -108,8 +115,11 @@ pub fn hast_util_to_oxc<'a>(
     location: Option<&'a Location>,
     explicit_jsxs: &mut FxHashSet<Span>,
     allocator: &'a Allocator,
-    optimize_static: Option<&'a OptimizeStaticConfig>,
+    optimize_static: Option<&OptimizeStaticConfig>,
 ) -> Result<MdxProgram<'a>, message::Message> {
+    let (effective_optimize_static, pre_parsed_esm) =
+        prepare_component_overrides(view, allocator, location, optimize_static)?;
+
     let mut context = Context {
         space: Space::Html,
         comments: vec![],
@@ -117,7 +127,8 @@ pub fn hast_util_to_oxc<'a>(
         location,
         allocator,
         view,
-        optimize_static,
+        optimize_static: effective_optimize_static,
+        pre_parsed_esm,
     };
     let expr = match one(&mut context, 0, explicit_jsxs)? {
         Some(JSXChild::Fragment(x)) => Some(Expression::JSXFragment(x)),
@@ -166,6 +177,104 @@ pub fn hast_util_to_oxc<'a>(
         program,
         comments: context.comments,
     })
+}
+
+/// Pre-scan for `export const components = { … }` and merge detected keys
+/// into `ignore_elements` so the optimizer doesn't collapse overridden elements.
+///
+/// Parsed programs are returned alongside the config so `transform_mdxjs_esm`
+/// can consume them later, avoiding a second OXC parse of the same source.
+type ComponentOverridePrepass<'a> = (Option<Rc<OptimizeStaticConfig>>, FxHashMap<u32, Program<'a>>);
+
+fn prepare_component_overrides<'a>(
+    view: &'a Arena,
+    allocator: &'a Allocator,
+    location: Option<&Location>,
+    optimize_static: Option<&OptimizeStaticConfig>,
+) -> Result<ComponentOverridePrepass<'a>, message::Message> {
+    let mut pre_parsed: FxHashMap<u32, Program<'a>> = FxHashMap::default();
+    let Some(config) = optimize_static else {
+        return Ok((None, pre_parsed));
+    };
+    if !view.source().contains("export const components") {
+        return Ok((Some(Rc::new(config.clone())), pre_parsed));
+    }
+
+    let mut collected_keys: Vec<String> = Vec::new();
+    let mut found_declaration = false;
+
+    for &child_id in view.get_children(0) {
+        let node = view.get_node(child_id);
+        if HastNodeType::from_u8(node.node_type) != Some(HastNodeType::MdxEsm) {
+            continue;
+        }
+        let data = view.get_type_data(child_id);
+        if data.len() < 8 {
+            continue;
+        }
+        let value = view.get_str(decode_text_data(data));
+        if !value.contains("export const components") {
+            continue;
+        }
+
+        let program = parse_esm_to_tree(value, &[], location, allocator)?;
+        if !found_declaration {
+            found_declaration = extract_component_override_keys(&program, &mut collected_keys);
+        }
+        pre_parsed.insert(child_id, program);
+    }
+
+    if collected_keys.is_empty() {
+        return Ok((Some(Rc::new(config.clone())), pre_parsed));
+    }
+
+    let mut merged = config.clone();
+    merged.ignore_elements.extend(collected_keys);
+    Ok((Some(Rc::new(merged)), pre_parsed))
+}
+
+/// Extract identifier keys from `export const components = { … }`.
+///
+/// Returns `true` if a `components` declarator was found (even with zero
+/// usable keys, e.g. only spreads) so the caller can stop scanning further
+/// ESM blocks.
+fn extract_component_override_keys(program: &Program<'_>, keys: &mut Vec<String>) -> bool {
+    for stmt in &program.body {
+        let Statement::ExportNamedDeclaration(export_decl) = stmt else {
+            continue;
+        };
+        let Some(Declaration::VariableDeclaration(var_decl)) = &export_decl.declaration else {
+            continue;
+        };
+        if var_decl.kind != VariableDeclarationKind::Const {
+            continue;
+        }
+        for declarator in &var_decl.declarations {
+            let BindingPattern::BindingIdentifier(ident) = &declarator.id else {
+                continue;
+            };
+            if ident.name.as_str() != "components" {
+                continue;
+            }
+            let Some(Expression::ObjectExpression(obj)) = &declarator.init else {
+                continue;
+            };
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                    continue;
+                };
+                if p.computed {
+                    continue;
+                }
+                let PropertyKey::StaticIdentifier(key_ident) = &p.key else {
+                    continue;
+                };
+                keys.push(key_ident.name.to_string());
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Transform one node.
@@ -317,8 +426,9 @@ fn all<'a>(
     let mut result = OxcVec::new_in(context.allocator);
     let child_count = context.view.get_children(parent_id).len();
 
-    if let Some(config) = context.optimize_static {
+    if let Some(config) = context.optimize_static.clone() {
         // Optimization enabled: group consecutive static siblings into raw HTML.
+        let config = &*config;
         let mut i = 0;
         while i < child_count {
             let child_id = context.view.get_children(parent_id)[i];
@@ -637,15 +747,19 @@ fn transform_mdxjs_esm<'a>(
     context: &mut Context<'a>,
     node_id: u32,
 ) -> Result<Option<JSXChild<'a>>, message::Message> {
-    let data = context.view.get_type_data(node_id);
-    let value = if data.len() >= 8 {
-        context.view.get_str(decode_text_data(data))
+    let alloc = context.allocator;
+    let mut program = if let Some(pre) = context.pre_parsed_esm.remove(&node_id) {
+        pre
     } else {
-        ""
+        let data = context.view.get_type_data(node_id);
+        let value = if data.len() >= 8 {
+            context.view.get_str(decode_text_data(data))
+        } else {
+            ""
+        };
+        parse_esm_to_tree(value, &[], context.location, alloc)?
     };
 
-    let alloc = context.allocator;
-    let mut program = parse_esm_to_tree(value, &[], context.location, alloc)?;
     let body = std::mem::replace(&mut program.body, OxcVec::new_in(alloc));
     for stmt in body {
         context.esm.push(stmt);
