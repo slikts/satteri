@@ -235,9 +235,7 @@ export interface HastVisitorInstance {
   mdxTextExpression?: HastVisitorFn<
     MdxTextExpressionHast & { parseExpression(): EstreeProgram | null }
   >;
-  mdxjsEsm?: HastVisitorFn<
-    MdxjsEsmHast & { parseExpression(): EstreeProgram | null }
-  >;
+  mdxjsEsm?: HastVisitorFn<MdxjsEsmHast & { parseExpression(): EstreeProgram | null }>;
 }
 
 // Selective walk helpers

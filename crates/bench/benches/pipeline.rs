@@ -188,9 +188,8 @@ fn mdx_compile_optimize_static(bencher: divan::Bencher) {
         optimize_static: Some(satteri_mdxjs::OptimizeStaticConfig::default()),
         ..Default::default()
     };
-    bencher.bench(|| {
-        satteri_mdxjs::compile(MDX, &opts, satteri_pulldown_cmark::MDX_OPTIONS).unwrap()
-    });
+    bencher
+        .bench(|| satteri_mdxjs::compile(MDX, &opts, satteri_pulldown_cmark::MDX_OPTIONS).unwrap());
 }
 
 /// MDX compile with optimize_static + source has `export const components`.
@@ -201,8 +200,12 @@ fn mdx_compile_optimize_static_with_overrides(bencher: divan::Bencher) {
         ..Default::default()
     };
     bencher.bench(|| {
-        satteri_mdxjs::compile(MDX_WITH_OVERRIDES, &opts, satteri_pulldown_cmark::MDX_OPTIONS)
-            .unwrap()
+        satteri_mdxjs::compile(
+            MDX_WITH_OVERRIDES,
+            &opts,
+            satteri_pulldown_cmark::MDX_OPTIONS,
+        )
+        .unwrap()
     });
 }
 

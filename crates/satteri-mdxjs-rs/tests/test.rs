@@ -544,8 +544,8 @@ fn optimize_static_detect_overrides_string_keys_ignored()
 }
 
 #[test]
-fn optimize_static_detect_overrides_no_declaration()
--> Result<(), satteri_arena::mdx_types::Message> {
+fn optimize_static_detect_overrides_no_declaration() -> Result<(), satteri_arena::mdx_types::Message>
+{
     // Files without `export const components` behave identically to the
     // pre-feature optimizer — the prepass costs only a substring gate.
     let result = compile(

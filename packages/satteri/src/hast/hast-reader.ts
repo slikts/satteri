@@ -137,9 +137,7 @@ export class HastReader {
   }
 
   /** Get position data for a node. */
-  getPosition(
-    nodeId: number,
-  ):
+  getPosition(nodeId: number):
     | {
         start: { offset: number; line: number; column: number };
         end: { offset: number; line: number; column: number };

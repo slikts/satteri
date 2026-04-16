@@ -165,7 +165,7 @@ jobs:
 
       - name: Inject optionalDependencies into main package.json
         if: steps.check.outputs.is_release == 'true'
-        run: pnpm napi pre-publish -t npm --skip-optional-publish
+        run: pnpm napi pre-publish -t npm --skip-optional-publish --no-gh-release
         working-directory: packages/satteri
 
       - uses: bruits/sampo/crates/sampo-github-action@main

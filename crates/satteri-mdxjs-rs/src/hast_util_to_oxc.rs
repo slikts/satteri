@@ -184,7 +184,10 @@ pub fn hast_util_to_oxc<'a>(
 ///
 /// Parsed programs are returned alongside the config so `transform_mdxjs_esm`
 /// can consume them later, avoiding a second OXC parse of the same source.
-type ComponentOverridePrepass<'a> = (Option<Rc<OptimizeStaticConfig>>, FxHashMap<u32, Program<'a>>);
+type ComponentOverridePrepass<'a> = (
+    Option<Rc<OptimizeStaticConfig>>,
+    FxHashMap<u32, Program<'a>>,
+);
 
 fn prepare_component_overrides<'a>(
     view: &'a Arena,
