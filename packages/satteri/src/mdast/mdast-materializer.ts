@@ -32,6 +32,9 @@ export const TYPE_NAMES: Record<number, string> = {
   26: "toml",
   27: "math",
   28: "inlineMath",
+  30: "containerDirective",
+  31: "leafDirective",
+  32: "textDirective",
   100: "mdxJsxFlowElement",
   101: "mdxJsxTextElement",
   102: "mdxFlowExpression",
@@ -39,8 +42,10 @@ export const TYPE_NAMES: Record<number, string> = {
   104: "mdxjsEsm",
 };
 
-// Leaf node types that do NOT have children
-const LEAF_TYPES = new Set([10, 13, 7, 8, 14, 3, 16, 20, 25, 26, 27, 28, 102, 103, 104]);
+// Leaf node types that do NOT have children.
+// Type 9 = `definition`; type 18 = `imageReference` — leaves per mdast spec
+// (imageReference carries `alt` as a string, not children).
+const LEAF_TYPES = new Set([9, 10, 13, 7, 8, 14, 3, 16, 18, 20, 25, 26, 27, 28, 102, 103, 104]);
 
 /**
  * Add type-specific lazy properties to a node object.
@@ -63,7 +68,6 @@ function addTypeProperties(
     case 7: // html
     case 25: // yaml
     case 26: // toml
-    case 28: // inlineMath
       Object.defineProperties(node, {
         value: lazyProp("value", () => reader.getTextValue(nodeId)),
       });
@@ -75,6 +79,12 @@ function addTypeProperties(
 
     case 27: // math
       lazyGroup(node, ["meta", "value"], () => reader.getMathData(nodeId));
+      break;
+
+    case 28: // inlineMath
+      Object.defineProperties(node, {
+        value: lazyProp("value", () => reader.getMathData(nodeId).value),
+      });
       break;
 
     case 15: // link
@@ -102,14 +112,22 @@ function addTypeProperties(
     }
 
     case 6: // listItem
-      lazyGroup(node, ["checked", "spread"], () => reader.getListItemData(nodeId));
+      lazyGroup(node, ["spread", "checked"], () => reader.getListItemData(nodeId));
       break;
 
     case 17: // linkReference
-    case 18: // imageReference
-    case 20: // footnoteReference
       lazyGroup(node, ["identifier", "label", "referenceType"], () =>
         reader.getReferenceData(nodeId),
+      );
+      break;
+
+    case 20: // footnoteReference — no `referenceType` per mdast spec
+      lazyGroup(node, ["identifier", "label"], () => reader.getReferenceData(nodeId));
+      break;
+
+    case 18: // imageReference — leaf with alt (remark treats it as a void node)
+      lazyGroup(node, ["identifier", "label", "referenceType", "alt"], () =>
+        reader.getImageReferenceData(nodeId),
       );
       break;
 
@@ -121,6 +139,12 @@ function addTypeProperties(
       Object.defineProperties(node, {
         align: lazyProp("align", () => reader.getTableAlign(nodeId)),
       });
+      break;
+
+    case 30: // containerDirective
+    case 31: // leafDirective
+    case 32: // textDirective
+      lazyGroup(node, ["name", "attributes"], () => reader.getDirectiveData(nodeId));
       break;
 
     case 100: // mdxJsxFlowElement

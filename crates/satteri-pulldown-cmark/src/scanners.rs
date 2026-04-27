@@ -423,6 +423,7 @@ impl<'a> LineStart<'a> {
             *self = save;
             return None;
         }
+        self.ix += 1;
         Some(is_checked)
     }
 
@@ -548,8 +549,41 @@ pub(crate) fn scan_closing_code_fence(
         return None;
     }
     i += num_fence_chars_found;
-    let num_trailing_spaces = scan_ch_repeat(&bytes[i..], b' ');
-    i += num_trailing_spaces;
+    // Trailing whitespace (spaces and tabs) is allowed after the closing
+    // fence and is ignored — remark/micromark accepts both.
+    while bytes.get(i).is_some_and(|&b| b == b' ' || b == b'\t') {
+        i += 1;
+    }
+    scan_eol(&bytes[i..]).map(|_| i)
+}
+
+pub(crate) fn scan_math_fence(data: &[u8]) -> Option<usize> {
+    let c = *data.first()?;
+    if c != b'$' {
+        return None;
+    }
+    let n = 1 + scan_ch_repeat(&data[1..], b'$');
+    if n >= 2 {
+        let suffix = &data[n..];
+        let next_line = scan_nextline(suffix);
+        if suffix[..next_line].contains(&b'$') {
+            return None;
+        }
+        Some(n)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn scan_closing_math_fence(bytes: &[u8], n_fence_char: usize) -> Option<usize> {
+    if bytes.is_empty() {
+        return Some(0);
+    }
+    let num_fence_chars_found = scan_ch_repeat(bytes, b'$');
+    if num_fence_chars_found < n_fence_char {
+        return None;
+    }
+    let i = num_fence_chars_found + scan_ch_repeat(&bytes[num_fence_chars_found..], b' ');
     scan_eol(&bytes[i..]).map(|_| i)
 }
 
@@ -694,7 +728,7 @@ pub(crate) fn scan_table_head(data: &[u8]) -> (usize, Vec<Alignment>) {
             break;
         }
         match *c {
-            b' ' => (),
+            b' ' | b'\t' => (),
             b':' => {
                 active_col = match (start_col, active_col) {
                     (true, Alignment::None) => Alignment::Left,
@@ -766,11 +800,23 @@ pub(crate) fn scan_code_fence(data: &[u8]) -> Option<(usize, u8)> {
 
 pub(crate) fn scan_interrupting_container_extensions_fence(data: &[u8]) -> bool {
     let fence_length = scan_ch_repeat(data, b':');
-    let kind_start = fence_length + scan_whitespace_no_nl(&data[fence_length..]);
-    let kind_length = scan_while(&data[kind_start..], |c| {
-        is_ascii_alphanumeric(c) || c == b'_' || c == b'-' || c == b':' || c == b'.'
+    if fence_length < 2 {
+        return false;
+    }
+    if data.len() <= fence_length || !data[fence_length].is_ascii_alphanumeric() {
+        return false;
+    }
+    let name_len = scan_while(&data[fence_length..], |c| {
+        c.is_ascii_alphanumeric() || c == b'-' || c == b'_'
     });
-    fence_length > 2 && kind_length > 0
+    if name_len == 0 {
+        return false;
+    }
+    let last = data[fence_length + name_len - 1];
+    if last == b'-' || last == b'_' {
+        return false;
+    }
+    true
 }
 
 /// Scan metadata block, returning the number of delimiter bytes
@@ -801,21 +847,13 @@ pub(crate) fn scan_metadata_block(
             }
         }
         if i == 3 {
-            // Search the closing sequence
+            // Search the closing sequence. remark-frontmatter accepts any
+            // content between the fences, including blank first lines
+            // (`---\n\ntitle: x\n---`), so we don't special-case them here.
             let mut j = i;
-            let mut first_line = true;
             while j < data.len() {
                 j += scan_nextline(&data[j..]);
-                let closed = scan_closing_metadata_block(&data[j..], c).is_some();
-                // The first line of the metadata block cannot be an empty line
-                // nor the end of the block
-                if first_line {
-                    if closed || scan_blank_line(&data[j..]).is_some() {
-                        return None;
-                    }
-                    first_line = false;
-                }
-                if closed {
+                if scan_closing_metadata_block(&data[j..], c).is_some() {
                     return Some((i, c));
                 }
             }
@@ -1426,8 +1464,11 @@ fn scan_email(text: &str, start_ix: usize) -> Option<(usize, CowStr<'_>)> {
         i += 1;
         match c {
             c if is_ascii_alphanumeric(c) => (),
-            b'.' | b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'/' | b'=' | b'?'
-            | b'^' | b'_' | b'`' | b'{' | b'|' | b'}' | b'~' | b'-' => (),
+            // Local-part character class matches micromark's `asciiAtext`, which
+            // deliberately excludes `!` even though CommonMark's reference regex
+            // allows it. remark inherits this behavior, so we need to match it.
+            b'.' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'/' | b'=' | b'?' | b'^'
+            | b'_' | b'`' | b'{' | b'|' | b'}' | b'~' | b'-' => (),
             b'@' if i > 1 => break,
             _ => return None,
         }
@@ -1572,7 +1613,8 @@ mod test {
         const EMAILS: &[&str] = &[
             "<a@b.c>",
             "<a@b>",
-            "<a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-@example.com>",
+            // Matches micromark's `asciiAtext` character class (no `!`).
+            "<a-zA-Z0-9.#$%&'*+/=?^_`{|}~-@example.com>",
             "<a@sixty-three-letters-in-this-identifier-----------------------63>",
         ];
         for email in EMAILS {
@@ -1590,6 +1632,9 @@ mod test {
             "<a(noparens)@example.com>",
             "<\"noquotes\"@example.com>",
             "<a@sixty-four-letters-in-this-identifier-------------------------64>",
+            // `!` is excluded from the local-part character class to match
+            // micromark/remark.
+            "<a!b@example.com>",
         ];
         for email in EMAILS {
             assert!(scan_email(email, 1).is_none());

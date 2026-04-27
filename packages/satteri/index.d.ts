@@ -50,10 +50,7 @@ export declare function getNodeData(handle: ArenaHandle, nodeId: number): string
 
 /** Feature toggles for the Markdown/MDX parser, passed from JavaScript. */
 export interface JsFeatures {
-  /**
-   * GFM: tables, footnotes, strikethrough, task lists, blockquote tags.
-   * Default: true.
-   */
+  /** GFM: tables, footnotes, strikethrough, task lists. Default: true. */
   gfm?: boolean
   /** Frontmatter: YAML (`--- ... ---`) and TOML (`+++ ... +++`). Default: true. */
   frontmatter?: boolean
@@ -73,8 +70,6 @@ export interface JsFeatures {
   smartPunctuation?: boolean
   /** Granular smart-punctuation control (overrides `smart_punctuation`). */
   smartPunctuationOptions?: JsSmartPunctuationOptions
-  /** Definition lists. Default: false. */
-  definitionList?: boolean
 }
 
 /** MDX compile options passed from JavaScript. */
@@ -161,10 +156,7 @@ export declare function parseEsm(source: string): string | null
  */
 export declare function parseExpression(source: string): string | null
 
-/**
- * Parse Markdown source and return HTML string directly.
- * Uses pulldown-cmark's streaming renderer, skipping the arena entirely.
- */
+/** Parse Markdown source and return HTML string directly. */
 export declare function parseToHtml(source: string, features?: JsFeatures | undefined | null): string
 
 /** Render a handle's HAST arena to HTML. Does not consume the handle. */

@@ -48,7 +48,6 @@ function featuresToNative(features: Features | undefined) {
       result.smartPunctuation = features.smartPunctuation;
     }
   }
-  if (features.definitionList !== undefined) result.definitionList = features.definitionList;
   return result;
 }
 
@@ -195,7 +194,7 @@ export interface SmartPunctuationOptions {
 
 /** Parser feature toggles. All default to their documented value when omitted. */
 export interface Features {
-  /** GFM: tables, footnotes, strikethrough, task lists, blockquote tags. Default: true. */
+  /** GFM: tables, footnotes, strikethrough, task lists. Default: true. */
   gfm?: boolean;
   /** Frontmatter: YAML (`--- ... ---`) and TOML (`+++ ... +++`). Default: true. */
   frontmatter?: boolean;
@@ -220,8 +219,6 @@ export interface Features {
    * ```
    */
   smartPunctuation?: boolean | SmartPunctuationOptions;
-  /** Definition lists. Default: false. */
-  definitionList?: boolean;
 }
 
 export interface CompileOptions {
@@ -267,9 +264,8 @@ export function markdownToHtml(
   const { mdastPlugins = [], hastPlugins = [], features, filename = "<unknown>" } = options;
   const nativeFeatures = featuresToNative(features);
 
-  if (mdastPlugins.length === 0 && hastPlugins.length === 0) {
-    return parseToHtml(source, nativeFeatures);
-  }
+  // TODO: When there's no plugins, we shouldn't go through all the steps below, we could just call parseToHtml directly.
+  // However right now pulldown-cmark's HTML output is super different from our target (unified's). So until that's fixed, we'll do the slower pipeline
 
   const handleResult = createHastHandleFromMdast(
     source,

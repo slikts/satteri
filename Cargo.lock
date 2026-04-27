@@ -1073,6 +1073,7 @@ dependencies = [
 name = "satteri-arena"
 version = "0.1.2"
 dependencies = [
+ "memchr",
  "rustc-hash",
 ]
 
@@ -1154,7 +1155,6 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
- "pulldown-cmark-escape",
  "rustc-hash",
  "satteri-arena",
  "satteri-ast",

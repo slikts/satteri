@@ -145,7 +145,7 @@ fn thematic_break() {
 fn hard_line_break() {
     assert_eq!(
         html("Line one  \nLine two"),
-        "<p>Line one<br>Line two</p>\n"
+        "<p>Line one<br>\nLine two</p>\n"
     );
 }
 
@@ -181,7 +181,7 @@ fn task_list_mixed() {
     assert_eq!(
         html("- [x] done\n- [ ] todo"),
         "<ul class=\"contains-task-list\">\n\
-         <li class=\"task-list-item\"><input type=\"checkbox\" disabled checked> done</li>\n\
+         <li class=\"task-list-item\"><input type=\"checkbox\" checked disabled> done</li>\n\
          <li class=\"task-list-item\"><input type=\"checkbox\" disabled> todo</li>\n\
          </ul>\n"
     );
@@ -223,21 +223,21 @@ fn code_block_preserves_single_trailing_newline() {
 fn table_column_alignments() {
     assert_eq!(
         html("| a | b | c |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |\n"),
-        "<table>\
-         <thead>\
-         <tr>\
-         <th style=\"text-align: left\">a</th>\
-         <th style=\"text-align: center\">b</th>\
-         <th style=\"text-align: right\">c</th>\
-         </tr>\
-         </thead>\
-         <tbody>\
-         <tr>\
-         <td style=\"text-align: left\">1</td>\
-         <td style=\"text-align: center\">2</td>\
-         <td style=\"text-align: right\">3</td>\
-         </tr>\
-         </tbody>\
+        "<table>\n\
+         <thead>\n\
+         <tr>\n\
+         <th style=\"text-align: left\">a</th>\n\
+         <th style=\"text-align: center\">b</th>\n\
+         <th style=\"text-align: right\">c</th>\n\
+         </tr>\n\
+         </thead>\n\
+         <tbody>\n\
+         <tr>\n\
+         <td style=\"text-align: left\">1</td>\n\
+         <td style=\"text-align: center\">2</td>\n\
+         <td style=\"text-align: right\">3</td>\n\
+         </tr>\n\
+         </tbody>\n\
          </table>\n"
     );
 }
@@ -246,9 +246,19 @@ fn table_column_alignments() {
 fn table_no_alignment_omits_style() {
     assert_eq!(
         html("| a | b |\n|---|---|\n| 1 | 2 |"),
-        "<table>\
-         <thead><tr><th>a</th><th>b</th></tr></thead>\
-         <tbody><tr><td>1</td><td>2</td></tr></tbody>\
+        "<table>\n\
+         <thead>\n\
+         <tr>\n\
+         <th>a</th>\n\
+         <th>b</th>\n\
+         </tr>\n\
+         </thead>\n\
+         <tbody>\n\
+         <tr>\n\
+         <td>1</td>\n\
+         <td>2</td>\n\
+         </tr>\n\
+         </tbody>\n\
          </table>\n"
     );
 }
@@ -262,31 +272,58 @@ fn table_no_alignment_omits_style() {
 fn footnote_single_reference_and_definition() {
     assert_eq!(
         html("Here[^1].\n\n[^1]: the note"),
-        "<p>Here<sup class=\"footnote-reference\"><a href=\"#1\">1</a></sup>.</p>\n\
-         <div class=\"footnote-definition\" id=\"1\">\
-         <sup class=\"footnote-definition-label\">1</sup>\
-         <p>the note</p>\n\
-         </div>\n"
+        concat!(
+            "<p>Here",
+            "<sup><a href=\"#user-content-fn-1\" id=\"user-content-fnref-1\"",
+            " data-footnote-ref aria-describedby=\"footnote-label\">1</a></sup>",
+            ".</p>\n",
+            "<section data-footnotes class=\"footnotes\">",
+            "<h2 class=\"sr-only\" id=\"footnote-label\">Footnotes</h2>\n",
+            "<ol>\n",
+            "<li id=\"user-content-fn-1\">\n",
+            "<p>the note ",
+            "<a href=\"#user-content-fnref-1\" data-footnote-backref=\"\"",
+            " aria-label=\"Back to reference 1\" class=\"data-footnote-backref\">",
+            "\u{21a9}</a></p>\n",
+            "</li>\n",
+            "</ol>\n",
+            "</section>\n",
+        )
     );
 }
 
 #[test]
 fn footnote_numbers_follow_source_order() {
     // `b` is referenced before `a` in the body, so numbering becomes b=1, a=2
-    // — even though the definitions appear in order a, b.
+    // — and because the `<section>` iterates `footnoteOrder`, the list items
+    // also appear in reference order (b then a) rather than definition order.
     assert_eq!(
         html("See[^b] then[^a].\n\n[^a]: first def\n[^b]: second def"),
         concat!(
-            "<p>See<sup class=\"footnote-reference\"><a href=\"#b\">1</a></sup>",
-            " then<sup class=\"footnote-reference\"><a href=\"#a\">2</a></sup>.</p>\n",
-            "<div class=\"footnote-definition\" id=\"a\">",
-            "<sup class=\"footnote-definition-label\">2</sup>",
-            "<p>first def</p>\n",
-            "</div>\n",
-            "<div class=\"footnote-definition\" id=\"b\">",
-            "<sup class=\"footnote-definition-label\">1</sup>",
-            "<p>second def</p>\n",
-            "</div>\n",
+            "<p>See",
+            "<sup><a href=\"#user-content-fn-b\" id=\"user-content-fnref-b\"",
+            " data-footnote-ref aria-describedby=\"footnote-label\">1</a></sup>",
+            " then",
+            "<sup><a href=\"#user-content-fn-a\" id=\"user-content-fnref-a\"",
+            " data-footnote-ref aria-describedby=\"footnote-label\">2</a></sup>",
+            ".</p>\n",
+            "<section data-footnotes class=\"footnotes\">",
+            "<h2 class=\"sr-only\" id=\"footnote-label\">Footnotes</h2>\n",
+            "<ol>\n",
+            "<li id=\"user-content-fn-b\">\n",
+            "<p>second def ",
+            "<a href=\"#user-content-fnref-b\" data-footnote-backref=\"\"",
+            " aria-label=\"Back to reference 1\" class=\"data-footnote-backref\">",
+            "\u{21a9}</a></p>\n",
+            "</li>\n",
+            "<li id=\"user-content-fn-a\">\n",
+            "<p>first def ",
+            "<a href=\"#user-content-fnref-a\" data-footnote-backref=\"\"",
+            " aria-label=\"Back to reference 2\" class=\"data-footnote-backref\">",
+            "\u{21a9}</a></p>\n",
+            "</li>\n",
+            "</ol>\n",
+            "</section>\n",
         )
     );
 }

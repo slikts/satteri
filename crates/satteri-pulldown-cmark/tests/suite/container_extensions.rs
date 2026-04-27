@@ -5,212 +5,6 @@ use super::test_markdown_html;
 
 #[test]
 fn container_extensions_test_1() {
-    let original = r##"> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this inside?
-> :::
-"##;
-    let expected = r##"<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this inside?</p>
-</details>
-</blockquote>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_2() {
-    let original = r##"::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-:::
-**is this seperate and bold**
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p></blockquote>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_3() {
-    let original = r##"::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this inside?
-> :::
-:::
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this inside?</p>
-</details>
-</blockquote>
-</details>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_4() {
-    let original = r##"::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this collapsable?
-> > Is this **bold**?
-> > Is this **bold**?
-> :::
-:::
-**is this seperate and bold**
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p></blockquote>
-</details>
-</blockquote>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_5() {
-    let original = r##"::: spoiler Is this expandable?
-Is this collapsable?
-:::
-**is this seperate and bold**
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_6() {
-    let original = r##"::: spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_7() {
-    let original = r##":::spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_8() {
-    let original = r##"::: example
-Is this collapsable?
-
-Is this **bold**?
-:::
-"##;
-    let expected = r##"<div class="example">
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_9() {
-    let original = r##":::: example
-Is this collapsable?
-
-Is this **bold**?
-::::
-"##;
-    let expected = r##"<div class="example">
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_10() {
-    let original = r##":::::spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::::
-"##;
-    let expected = r##"<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_11() {
     let original = r##":::
 
 content
@@ -222,97 +16,11 @@ content
 <p>:::</p>
 "##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
-fn container_extensions_test_12() {
-    let original = r##"::: block
-
-content
-
-::: end
-"##;
-    let expected = r##"<div class="block">
-<p>content</p>
-<div class="end">
-</div>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_13() {
-    let original = r##" ::: block
-:::
-
-::: block
- :::
-"##;
-    let expected = r##"<div class="block">
-</div>
-<div class="block">
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_14() {
-    let original = r##"::: a
-::: b
-
-:::
-:::
-"##;
-    let expected = r##"<div class="a">
-<div class="b">
-</div>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_15() {
-    let original = r##":::: a
-::: b
-
-:::
-::::
-"##;
-    let expected = r##"<div class="a">
-<div class="b">
-</div>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_16() {
-    let original = r##"::: a
-:::: b
-
-::::
-:::
-"##;
-    let expected = r##"<div class="a">
-<div class="b">
-</div>
-</div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_17() {
+fn container_extensions_test_2() {
     let original = r##":::
 Hi
 :::
@@ -322,133 +30,264 @@ Hi
 :::</p>
 "##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
-fn container_extensions_test_18() {
-    let original = r##"::::: foo
+fn container_extensions_test_3() {
+    let original = r##":::note
+Content here
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_4() {
+    let original = r##":::note[Title]
+Content
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_5() {
+    let original = r##":::warning{.big}
+Be careful!
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_6() {
+    let original = r##"::::outer
+:::inner
+Content
+:::
+::::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_7() {
+    let original = r##"::video[Title]{src=video.mp4}
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_8() {
+    let original = r##"A :abbr[HTML]{title="HyperText Markup Language"} example.
+"##;
+    let expected = r##"<p>A  example.</p>
+"##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_9() {
+    let original = r##"This :smile is text.
+"##;
+    let expected = r##"<p>This  is text.</p>
+"##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_10() {
+    let original = r##"Hello :smile: world
+"##;
+    let expected = r##"<p>Hello :smile: world</p>
+"##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_11() {
+    let original = r##":::note
+Paragraph 1
+
+Paragraph 2
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_12() {
+    let original = r##":::note
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_13() {
+    let original = r##"**bold after**
+:::example
+Content
+:::
+"##;
+    let expected = r##"<p><strong>bold after</strong></p>
+"##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_14() {
+    let original = r##":::::foo
 Hi
 :::
 ::::::
 "##;
-    let expected = r##"<div class="foo">
-<p>Hi
-:::</p>
-</div>
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_15() {
+    let original = r##"> :::foo
+> Hi
+"##;
+    let expected = r##"<blockquote>
+</blockquote>
 "##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_16() {
+    let original = r##":::c_d
+Hi
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_17() {
+    let original = r##":::container
+> shouldn't close, right?
+> :::
+> x
+:::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
+}
+
+#[test]
+fn container_extensions_test_18() {
+    let original = r##":::a
+::::b
+:::::c
+::::
+x
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_19() {
-    let original = r##"> ::: foo
-> Hi
+    let original = r##":::a
+content :::
 "##;
-    let expected = r##"<blockquote>
-<div class="foo">
-<p>Hi</p>
-</div>
-</blockquote>
-"##;
+    let expected = r##""##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_20() {
-    let original = r##"::: c_d
-Hi
+    // remark-directive closes a whole run of same-length container-
+    // directive fences on a single closing `:::`. So the first `:::` here
+    // closes both `:::a` and its nested `:::b`; the second `:::` has
+    // nothing to close and falls through as literal paragraph text.
+    let original = r##":::a
+:::b
+
+:::
 :::
 "##;
-    let expected = r##"<div class="c_d">
-<p>Hi</p>
-</div>
+    let expected = r##"<p>:::</p>
 "##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_21() {
-    let original = r##"::: container
-> shouldn't close, right?
-> :::
-> x
-:::
-"##;
-    let expected = r##"<div class="container">
-<blockquote>
-<p>shouldn't close, right?
-:::
-x</p>
-</blockquote>
-</div>
-"##;
+    let original = r##"::::a
+:::b
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+:::
+::::
+"##;
+    let expected = r##""##;
+
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_22() {
-    let original = r##"::: container
-> shouldn't close, right?
-> :::
-> x
+    let original = r##":::a
+::::b
 
+::::
 :::
 "##;
-    let expected = r##"<div class="container">
-<blockquote>
-<p>shouldn't close, right?
-:::
-x</p>
-</blockquote>
-</div>
-"##;
+    let expected = r##""##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_23() {
-    let original = r##"::: a
-:::: b
-::::: c
-::::
-x
+    let original = r##"::: note
+Hi
+:::
 "##;
-    let expected = r##"<div class="a">
-<div class="b">
-<div class="c">
-</div>
-</div>
-<p>x</p>
-</div>
+    let expected = r##"<p>::: note
+Hi
+:::</p>
 "##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }
 
 #[test]
 fn container_extensions_test_24() {
-    let original = r##"::: a
-content :::
+    let original = r##"::break
 "##;
-    let expected = r##"<div class="a"><p>content :::</p></div>
-"##;
+    let expected = r##""##;
 
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
-}
-
-#[test]
-fn container_extensions_test_25() {
-    let original = r##":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: a
-content :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-"##;
-    let expected = r##"<div class="a"><p>content :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::</p></div>
-"##;
-
-    test_markdown_html(original, expected, false, false, false, false, false, false, true);
+    test_markdown_html(original, expected, 0, false, false, false, false, false, true);
 }

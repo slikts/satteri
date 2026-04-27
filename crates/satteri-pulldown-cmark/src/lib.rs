@@ -20,7 +20,7 @@
 
 //! Pull parser for [CommonMark](https://commonmark.org). This crate provides a [Parser](struct.Parser.html) struct
 //! which is an iterator over [Event](enum.Event.html)s. This iterator can be used
-//! directly, or to output HTML using the [HTML module](html/index.html).
+//! directly, or to build an arena representation via [`parse()`].
 //!
 //! By default, only CommonMark features are enabled. To use extensions like tables,
 //! footnotes or task lists, enable them by setting the corresponding flags in the
@@ -28,25 +28,17 @@
 //!
 //! # Example
 //! ```rust
-//! use satteri_pulldown_cmark::{Parser, Options};
+//! use satteri_pulldown_cmark::{parse, Options};
 //!
 //! let markdown_input = "Hello world, this is a ~~complicated~~ *very simple* example.";
 //!
-//! // Set up options and parser. Strikethroughs are not part of the CommonMark standard
-//! // and we therefore must enable it explicitly.
 //! let mut options = Options::empty();
 //! options.insert(Options::ENABLE_STRIKETHROUGH);
-//! let parser = Parser::new_ext(markdown_input, options);
+//! let (arena, _) = parse(markdown_input, options);
+//! let html = satteri_ast::mdast_to_html(&arena);
 //!
-//! # #[cfg(feature = "html")] {
-//! // Write to String buffer.
-//! let mut html_output = String::new();
-//! satteri_pulldown_cmark::html::push_html(&mut html_output, parser);
-//!
-//! // Check that the output is what we expected.
 //! let expected_html = "<p>Hello world, this is a <del>complicated</del> <em>very simple</em> example.</p>\n";
-//! assert_eq!(expected_html, &html_output);
-//! # }
+//! assert_eq!(expected_html, &html);
 //! ```
 //!
 //! Note that consecutive text events can happen due to the manner in which the
@@ -91,9 +83,6 @@ use alloc::vec::Vec;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "html")]
-pub mod html;
 
 pub mod utils;
 
@@ -158,12 +147,13 @@ pub enum BlockQuoteKind {
     Caution,
 }
 
-/// ContainerBlock kind (Spoiler only).
+/// Directive kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ContainerKind {
-    Default,
-    Spoiler,
+pub enum DirectiveKind {
+    Container,
+    Leaf,
+    Text,
 }
 
 /// Metadata block kind.
@@ -208,7 +198,13 @@ pub enum Tag<'a> {
     BlockQuote(Option<BlockQuoteKind>),
     /// A code block.
     CodeBlock(CodeBlockKind<'a>),
-    ContainerBlock(ContainerKind, CowStr<'a>),
+    /// A directive (container, leaf, or text).
+    /// Only parsed and emitted with [`Options::ENABLE_CONTAINER_EXTENSIONS`].
+    Directive {
+        kind: DirectiveKind,
+        name: CowStr<'a>,
+        attributes: Vec<(CowStr<'a>, CowStr<'a>)>,
+    },
 
     /// An HTML block.
     ///
@@ -237,7 +233,7 @@ pub enum Tag<'a> {
     /// A footnote definition. The value contained is the footnote's label by which it can
     /// be referred to.
     ///
-    /// Only parsed and emitted with [`Options::ENABLE_FOOTNOTES`] or [`Options::ENABLE_OLD_FOOTNOTES`].
+    /// Only parsed and emitted with [`Options::ENABLE_FOOTNOTES`].
     #[cfg_attr(feature = "serde", serde(borrow))]
     FootnoteDefinition(CowStr<'a>),
 
@@ -338,7 +334,7 @@ impl<'a> Tag<'a> {
             Tag::Heading { level, .. } => TagEnd::Heading(*level),
             Tag::BlockQuote(kind) => TagEnd::BlockQuote(*kind),
             Tag::CodeBlock(_) => TagEnd::CodeBlock,
-            Tag::ContainerBlock(kind, _) => TagEnd::ContainerBlock(*kind),
+            Tag::Directive { kind, .. } => TagEnd::Directive(*kind),
             Tag::HtmlBlock => TagEnd::HtmlBlock,
             Tag::List(number, _) => TagEnd::List(number.is_some()),
             Tag::Item => TagEnd::Item,
@@ -382,7 +378,18 @@ impl<'a> Tag<'a> {
             },
             Tag::BlockQuote(k) => Tag::BlockQuote(k),
             Tag::CodeBlock(kb) => Tag::CodeBlock(kb.into_static()),
-            Tag::ContainerBlock(k, s) => Tag::ContainerBlock(k, s.into_static()),
+            Tag::Directive {
+                kind,
+                name,
+                attributes,
+            } => Tag::Directive {
+                kind,
+                name: name.into_static(),
+                attributes: attributes
+                    .into_iter()
+                    .map(|(k, v)| (k.into_static(), v.into_static()))
+                    .collect(),
+            },
             Tag::HtmlBlock => Tag::HtmlBlock,
             Tag::List(v, t) => Tag::List(v, t),
             Tag::Item => Tag::Item,
@@ -437,7 +444,7 @@ pub enum TagEnd {
 
     BlockQuote(Option<BlockQuoteKind>),
     CodeBlock,
-    ContainerBlock(ContainerKind),
+    Directive(DirectiveKind),
 
     HtmlBlock,
 
@@ -625,7 +632,7 @@ pub enum Event<'a> {
     InlineHtml(CowStr<'a>),
     /// A reference to a footnote with given label, defined
     /// by an event with a [`Tag::FootnoteDefinition`] tag. Definitions and references to them may
-    /// occur in any order. Only parsed and emitted with [`Options::ENABLE_FOOTNOTES`] or [`Options::ENABLE_OLD_FOOTNOTES`].
+    /// occur in any order. Only parsed and emitted with [`Options::ENABLE_FOOTNOTES`].
     ///
     /// ```markdown
     /// [^1]
@@ -781,33 +788,14 @@ bitflags::bitflags! {
         /// - `+++` line at start
         /// - `+++` line at end
         const ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS = 1 << 8;
-        /// Older footnote syntax. This flag implies `ENABLE_FOOTNOTES`, changing it to use an
-        /// older syntax instead of the new, default, GitHub-compatible syntax.
-        ///
-        /// New syntax is different from the old syntax regarding
-        /// indentation, nesting, and footnote references with no definition:
-        ///
-        /// ```markdown
-        /// [^1]: In new syntax, this is two footnote definitions.
-        /// [^2]: In old syntax, this is a single footnote definition with two lines.
-        ///
-        /// [^3]:
-        ///
-        ///     In new syntax, this is a footnote with two paragraphs.
-        ///
-        ///     In old syntax, this is a footnote followed by a code block.
-        ///
-        /// In new syntax, this undefined footnote definition renders as
-        /// literal text [^4]. In old syntax, it creates a dangling link.
-        /// ```
-        const ENABLE_OLD_FOOTNOTES = (1 << 9) | (1 << 2);
         /// With this feature enabled, two events `Event::InlineMath` and `Event::DisplayMath`
         /// are emitted that conventionally contain TeX formulas.
         const ENABLE_MATH = 1 << 10;
         /// Misc GitHub Flavored Markdown features not supported in CommonMark.
-        /// The following features are currently behind this tag:
-        /// - Blockquote tags ([!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]).
         const ENABLE_GFM = 1 << 11;
+        /// GitHub-style blockquote alerts ([!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]).
+        /// Not part of the GFM spec — this is a GitHub-specific feature.
+        const ENABLE_GITHUB_ALERTS = 1 << 21;
         /// Commonmark-HS-Extensions compatible definition lists.
         ///
         /// ```markdown
@@ -823,7 +811,7 @@ bitflags::bitflags! {
         const ENABLE_SUBSCRIPT = 1 << 14;
         /// Obsidian-style Wikilinks.
         const ENABLE_WIKILINKS = 1 << 15;
-        /// Colon-delimited Container Extension Blocks.
+        /// Directives: container (:::), leaf (::), and text (:) directives.
         const ENABLE_CONTAINER_EXTENSIONS = 1 << 16;
         /// MDX: enables JSX elements, expressions, and ESM import/export.
         const ENABLE_MDX = 1 << 17;
@@ -831,10 +819,6 @@ bitflags::bitflags! {
 }
 
 impl Options {
-    pub(crate) fn has_gfm_footnotes(&self) -> bool {
-        self.contains(Options::ENABLE_FOOTNOTES) && !self.contains(Options::ENABLE_OLD_FOOTNOTES)
-    }
-
     pub(crate) fn has_smart_quotes(&self) -> bool {
         self.contains(Options::ENABLE_SMART_PUNCTUATION)
             || self.contains(Options::ENABLE_SMART_QUOTES)
@@ -849,5 +833,4 @@ impl Options {
         self.contains(Options::ENABLE_SMART_PUNCTUATION)
             || self.contains(Options::ENABLE_SMART_ELLIPSES)
     }
-
 }

@@ -19,8 +19,7 @@ pub struct JsSmartPunctuationOptions {
 /// Feature toggles for the Markdown/MDX parser, passed from JavaScript.
 #[napi(object)]
 pub struct JsFeatures {
-    /// GFM: tables, footnotes, strikethrough, task lists, blockquote tags.
-    /// Default: true.
+    /// GFM: tables, footnotes, strikethrough, task lists. Default: true.
     pub gfm: Option<bool>,
     /// Frontmatter: YAML (`--- ... ---`) and TOML (`+++ ... +++`). Default: true.
     pub frontmatter: Option<bool>,
@@ -40,8 +39,6 @@ pub struct JsFeatures {
     pub smart_punctuation: Option<bool>,
     /// Granular smart-punctuation control (overrides `smart_punctuation`).
     pub smart_punctuation_options: Option<JsSmartPunctuationOptions>,
-    /// Definition lists. Default: false.
-    pub definition_list: Option<bool>,
 }
 
 fn features_to_options(features: Option<JsFeatures>, mdx: bool) -> satteri_pulldown_cmark::Options {
@@ -58,7 +55,6 @@ fn features_to_options(features: Option<JsFeatures>, mdx: bool) -> satteri_pulld
         wikilinks: None,
         smart_punctuation: None,
         smart_punctuation_options: None,
-        definition_list: None,
     });
 
     let mut opts = Options::empty();
@@ -77,7 +73,7 @@ fn features_to_options(features: Option<JsFeatures>, mdx: bool) -> satteri_pulld
     if f.math.unwrap_or(true) {
         opts |= Options::ENABLE_MATH;
     }
-    if f.heading_attributes.unwrap_or(true) {
+    if f.heading_attributes.unwrap_or(false) {
         opts |= Options::ENABLE_HEADING_ATTRIBUTES;
     }
     if f.directive.unwrap_or(false) {
@@ -104,9 +100,6 @@ fn features_to_options(features: Option<JsFeatures>, mdx: bool) -> satteri_pulld
         }
     } else if f.smart_punctuation.unwrap_or(false) {
         opts |= Options::ENABLE_SMART_PUNCTUATION;
-    }
-    if f.definition_list.unwrap_or(false) {
-        opts |= Options::ENABLE_DEFINITION_LIST;
     }
     if mdx {
         opts |= Options::ENABLE_MDX;
@@ -223,14 +216,11 @@ pub fn compile_mdx(
 // Direct rendering (no handle needed)
 
 /// Parse Markdown source and return HTML string directly.
-/// Uses pulldown-cmark's streaming renderer, skipping the arena entirely.
 #[napi]
 pub fn parse_to_html(source: String, features: Option<JsFeatures>) -> Result<String> {
     let opts = features_to_options(features, false);
-    let parser = satteri_pulldown_cmark::Parser::new_ext(&source, opts);
-    let mut html = String::with_capacity(source.len());
-    satteri_pulldown_cmark::html::push_html(&mut html, parser);
-    Ok(html)
+    let (arena, _) = satteri_pulldown_cmark::parse(&source, opts);
+    Ok(satteri_ast::mdast_to_html(&arena))
 }
 
 // Handle-based API: arena stays in Rust, no buffer copies to JS

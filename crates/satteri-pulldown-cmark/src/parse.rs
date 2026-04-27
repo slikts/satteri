@@ -37,7 +37,7 @@ use crate::{
     scanners::*,
     strings::CowStr,
     tree::{Tree, TreeIndex},
-    Alignment, BlockQuoteKind, CodeBlockKind, ContainerKind, Event, HeadingLevel, LinkType,
+    Alignment, BlockQuoteKind, CodeBlockKind, DirectiveKind, Event, HeadingLevel, LinkType,
     MetadataBlockKind, Options, Tag, TagEnd,
 };
 
@@ -61,8 +61,8 @@ pub(crate) enum ItemBody {
 
     // repeats, can_open, can_close
     MaybeEmphasis(usize, bool, bool),
-    // can_open, can_close, brace context
-    MaybeMath(bool, bool, u8),
+    // preceded_by_backslash, brace context
+    MaybeMath(bool, u8),
     // quote byte, can_open, can_close
     MaybeSmartQuote(u8, bool, bool),
     MaybeCode(usize, bool), // number of backticks, preceded by backslash
@@ -108,12 +108,15 @@ pub(crate) enum ItemBody {
     Rule,
     Heading(HeadingLevel, Option<HeadingIndex>), // heading level
     FencedCodeBlock(CowIndex),
+    MathBlock(CowIndex), // meta string (info after $$)
     IndentCodeBlock,
-    HtmlBlock,
+    HtmlBlock(bool), // true = type 6/7 (blank-line-terminated)
     BlockQuote(Option<BlockQuoteKind>),
-    Container(u8, ContainerKind, CowIndex), // (fence length, specific renderer, descriptor used in renderer)
-    List(bool, u8, u64),                    // is_tight, list character, list start index
-    ListItem(usize),                        // indent level
+    ContainerDirective(u8, DirectiveIndex), // (fence length, directive data)
+    LeafDirective(DirectiveIndex),
+    TextDirective(DirectiveIndex),
+    List(bool, u8, u64),   // is_tight, list character, list start index
+    ListItem(usize, bool), // indent level, spread (loose item)
     FootnoteDefinition(CowIndex),
     MetadataBlock(MetadataBlockKind),
 
@@ -511,7 +514,8 @@ impl<'input> ParserInner<'input> {
                             let end = start + total_len;
                             let node = scan_nodes_to_ix(&self.tree, self.tree[cur_ix].next, end);
                             let raw = &block_text[start..end];
-                            let jsx_data = crate::mdx::parse_jsx_tag(raw);
+                            let col = crate::mdx::column_at(block_text.as_bytes(), start);
+                            let jsx_data = crate::mdx::parse_jsx_tag_with_column(raw, col);
                             let jsx_ix = self.allocs.allocate_jsx_element(jsx_data);
                             self.tree[cur_ix].item.body = ItemBody::MdxJsxTextElement(jsx_ix);
                             self.tree[cur_ix].item.end = end;
@@ -606,84 +610,80 @@ impl<'input> ParserInner<'input> {
                         backslash_escaped: false,
                     };
                 }
-                ItemBody::MaybeMath(can_open, _can_close, brace_context) => {
-                    if !can_open {
+                ItemBody::MaybeMath(preceded_by_backslash, _brace_context) => {
+                    if preceded_by_backslash {
                         self.tree[cur_ix].item.body = ItemBody::Text {
-                            backslash_escaped: false,
+                            backslash_escaped: true,
                         };
                         prev = cur;
                         cur = self.tree[cur_ix].next;
                         continue;
                     }
-                    let is_display = self.tree[cur_ix].next.is_some_and(|next_ix| {
-                        matches!(
-                            self.tree[next_ix].item.body,
-                            ItemBody::MaybeMath(_can_open, _can_close, _brace_context)
-                        )
-                    });
-                    let result = if self.math_delims.is_populated() {
-                        // we have previously scanned all math environment delimiters,
-                        // so we can reuse that work
-                        self.math_delims
-                            .find(&self.tree, cur_ix, is_display, brace_context)
-                    } else {
-                        // we haven't previously scanned all math delimiters,
-                        // so walk the AST
-                        let mut scan = self.tree[cur_ix].next;
-                        if is_display {
-                            // a display delimiter, `$$`, is actually two delimiters
-                            // skip the second one
-                            scan = self.tree[scan.unwrap()].next;
-                        }
-                        let mut invalid = false;
-                        while let Some(scan_ix) = scan {
-                            if let ItemBody::MaybeMath(_can_open, can_close, delim_brace_context) =
-                                self.tree[scan_ix].item.body
+                    // Count consecutive $ from the opening position
+                    let mut open_count = 1usize;
+                    let mut open_end = cur_ix;
+                    {
+                        let mut peek = self.tree[cur_ix].next;
+                        while let Some(peek_ix) = peek {
+                            if matches!(self.tree[peek_ix].item.body, ItemBody::MaybeMath(..))
+                                && self.tree[peek_ix].item.start == self.tree[open_end].item.end
                             {
-                                let delim_is_display =
-                                    self.tree[scan_ix].next.is_some_and(|next_ix| {
-                                        matches!(
-                                            self.tree[next_ix].item.body,
-                                            ItemBody::MaybeMath(
-                                                _can_open,
-                                                _can_close,
-                                                _brace_context
-                                            )
-                                        )
-                                    });
-                                if !invalid && delim_brace_context == brace_context {
-                                    if (!is_display && can_close)
-                                        || (is_display && delim_is_display)
-                                    {
-                                        // This will skip ahead past everything we
-                                        // just inserted. Needed for correctness to
-                                        // ensure that a new scan is done after this item.
-                                        self.math_delims.clear();
-                                        break;
-                                    } else {
-                                        // Math cannot contain $, so the current item
-                                        // is invalid. Keep scanning to fill math_delims.
-                                        invalid = true;
-                                    }
-                                }
-                                self.math_delims.insert(
-                                    delim_is_display,
-                                    delim_brace_context,
-                                    scan_ix,
-                                    can_close,
-                                );
+                                open_count += 1;
+                                open_end = peek_ix;
+                                peek = self.tree[peek_ix].next;
+                            } else {
+                                break;
                             }
-                            scan = self.tree[scan_ix].next;
                         }
-                        scan
-                    };
+                    }
 
-                    if let Some(scan_ix) = result {
+                    // Scan forward for a matching run of the same count
+                    let mut scan = self.tree[open_end].next;
+                    let mut close_ix = None;
+                    while let Some(scan_ix) = scan {
+                        if matches!(self.tree[scan_ix].item.body, ItemBody::MaybeMath(..)) {
+                            let mut run = 1usize;
+                            let mut run_end = scan_ix;
+                            let mut peek = self.tree[scan_ix].next;
+                            while let Some(peek_ix) = peek {
+                                if matches!(self.tree[peek_ix].item.body, ItemBody::MaybeMath(..))
+                                    && self.tree[peek_ix].item.start == self.tree[run_end].item.end
+                                {
+                                    run += 1;
+                                    run_end = peek_ix;
+                                    peek = self.tree[peek_ix].next;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if run == open_count {
+                                close_ix = Some(scan_ix);
+                                break;
+                            }
+                            // Skip past this non-matching run
+                            scan = self.tree[run_end].next;
+                            continue;
+                        }
+                        scan = self.tree[scan_ix].next;
+                    }
+
+                    if let Some(scan_ix) = close_ix {
                         self.make_math_span(cur_ix, scan_ix);
                     } else {
-                        self.tree[cur_ix].item.body = ItemBody::Text {
-                            backslash_escaped: false,
-                        };
+                        let mut fail_ix = cur_ix;
+                        loop {
+                            self.tree[fail_ix].item.body = ItemBody::Text {
+                                backslash_escaped: false,
+                            };
+                            if fail_ix == open_end {
+                                break;
+                            }
+                            if let Some(next) = self.tree[fail_ix].next {
+                                fail_ix = next;
+                            } else {
+                                break;
+                            }
+                        }
                     }
                 }
                 ItemBody::MaybeCode(mut search_count, preceded_by_backslash) => {
@@ -691,7 +691,7 @@ impl<'input> ParserInner<'input> {
                         search_count -= 1;
                         if search_count == 0 {
                             self.tree[cur_ix].item.body = ItemBody::Text {
-                                backslash_escaped: false,
+                                backslash_escaped: true,
                             };
                             prev = cur;
                             cur = self.tree[cur_ix].next;
@@ -706,7 +706,7 @@ impl<'input> ParserInner<'input> {
                             self.make_code_span(cur_ix, scan_ix, preceded_by_backslash);
                         } else {
                             self.tree[cur_ix].item.body = ItemBody::Text {
-                                backslash_escaped: false,
+                                backslash_escaped: preceded_by_backslash,
                             };
                         }
                     } else {
@@ -733,7 +733,7 @@ impl<'input> ParserInner<'input> {
                         }
                         if scan.is_none() {
                             self.tree[cur_ix].item.body = ItemBody::Text {
-                                backslash_escaped: false,
+                                backslash_escaped: preceded_by_backslash,
                             };
                         }
                     }
@@ -838,6 +838,52 @@ impl<'input> ParserInner<'input> {
                                 self.disable_all_links();
                             }
                         } else {
+                            // Footnote-first check: if the first bracket content is
+                            // `[^X]` where `X` has a matching footnote definition,
+                            // emit a FootnoteReference regardless of what follows.
+                            // Otherwise `[^X][Y]` would be resolved as a link whose
+                            // text happens to start with `^`, which diverges from
+                            // remark-gfm's two-node parse (footnote + trailing ref).
+                            let first_bracket_start = self.tree[tos.node].item.start;
+                            let first_bracket_end = self.tree[cur_ix].item.end;
+                            let first_bracket_text =
+                                &self.text[first_bracket_start..first_bracket_end];
+                            if let Some((_, ReferenceLabel::Footnote(footlabel))) =
+                                scan_link_label(&self.tree, first_bracket_text, self.options)
+                            {
+                                if self.allocs.footdefs.contains(&footlabel) {
+                                    let footref = self.allocs.allocate_cow(footlabel);
+                                    if let Some(def) = self
+                                        .allocs
+                                        .footdefs
+                                        .get_mut(self.allocs.cows[footref.0].to_owned())
+                                    {
+                                        def.use_count += 1;
+                                    }
+                                    let footnote_ix = if tos.ty == LinkStackTy::Image {
+                                        self.tree[tos.node].next = Some(cur_ix);
+                                        self.tree[tos.node].child = None;
+                                        self.tree[tos.node].item.body =
+                                            ItemBody::SynthesizeChar('!');
+                                        self.tree[cur_ix].item.start =
+                                            self.tree[tos.node].item.start + 1;
+                                        self.tree[tos.node].item.end =
+                                            self.tree[tos.node].item.start + 1;
+                                        cur_ix
+                                    } else {
+                                        tos.node
+                                    };
+                                    self.tree[footnote_ix].next = next;
+                                    self.tree[footnote_ix].child = None;
+                                    self.tree[footnote_ix].item.body =
+                                        ItemBody::FootnoteReference(footref);
+                                    self.tree[footnote_ix].item.end = first_bracket_end;
+                                    prev = Some(footnote_ix);
+                                    cur = next;
+                                    self.link_stack.clear();
+                                    continue;
+                                }
+                            }
                             // ok, so its not an inline link. maybe it is a reference
                             // to a defined link?
                             let scan_result =
@@ -871,10 +917,17 @@ impl<'input> ParserInner<'input> {
                                     }
                                     (next_node, LinkType::Collapsed)
                                 }
+                                // [X][^Y] — full-reference form with a footnote-shaped
+                                // second label. Per CommonMark the full-ref has to
+                                // resolve to a link definition, which `^Y` never will;
+                                // shortcut fallback is NOT tried. Leave both brackets
+                                // literal and let `[^Y]` be parsed as a footnote on
+                                // its own MaybeLinkClose iteration.
+                                RefScan::UnexpectedFootnote => continue,
                                 // [shortcut]
                                 //
                                 // [shortcut]: /blah
-                                RefScan::Failed | RefScan::UnexpectedFootnote => {
+                                RefScan::Failed => {
                                     if !could_be_ref {
                                         continue;
                                     }
@@ -923,9 +976,7 @@ impl<'input> ParserInner<'input> {
                                 {
                                     def.use_count += 1;
                                 }
-                                if !self.options.has_gfm_footnotes()
-                                    || self.allocs.footdefs.contains(&self.allocs.cows[footref.0])
-                                {
+                                if self.allocs.footdefs.contains(&self.allocs.cows[footref.0]) {
                                     // If this came from a MaybeImage, then the `!` prefix
                                     // isn't part of the footnote reference.
                                     let footnote_ix = if tos.ty == LinkStackTy::Image {
@@ -1338,7 +1389,7 @@ impl<'input> ParserInner<'input> {
             let c = bytes[i];
 
             if c == close {
-                let cow = if mark == 1 {
+                let cow = if title.is_empty() {
                     (i - start_ix + 1, text[mark..i].into())
                 } else {
                     title.push_str(&text[mark..i]);
@@ -1395,39 +1446,48 @@ impl<'input> ParserInner<'input> {
         None
     }
 
-    fn make_math_span(&mut self, open: TreeIndex, mut close: TreeIndex) {
-        let start_is_display = self.tree[open].next.filter(|&next_ix| {
-            next_ix != close
-                && matches!(
-                    self.tree[next_ix].item.body,
-                    ItemBody::MaybeMath(_can_open, _can_close, _brace_context)
-                )
-        });
-        let end_is_display = self.tree[close].next.filter(|&next_ix| {
-            matches!(
-                self.tree[next_ix].item.body,
-                ItemBody::MaybeMath(_can_open, _can_close, _brace_context)
-            )
-        });
-        let is_display = start_is_display.is_some() && end_is_display.is_some();
-        if is_display {
-            // This unwrap() can't panic, because if the next variable were None, end_is_display would be None
-            close = self.tree[close].next.unwrap();
-            self.tree[open].next = Some(close);
-            self.tree[open].item.end += 1;
-            self.tree[close].item.start -= 1;
-        } else {
-            if self.tree[open].item.end == self.tree[close].item.start {
-                // inline math spans cannot be empty
-                self.tree[open].item.body = ItemBody::Text {
-                    backslash_escaped: false,
-                };
-                return;
+    fn make_math_span(&mut self, open: TreeIndex, close: TreeIndex) {
+        // Find the end of the opening run of consecutive $ tokens
+        let mut open_end = open;
+        {
+            let mut peek = self.tree[open].next;
+            while let Some(peek_ix) = peek {
+                if matches!(self.tree[peek_ix].item.body, ItemBody::MaybeMath(..))
+                    && self.tree[peek_ix].item.start == self.tree[open_end].item.end
+                    && peek_ix != close
+                {
+                    open_end = peek_ix;
+                    peek = self.tree[peek_ix].next;
+                } else {
+                    break;
+                }
             }
-            self.tree[open].next = Some(close);
         }
-        let span_start = self.tree[open].item.end;
+        // Find the end of the closing run
+        let mut close_end = close;
+        {
+            let mut peek = self.tree[close].next;
+            while let Some(peek_ix) = peek {
+                if matches!(self.tree[peek_ix].item.body, ItemBody::MaybeMath(..))
+                    && self.tree[peek_ix].item.start == self.tree[close_end].item.end
+                {
+                    close_end = peek_ix;
+                    peek = self.tree[peek_ix].next;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let span_start = self.tree[open_end].item.end;
         let span_end = self.tree[close].item.start;
+
+        if span_start > span_end {
+            self.tree[open].item.body = ItemBody::Text {
+                backslash_escaped: false,
+            };
+            return;
+        }
 
         let spanned_text = &self.text[span_start..span_end];
         let spanned_bytes = spanned_text.as_bytes();
@@ -1441,53 +1501,6 @@ impl<'input> ParserInner<'input> {
                 ix += 1;
                 let buf = buf.get_or_insert_with(|| String::with_capacity(spanned_bytes.len()));
                 buf.push_str(&spanned_text[start_ix..ix]);
-                ix += skip_container_prefixes(&self.tree, &spanned_bytes[ix..], self.options);
-                start_ix = ix;
-            } else if c == b'\\'
-                && spanned_bytes.get(ix + 1) == Some(&b'|')
-                && self.tree.is_in_table()
-            {
-                let buf = buf.get_or_insert_with(|| String::with_capacity(spanned_bytes.len()));
-                buf.push_str(&spanned_text[start_ix..ix]);
-                buf.push('|');
-                ix += 2;
-                start_ix = ix;
-            } else {
-                ix += 1;
-            }
-        }
-
-        let cow = if let Some(mut buf) = buf {
-            buf.push_str(&spanned_text[start_ix..]);
-            buf.into()
-        } else {
-            spanned_text.into()
-        };
-
-        self.tree[open].item.body = ItemBody::Math(self.allocs.allocate_cow(cow), is_display);
-        self.tree[open].item.end = self.tree[close].item.end;
-        self.tree[open].next = self.tree[close].next;
-    }
-
-    /// Make a code span.
-    ///
-    /// Both `open` and `close` are matching MaybeCode items.
-    fn make_code_span(&mut self, open: TreeIndex, close: TreeIndex, preceding_backslash: bool) {
-        let span_start = self.tree[open].item.end;
-        let span_end = self.tree[close].item.start;
-        let mut buf: Option<String> = None;
-
-        let spanned_text = &self.text[span_start..span_end];
-        let spanned_bytes = spanned_text.as_bytes();
-        let mut start_ix = 0;
-        let mut ix = 0;
-        while ix < spanned_bytes.len() {
-            let c = spanned_bytes[ix];
-            if c == b'\r' || c == b'\n' {
-                let buf = buf.get_or_insert_with(|| String::with_capacity(spanned_bytes.len()));
-                buf.push_str(&spanned_text[start_ix..ix]);
-                buf.push(' ');
-                ix += 1;
                 ix += skip_container_prefixes(&self.tree, &spanned_bytes[ix..], self.options);
                 start_ix = ix;
             } else if c == b'\\'
@@ -1512,9 +1525,82 @@ impl<'input> ParserInner<'input> {
                 spanned_text
             };
             (
-                s.as_bytes().first() == Some(&b' '),
-                s.as_bytes().last() == Some(&b' '),
-                s.bytes().all(|b| b == b' '),
+                matches!(s.as_bytes().first(), Some(b' ' | b'\n')),
+                matches!(s.as_bytes().last(), Some(b' ' | b'\n')),
+                s.bytes().all(|b| b == b' ' || b == b'\n'),
+            )
+        };
+
+        let cow: CowStr<'input> = if !all_spaces && opening && closing {
+            if let Some(mut buf) = buf {
+                if !buf.is_empty() {
+                    buf.remove(0);
+                    buf.pop();
+                }
+                buf.into()
+            } else {
+                spanned_text[1..(spanned_text.len() - 1).max(1)].into()
+            }
+        } else if let Some(buf) = buf {
+            buf.into()
+        } else {
+            spanned_text.into()
+        };
+
+        self.tree[open].item.body = ItemBody::Math(self.allocs.allocate_cow(cow), false);
+        self.tree[open].item.end = self.tree[close_end].item.end;
+        self.tree[open].next = self.tree[close_end].next;
+    }
+
+    /// Make a code span.
+    ///
+    /// Both `open` and `close` are matching MaybeCode items.
+    fn make_code_span(&mut self, open: TreeIndex, close: TreeIndex, preceding_backslash: bool) {
+        let span_start = self.tree[open].item.end;
+        let span_end = self.tree[close].item.start;
+        let mut buf: Option<String> = None;
+
+        let spanned_text = &self.text[span_start..span_end];
+        let spanned_bytes = spanned_text.as_bytes();
+        let mut start_ix = 0;
+        let mut ix = 0;
+        while ix < spanned_bytes.len() {
+            let c = spanned_bytes[ix];
+            if c == b'\r' || c == b'\n' {
+                let buf = buf.get_or_insert_with(|| String::with_capacity(spanned_bytes.len()));
+                buf.push_str(&spanned_text[start_ix..ix]);
+                buf.push('\n');
+                ix += 1;
+                if c == b'\r' && spanned_bytes.get(ix) == Some(&b'\n') {
+                    ix += 1;
+                }
+                ix += skip_container_prefixes(&self.tree, &spanned_bytes[ix..], self.options);
+                start_ix = ix;
+            } else if c == b'\\'
+                && spanned_bytes.get(ix + 1) == Some(&b'|')
+                && self.tree.is_in_table()
+            {
+                let buf = buf.get_or_insert_with(|| String::with_capacity(spanned_bytes.len()));
+                buf.push_str(&spanned_text[start_ix..ix]);
+                buf.push('|');
+                ix += 2;
+                start_ix = ix;
+            } else {
+                ix += 1;
+            }
+        }
+
+        let (opening, closing, all_spaces) = {
+            let s = if let Some(buf) = &mut buf {
+                buf.push_str(&spanned_text[start_ix..]);
+                &buf[..]
+            } else {
+                spanned_text
+            };
+            (
+                matches!(s.as_bytes().first(), Some(b' ' | b'\n')),
+                matches!(s.as_bytes().last(), Some(b' ' | b'\n')),
+                s.bytes().all(|b| b == b' ' || b == b'\n'),
             )
         };
 
@@ -1599,7 +1685,7 @@ pub(crate) fn scan_containers(
                     break;
                 }
             }
-            ItemBody::ListItem(indent) => {
+            ItemBody::ListItem(indent, _) => {
                 let save = line_start.clone();
                 if !line_start.scan_space(indent) && !line_start.is_at_eol() {
                     *line_start = save;
@@ -1613,7 +1699,7 @@ pub(crate) fn scan_containers(
                     break;
                 }
             }
-            ItemBody::FootnoteDefinition(..) if options.has_gfm_footnotes() => {
+            ItemBody::FootnoteDefinition(..) if options.contains(Options::ENABLE_FOOTNOTES) => {
                 let save = line_start.clone();
                 if !line_start.scan_space(4) && !line_start.is_at_eol() {
                     *line_start = save;
@@ -1810,7 +1896,15 @@ impl InlineStack {
             self.truncate(matching_ix);
             Some(matching_el)
         } else {
-            self.set_lowerbound(c, run_length, both, self.stack.len());
+            // For `*`/`_`, the lower-bound optimisation is safe because their
+            // matching rule (CM "rule of three") is monotonic across future
+            // closers with the same count. Tildes/carets match strictly by
+            // equal run-length, so a failure at run-length 2 must not close
+            // the door on a later run-length 1 closer matching an earlier
+            // run-length 1 opener still on the stack.
+            if c != b'~' && c != b'^' {
+                self.set_lowerbound(c, run_length, both, self.stack.len());
+            }
             None
         }
     }
@@ -1872,11 +1966,8 @@ fn scan_link_label<'text>(
         && b'^' == bytes[1]
         && bytes.get(2) != Some(&b']')
     {
-        let linebreak_handler: &dyn Fn(&[u8]) -> Option<usize> = if options.has_gfm_footnotes() {
-            &|_| None
-        } else {
-            &linebreak_handler
-        };
+        // GFM footnote labels don't wrap across line breaks.
+        let linebreak_handler: &dyn Fn(&[u8]) -> Option<usize> = &|_| None;
         if let Some((byte_index, cow)) =
             scan_link_label_rest(&text[2..], linebreak_handler, tree.is_in_table())
         {
@@ -1902,8 +1993,13 @@ fn scan_reference<'b>(
     let tail = &text.as_bytes()[start..];
 
     if tail.starts_with(b"[]") {
-        // TODO: this unwrap is sus and should be looked at closer
-        let closing_node = tree[cur_ix].next.unwrap();
+        // The trailing `]` of the collapsed reference must already exist as a
+        // tree node — pulldown-cmark emits each bracket as its own item, and
+        // we only reach here when `tail` already contains `]`. Defensive
+        // fallback to `Failed` if that invariant is somehow broken.
+        let Some(closing_node) = tree[cur_ix].next else {
+            return RefScan::Failed;
+        };
         RefScan::Collapsed(tree[closing_node].next)
     } else {
         let label = scan_link_label(tree, &text[start..], options);
@@ -2041,50 +2137,6 @@ impl MathDelims {
         }
     }
 
-    fn insert(
-        &mut self,
-        delim_is_display: bool,
-        brace_context: u8,
-        ix: TreeIndex,
-        can_close: bool,
-    ) {
-        self.inner
-            .entry(brace_context)
-            .or_default()
-            .push_back((ix, can_close, delim_is_display));
-    }
-
-    fn is_populated(&self) -> bool {
-        !self.inner.is_empty()
-    }
-
-    fn find(
-        &mut self,
-        tree: &Tree<Item>,
-        open_ix: TreeIndex,
-        is_display: bool,
-        brace_context: u8,
-    ) -> Option<TreeIndex> {
-        while let Some((ix, can_close, delim_is_display)) =
-            self.inner.get_mut(&brace_context)?.pop_front()
-        {
-            if ix <= open_ix || (is_display && tree[open_ix].next == Some(ix)) {
-                continue;
-            }
-            let can_close = can_close && tree[open_ix].item.end != tree[ix].item.start;
-            if (!is_display && can_close) || (is_display && delim_is_display) {
-                return Some(ix);
-            }
-            // if we can't use it, leave it in the queue as a tombstone for the next
-            // thing that tries to match it
-            self.inner
-                .get_mut(&brace_context)?
-                .push_front((ix, can_close, delim_is_display));
-            break;
-        }
-        None
-    }
-
     fn clear(&mut self) {
         self.inner.clear();
     }
@@ -2104,6 +2156,9 @@ pub(crate) struct HeadingIndex(NonZeroUsize);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct JsxElementIndex(usize);
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct DirectiveIndex(usize);
 
 /// A parsed JSX attribute.
 #[derive(Debug, Clone)]
@@ -2147,6 +2202,14 @@ impl<'a> JsxElementData<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DirectiveAttrData<'a> {
+    pub name: CowStr<'a>,
+    pub attributes: Vec<(CowStr<'a>, CowStr<'a>)>,
+    pub label_start: usize,
+    pub label_end: usize,
+}
+
 #[derive(Clone)]
 pub(crate) struct Allocations<'a> {
     pub refdefs: RefDefs<'a>,
@@ -2156,6 +2219,7 @@ pub(crate) struct Allocations<'a> {
     alignments: Vec<Vec<Alignment>>,
     headings: Vec<HeadingAttributes<'a>>,
     jsx_elements: Vec<JsxElementData<'a>>,
+    directives: Vec<DirectiveAttrData<'a>>,
 }
 
 /// Used by the heading attributes extension.
@@ -2213,6 +2277,7 @@ impl<'a> Allocations<'a> {
             alignments: Vec::new(),
             headings: Vec::new(),
             jsx_elements: Vec::new(),
+            directives: Vec::new(),
         }
     }
 
@@ -2266,6 +2331,28 @@ impl<'a> Allocations<'a> {
         let ix = self.jsx_elements.len();
         self.jsx_elements.push(data);
         JsxElementIndex(ix)
+    }
+
+    pub fn allocate_directive(&mut self, data: DirectiveAttrData<'a>) -> DirectiveIndex {
+        let ix = self.directives.len();
+        self.directives.push(data);
+        DirectiveIndex(ix)
+    }
+
+    pub fn take_directive(&mut self, ix: DirectiveIndex) -> DirectiveAttrData<'a> {
+        core::mem::replace(
+            &mut self.directives[ix.0],
+            DirectiveAttrData {
+                name: "".into(),
+                attributes: Vec::new(),
+                label_start: 0,
+                label_end: 0,
+            },
+        )
+    }
+
+    pub fn directive_ref(&self, ix: DirectiveIndex) -> &DirectiveAttrData<'a> {
+        &self.directives[ix.0]
     }
 
     pub fn take_jsx_element(&mut self, ix: JsxElementIndex) -> JsxElementData<'a> {
@@ -2486,15 +2573,19 @@ fn body_to_tag_end(body: &ItemBody) -> TagEnd {
         ItemBody::Link(..) => TagEnd::Link,
         ItemBody::Image(..) => TagEnd::Image,
         ItemBody::Heading(level, _) => TagEnd::Heading(level),
-        ItemBody::IndentCodeBlock | ItemBody::FencedCodeBlock(..) => TagEnd::CodeBlock,
-        ItemBody::Container(_, kind, _) => TagEnd::ContainerBlock(kind),
+        ItemBody::IndentCodeBlock | ItemBody::FencedCodeBlock(..) | ItemBody::MathBlock(..) => {
+            TagEnd::CodeBlock
+        }
+        ItemBody::ContainerDirective(..) => TagEnd::Directive(DirectiveKind::Container),
+        ItemBody::LeafDirective(..) => TagEnd::Directive(DirectiveKind::Leaf),
+        ItemBody::TextDirective(..) => TagEnd::Directive(DirectiveKind::Text),
         ItemBody::BlockQuote(kind) => TagEnd::BlockQuote(kind),
-        ItemBody::HtmlBlock => TagEnd::HtmlBlock,
+        ItemBody::HtmlBlock(_) => TagEnd::HtmlBlock,
         ItemBody::List(_, c, _) => {
             let is_ordered = c == b'.' || c == b')';
             TagEnd::List(is_ordered)
         }
-        ItemBody::ListItem(_) => TagEnd::Item,
+        ItemBody::ListItem(_, _) => TagEnd::Item,
         ItemBody::TableHead => TagEnd::TableHead,
         ItemBody::TableCell => TagEnd::TableCell,
         ItemBody::TableRow => TagEnd::TableRow,
@@ -2516,7 +2607,7 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &mut Allocations<'a>) ->
         ItemBody::Code(cow_ix) => return Event::Code(allocs.take_cow(cow_ix)),
         ItemBody::SynthesizeText(cow_ix) => return Event::Text(allocs.take_cow(cow_ix)),
         ItemBody::SynthesizeChar(c) => return Event::Text(c.into()),
-        ItemBody::HtmlBlock => Tag::HtmlBlock,
+        ItemBody::HtmlBlock(_) => Tag::HtmlBlock,
         ItemBody::Html => return Event::Html(text[item.start..item.end].into()),
         ItemBody::InlineHtml => return Event::InlineHtml(text[item.start..item.end].into()),
         ItemBody::OwnedInlineHtml(cow_ix) => return Event::InlineHtml(allocs.take_cow(cow_ix)),
@@ -2566,11 +2657,28 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &mut Allocations<'a>) ->
             classes: Vec::new(),
             attrs: Vec::new(),
         },
+        ItemBody::MathBlock(cow_ix) => {
+            Tag::CodeBlock(CodeBlockKind::Fenced(allocs.take_cow(cow_ix)))
+        }
         ItemBody::FencedCodeBlock(cow_ix) => {
             Tag::CodeBlock(CodeBlockKind::Fenced(allocs.take_cow(cow_ix)))
         }
         ItemBody::IndentCodeBlock => Tag::CodeBlock(CodeBlockKind::Indented),
-        ItemBody::Container(_, kind, cow_ix) => Tag::ContainerBlock(kind, allocs.take_cow(cow_ix)),
+        ItemBody::ContainerDirective(_, dir_ix)
+        | ItemBody::LeafDirective(dir_ix)
+        | ItemBody::TextDirective(dir_ix) => {
+            let kind = match item.body {
+                ItemBody::ContainerDirective(..) => DirectiveKind::Container,
+                ItemBody::LeafDirective(..) => DirectiveKind::Leaf,
+                _ => DirectiveKind::Text,
+            };
+            let dir = allocs.take_directive(dir_ix);
+            Tag::Directive {
+                kind,
+                name: dir.name,
+                attributes: dir.attributes,
+            }
+        }
         ItemBody::BlockQuote(kind) => Tag::BlockQuote(kind),
         ItemBody::List(is_tight, c, listitem_start) => {
             if c == b'.' || c == b')' {
@@ -2579,7 +2687,7 @@ fn item_to_event<'a>(item: Item, text: &'a str, allocs: &mut Allocations<'a>) ->
                 Tag::List(None, is_tight)
             }
         }
-        ItemBody::ListItem(_) => Tag::Item,
+        ItemBody::ListItem(_, _) => Tag::Item,
         ItemBody::TableHead => Tag::TableHead,
         ItemBody::TableCell => Tag::TableCell,
         ItemBody::TableRow => Tag::TableRow,
@@ -2875,62 +2983,6 @@ mod test {
             .collect();
         let expected_offsets = vec![(0..4), (0..4)];
         assert_eq!(expected_offsets, event_offsets);
-    }
-
-    // FIXME: add this one regression suite
-    #[cfg(feature = "html")]
-    #[test]
-    fn link_def_at_eof() {
-        let test_str = "[My site][world]\n\n[world]: https://vincentprouillet.com";
-        let expected = "<p><a href=\"https://vincentprouillet.com\">My site</a></p>\n";
-
-        let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
-        assert_eq!(expected, buf);
-    }
-
-    #[cfg(feature = "html")]
-    #[test]
-    fn no_footnote_refs_without_option() {
-        let test_str = "a [^a]\n\n[^a]: yolo";
-        let expected = "<p>a <a href=\"yolo\">^a</a></p>\n";
-
-        let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
-        assert_eq!(expected, buf);
-    }
-
-    #[cfg(feature = "html")]
-    #[test]
-    fn ref_def_at_eof() {
-        let test_str = "[test]:\\";
-        let expected = "";
-
-        let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
-        assert_eq!(expected, buf);
-    }
-
-    #[cfg(feature = "html")]
-    #[test]
-    fn ref_def_cr_lf() {
-        let test_str = "[a]: /u\r\n\n[a]";
-        let expected = "<p><a href=\"/u\">a</a></p>\n";
-
-        let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
-        assert_eq!(expected, buf);
-    }
-
-    #[cfg(feature = "html")]
-    #[test]
-    fn no_dest_refdef() {
-        let test_str = "[a]:";
-        let expected = "<p>[a]:</p>\n";
-
-        let mut buf = String::new();
-        crate::html::push_html(&mut buf, Parser::new(test_str));
-        assert_eq!(expected, buf);
     }
 
     #[test]

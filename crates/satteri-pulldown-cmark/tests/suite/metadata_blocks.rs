@@ -12,7 +12,7 @@ another_field: 0
 "##;
     let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -26,7 +26,7 @@ another_field: 0
 another_field: 0</p>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -34,11 +34,9 @@ fn metadata_blocks_test_3() {
     let original = r##"---
 ---
 "##;
-    let expected = r##"<hr>
-<hr>
-"##;
+    let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -49,28 +47,27 @@ title: example
 another_field: 0
 ---
 "##;
-    let expected = r##"<hr>
-<h2>title: example
-another_field: 0</h2>
-"##;
+    let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
 fn metadata_blocks_test_5() {
     let original = r##"My paragraph here.
+
 ---
 title: example
 another_field: 0
 ---
 "##;
-    let expected = r##"<h2>My paragraph here.</h2>
+    let expected = r##"<p>My paragraph here.</p>
+<hr>
 <h2>title: example
 another_field: 0</h2>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -83,9 +80,12 @@ another_field: 0
 ---
 "##;
     let expected = r##"<p>My paragraph here.</p>
+<hr>
+<h2>title: example
+another_field: 0</h2>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -105,7 +105,7 @@ another_field: 0
 another_field: 0</h2>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -126,7 +126,7 @@ another_field: 0
 ---a</p>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -138,7 +138,7 @@ another_field: 0
 "##;
     let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -150,7 +150,7 @@ another_field: 0
 "##;
     let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -165,7 +165,7 @@ Things
 </code></pre>
 "##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }
 
 #[test]
@@ -177,5 +177,5 @@ fn metadata_blocks_test_12() {
 "##;
     let expected = r##""##;
 
-    test_markdown_html(original, expected, false, true, false, false, false, false, false);
+    test_markdown_html(original, expected, 0, false, true, false, false, false, false);
 }

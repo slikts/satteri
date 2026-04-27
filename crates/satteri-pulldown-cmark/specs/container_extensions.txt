@@ -1,170 +1,8 @@
-# Spoiler tests
+# Directive tests (remark-directive compatible)
+# Directives have no standard HTML/HAST representation, so they produce no HTML output.
+# Only non-directive cases (invalid syntax) should produce visible output.
 
-```````````````````````````````` example_container_extensions
-> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this inside?
-> :::
-.
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this inside?</p>
-</details>
-</blockquote>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-:::
-**is this seperate and bold**
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p></blockquote>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this inside?
-> :::
-:::
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this inside?</p>
-</details>
-</blockquote>
-</details>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: spoiler Is this expandable?
-Is this collapsable?
-> Is this **bold**?
-> Is this **bold**?
-> ::: spoiler Is this expandable?
-> Is this collapsable?
-> > Is this **bold**?
-> > Is this **bold**?
-> :::
-:::
-**is this seperate and bold**
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p>
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<blockquote><p>Is this <strong>bold</strong>?
-Is this <strong>bold</strong>?</p></blockquote>
-</details>
-</blockquote>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: spoiler Is this expandable?
-Is this collapsable?
-:::
-**is this seperate and bold**
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-</details>
-<p><strong>is this seperate and bold</strong></p>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-:::spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: example
-Is this collapsable?
-
-Is this **bold**?
-:::
-.
-<div class="example">
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-:::: example
-Is this collapsable?
-
-Is this **bold**?
-::::
-.
-<div class="example">
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-:::::spoiler Is this expandable?
-Is this collapsable?
-
-Is this **bold**?
-:::::
-.
-<details>
-<summary>Is this expandable?</summary>
-<p>Is this collapsable?</p>
-<p>Is this <strong>bold</strong>?</p>
-</details>
-````````````````````````````````
+No name (bare :::) means not a directive:
 
 ```````````````````````````````` example_container_extensions
 :::
@@ -178,71 +16,7 @@ content
 <p>:::</p>
 ````````````````````````````````
 
-```````````````````````````````` example_container_extensions
-::: block
-
-content
-
-::: end
-.
-<div class="block">
-<p>content</p>
-<div class="end">
-</div>
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
- ::: block
-:::
-
-::: block
- :::
-.
-<div class="block">
-</div>
-<div class="block">
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: a
-::: b
-
-:::
-:::
-.
-<div class="a">
-<div class="b">
-</div>
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-:::: a
-::: b
-
-:::
-::::
-.
-<div class="a">
-<div class="b">
-</div>
-</div>
-````````````````````````````````
-
-```````````````````````````````` example_container_extensions
-::: a
-:::: b
-
-::::
-:::
-.
-<div class="a">
-<div class="b">
-</div>
-</div>
-````````````````````````````````
+No name (bare ::: with adjacent text):
 
 ```````````````````````````````` example_container_extensions
 :::
@@ -254,98 +28,212 @@ Hi
 :::</p>
 ````````````````````````````````
 
+Container directive produces no HTML:
+
 ```````````````````````````````` example_container_extensions
-::::: foo
+:::note
+Content here
+:::
+.
+````````````````````````````````
+
+Container with label produces no HTML:
+
+```````````````````````````````` example_container_extensions
+:::note[Title]
+Content
+:::
+.
+````````````````````````````````
+
+Container with attributes produces no HTML:
+
+```````````````````````````````` example_container_extensions
+:::warning{.big}
+Be careful!
+:::
+.
+````````````````````````````````
+
+Nested containers produce no HTML:
+
+```````````````````````````````` example_container_extensions
+::::outer
+:::inner
+Content
+:::
+::::
+.
+````````````````````````````````
+
+Leaf directive produces no HTML:
+
+```````````````````````````````` example_container_extensions
+::video[Title]{src=video.mp4}
+.
+````````````````````````````````
+
+Text directive in paragraph:
+
+```````````````````````````````` example_container_extensions
+A :abbr[HTML]{title="HyperText Markup Language"} example.
+.
+<p>A  example.</p>
+````````````````````````````````
+
+Bare text directive (no label/attrs):
+
+```````````````````````````````` example_container_extensions
+This :smile is text.
+.
+<p>This  is text.</p>
+````````````````````````````````
+
+Emoji-style colon pair is not a directive:
+
+```````````````````````````````` example_container_extensions
+Hello :smile: world
+.
+<p>Hello :smile: world</p>
+````````````````````````````````
+
+Container with multiple paragraphs:
+
+```````````````````````````````` example_container_extensions
+:::note
+Paragraph 1
+
+Paragraph 2
+:::
+.
+````````````````````````````````
+
+Empty container:
+
+```````````````````````````````` example_container_extensions
+:::note
+:::
+.
+````````````````````````````````
+
+Container followed by content (directive itself produces no output):
+
+```````````````````````````````` example_container_extensions
+**bold after**
+:::example
+Content
+:::
+.
+<p><strong>bold after</strong></p>
+````````````````````````````````
+
+Longer fence nesting:
+
+```````````````````````````````` example_container_extensions
+:::::foo
 Hi
 :::
 ::::::
 .
-<div class="foo">
-<p>Hi
-:::</p>
-</div>
 ````````````````````````````````
 
+Container in blockquote:
+
 ```````````````````````````````` example_container_extensions
-> ::: foo
+> :::foo
 > Hi
 .
 <blockquote>
-<div class="foo">
-<p>Hi</p>
-</div>
 </blockquote>
 ````````````````````````````````
 
+Name with underscores:
+
 ```````````````````````````````` example_container_extensions
-::: c_d
+:::c_d
 Hi
 :::
 .
-<div class="c_d">
-<p>Hi</p>
-</div>
 ````````````````````````````````
 
+Container can't be closed from inside blockquote:
+
 ```````````````````````````````` example_container_extensions
-::: container
+:::container
 > shouldn't close, right?
 > :::
 > x
 :::
 .
-<div class="container">
-<blockquote>
-<p>shouldn't close, right?
-:::
-x</p>
-</blockquote>
-</div>
 ````````````````````````````````
 
-```````````````````````````````` example_container_extensions
-::: container
-> shouldn't close, right?
-> :::
-> x
-
-:::
-.
-<div class="container">
-<blockquote>
-<p>shouldn't close, right?
-:::
-x</p>
-</blockquote>
-</div>
-````````````````````````````````
+Nested containers with partial close:
 
 ```````````````````````````````` example_container_extensions
-::: a
-:::: b
-::::: c
+:::a
+::::b
+:::::c
 ::::
 x
 .
-<div class="a">
-<div class="b">
-<div class="c">
-</div>
-</div>
-<p>x</p>
-</div>
 ````````````````````````````````
 
+Closing fence must be on its own line:
+
 ```````````````````````````````` example_container_extensions
-::: a
+:::a
 content :::
 .
-<div class="a"><p>content :::</p></div>
 ````````````````````````````````
 
+Multiple containers:
+
 ```````````````````````````````` example_container_extensions
-:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: a
-content :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+:::a
+:::b
+
+:::
+:::
 .
-<div class="a"><p>content :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::</p></div>
+````````````````````````````````
+
+Longer opening/closing fence:
+
+```````````````````````````````` example_container_extensions
+::::a
+:::b
+
+:::
+::::
+.
+````````````````````````````````
+
+Shorter inner fence:
+
+```````````````````````````````` example_container_extensions
+:::a
+::::b
+
+::::
+:::
+.
+````````````````````````````````
+
+Space between colons and name is not a directive:
+
+```````````````````````````````` example_container_extensions
+::: note
+Hi
+:::
+.
+<p>::: note
+Hi
+:::</p>
+````````````````````````````````
+
+Leaf directive name only:
+
+```````````````````````````````` example_container_extensions
+::break
+.
 ````````````````````````````````
