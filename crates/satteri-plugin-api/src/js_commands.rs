@@ -745,6 +745,10 @@ fn encode_hast_js_node_data(
                             let val_ref = builder.alloc_string(s);
                             props.push((name_ref, PROP_STRING, val_ref));
                         }
+                        serde_json::Value::Number(n) => {
+                            let val_ref = builder.alloc_string(&n.to_string());
+                            props.push((name_ref, PROP_INT, val_ref));
+                        }
                         serde_json::Value::Array(arr) => {
                             let joined: String = arr
                                 .iter()

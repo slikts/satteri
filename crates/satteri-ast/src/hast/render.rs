@@ -14,7 +14,7 @@ use crate::shared::{
 /// Render HTML from an arena.
 pub fn hast_arena_to_html(arena: &Arena) -> String {
     let mut out = String::with_capacity(arena.source().len());
-    render_node(0, arena, &mut out, false);
+    render_node(0, arena, &mut out, false, false);
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
@@ -43,12 +43,16 @@ fn escape_html_attr_value(out: &mut String, value: &str) {
 /// `in_raw_text` indicates the node is being rendered inside a raw-text element
 /// (`<script>` / `<style>`). Per the HTML spec, descendant text of these elements
 /// is not entity-escaped.
-pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bool) {
+///
+/// `in_svg` selects the SVG attribute schema. Set on entry to `<svg>` and
+/// sticky for all descendants — `<foreignObject>` does NOT switch back, matching
+/// `hast-util-to-html`.
+pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bool, in_svg: bool) {
     let node = view.get_node(node_id);
 
     let Some(node_type) = HastNodeType::from_u8(node.node_type) else {
         for &child_id in view.get_children(node_id) {
-            render_node(child_id, view, out, in_raw_text);
+            render_node(child_id, view, out, in_raw_text, in_svg);
         }
         return;
     };
@@ -56,7 +60,7 @@ pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bo
     match node_type {
         HastNodeType::Root => {
             for &child_id in view.get_children(node_id) {
-                render_node(child_id, view, out, in_raw_text);
+                render_node(child_id, view, out, in_raw_text, in_svg);
             }
         }
 
@@ -68,6 +72,10 @@ pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bo
             let tag_ref = decode_element_tag(data);
             let tag = view.get_str(tag_ref);
 
+            // The schema switch covers the <svg> element's own attributes too,
+            // not just its descendants.
+            let element_in_svg = in_svg || tag == "svg";
+
             out.push('<');
             out.push_str(tag);
 
@@ -75,7 +83,7 @@ pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bo
             for i in 0..prop_count {
                 let (name_ref, value_kind, value_ref) = decode_element_prop(data, i);
                 let name = view.get_str(name_ref);
-                let attr_name = property_to_attribute(name);
+                let attr_name = property_to_attribute(name, element_in_svg);
                 match value_kind {
                     PROP_BOOL_TRUE => {
                         out.push(' ');
@@ -100,7 +108,7 @@ pub fn render_node(node_id: u32, view: &Arena, out: &mut String, in_raw_text: bo
                 out.push('>');
                 let child_in_raw_text = in_raw_text || is_raw_text_element(tag);
                 for &child_id in view.get_children(node_id) {
-                    render_node(child_id, view, out, child_in_raw_text);
+                    render_node(child_id, view, out, child_in_raw_text, element_in_svg);
                 }
                 out.push_str("</");
                 out.push_str(tag);

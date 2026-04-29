@@ -345,11 +345,12 @@ fn try_render_static(
     node_id: u32,
     config: &OptimizeStaticConfig,
     out: &mut String,
+    space: Space,
 ) -> bool {
     if !is_static_subtree(view, node_id, config) {
         return false;
     }
-    satteri_ast::hast::render_node(node_id, view, out, false);
+    satteri_ast::hast::render_node(node_id, view, out, false, space == Space::Svg);
     true
 }
 
@@ -437,12 +438,18 @@ fn all<'a>(
             let child_id = context.view.get_children(parent_id)[i];
 
             let mut html_buf = String::new();
-            if try_render_static(context.view, child_id, config, &mut html_buf) {
+            if try_render_static(context.view, child_id, config, &mut html_buf, context.space) {
                 // Accumulate consecutive static siblings
                 i += 1;
                 while i < child_count {
                     let next_id = context.view.get_children(parent_id)[i];
-                    if !try_render_static(context.view, next_id, config, &mut html_buf) {
+                    if !try_render_static(
+                        context.view,
+                        next_id,
+                        config,
+                        &mut html_buf,
+                        context.space,
+                    ) {
                         break;
                     }
                     i += 1;
