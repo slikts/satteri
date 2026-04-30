@@ -118,13 +118,19 @@ export class MdastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: MdastDiagnostic[] = [];
   readonly #handle: MdastHandle;
-  readonly source: string;
+  readonly #getSource: () => string;
   readonly filename: string;
 
-  constructor(handle: MdastHandle, source: string, filename: string) {
+  constructor(handle: MdastHandle, getSource: () => string, filename: string) {
     this.#handle = handle;
-    this.source = source;
+    this.#getSource = getSource;
     this.filename = filename;
+  }
+
+  get source(): string {
+    const value = this.#getSource();
+    Object.defineProperty(this, "source", { value, writable: false, enumerable: true });
+    return value;
   }
 
   removeNode(node: Readonly<MdastNode>): void {
@@ -719,10 +725,11 @@ export function visitMdastHandle(
   handle: MdastHandle,
   plugin: MdastPluginInstance,
   subs: MdastSubscription[],
-  source: string,
+  source: string | (() => string),
   filename: string,
 ): MdastVisitResult | Promise<MdastVisitResult> {
-  const context = new MdastVisitorContext(handle, source, filename);
+  const getSource = typeof source === "function" ? source : () => source;
+  const context = new MdastVisitorContext(handle, getSource, filename);
   const returnBuffer = new CommandBuffer();
   const resolver = new MdastLazyChildResolver(handle);
   const rustSubs = subs.map((s) => ({ nodeType: s.nodeType, tagFilter: [] as string[] }));

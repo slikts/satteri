@@ -340,6 +340,81 @@ fn multiple_patches_applied_together() {
     assert_eq!(rebuilt.len(), 4);
 }
 
+/// Replacement subtree containing a directive child must have the directive's
+/// `name` (and any attribute keys/values) remapped onto the merged source.
+/// Without remapping, the directive's StringRef stays at the sub-arena's local
+/// offset, which collides with the original-source bytes — and if those bytes
+/// are inside a multi-byte codepoint, any later read panics with "byte index N
+/// is not a char boundary". Reproduces the asides + directives-restoration
+/// crash on Hindi MDX (see satteri-arena-panic.md).
+#[test]
+fn replacement_with_directive_child_remaps_string_refs() {
+    use satteri_arena::StringRef;
+    use satteri_ast::mdast::codec::{encode_directive_data, encode_string_ref_data};
+
+    // Multi-byte UTF-8 prefix so that an un-remapped sub-arena offset that
+    // lands inside this region would split a codepoint when sliced.
+    let pad = "अवयव अवयव अवयव अवयव"; // 36 bytes of Devanagari + 4 ASCII spaces
+    let source = format!("{pad}\n");
+    let pad_len = pad.len() as u32;
+
+    let mut b = ArenaBuilder::new(source);
+    b.open_node(MdastNodeType::Root as u8);
+    b.open_node(MdastNodeType::Paragraph as u8);
+    b.open_node(MdastNodeType::Text as u8);
+    b.set_data_current(&encode_string_ref_data(StringRef::new(0, pad_len)));
+    b.close_node();
+    b.close_node();
+    b.close_node();
+    let orig = b.finish();
+
+    let para_id = orig.get_children(0)[0];
+
+    // Replacement: a paragraph whose only child is a textDirective named
+    // "inline" with an attribute pair. The sub-arena's source starts empty,
+    // so each `alloc_string` produces offsets 0, 6, … which — if not remapped
+    // — would alias the multi-byte prefix of the merged source.
+    let mut sub = ArenaBuilder::new(String::new());
+    sub.open_node(MdastNodeType::Paragraph as u8);
+    sub.open_node(MdastNodeType::TextDirective as u8);
+    let name_ref = sub.alloc_string("inline");
+    let key_ref = sub.alloc_string("class");
+    let val_ref = sub.alloc_string("note");
+    sub.set_data_current(&encode_directive_data(
+        name_ref,
+        &[(key_ref, val_ref)],
+    ));
+    sub.close_node();
+    sub.close_node();
+    let replacement = sub.finish();
+
+    let rebuilt = rebuild(
+        &orig,
+        &[Patch::Replace {
+            node_id: para_id,
+            new_tree: replacement,
+            keep_children: false,
+        }],
+    );
+
+    let dir_id = (0..rebuilt.len() as u32)
+        .find(|&id| rebuilt.get_node(id).node_type == MdastNodeType::TextDirective as u8)
+        .expect("textDirective should be present");
+
+    let dir_data = rebuilt.get_type_data(dir_id);
+    let name_sr = StringRef::from_bytes(&dir_data[..8]);
+    let key_sr = StringRef::from_bytes(&dir_data[16..24]);
+    let val_sr = StringRef::from_bytes(&dir_data[24..32]);
+
+    assert!(
+        name_sr.offset >= pad_len && key_sr.offset >= pad_len && val_sr.offset >= pad_len,
+        "directive StringRef offsets must be remapped past the original source",
+    );
+    assert_eq!(rebuilt.get_str(name_sr), "inline");
+    assert_eq!(rebuilt.get_str(key_sr), "class");
+    assert_eq!(rebuilt.get_str(val_sr), "note");
+}
+
 #[test]
 fn parent_references_consistent_after_rebuild() {
     let orig = build_hello_world();

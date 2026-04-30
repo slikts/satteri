@@ -109,13 +109,19 @@ class HastVisitorContextImpl implements HastVisitorContext {
   /** Track accumulated node state for multiple setProperty calls on the same node. */
   readonly #pendingNodes: Map<number, HastNode> = new Map();
   readonly #handle: HastHandle;
-  readonly source: string;
+  readonly #getSource: () => string;
   readonly filename: string;
 
-  constructor(handle: HastHandle, source: string, filename: string) {
+  constructor(handle: HastHandle, getSource: () => string, filename: string) {
     this.#handle = handle;
-    this.source = source;
+    this.#getSource = getSource;
     this.filename = filename;
+  }
+
+  get source(): string {
+    const value = this.#getSource();
+    Object.defineProperty(this, "source", { value, writable: false, enumerable: true });
+    return value;
   }
 
   removeNode(node: HastNode): void {
@@ -741,10 +747,11 @@ export function visitHastHandle(
   handle: HastHandle,
   plugin: HastVisitorInstance,
   subs: ResolvedSubscription[],
-  source: string,
+  source: string | (() => string),
   filename: string,
 ): void | Promise<void> {
-  const ctx = new HastVisitorContextImpl(handle, source, filename);
+  const getSource = typeof source === "function" ? source : () => source;
+  const ctx = new HastVisitorContextImpl(handle, getSource, filename);
   const returnBuffer = new CommandBuffer();
   const resolver = new LazyChildResolver(handle);
   const rustSubs = subs.map((s) => ({ nodeType: s.nodeType, tagFilter: s.tagFilter }));

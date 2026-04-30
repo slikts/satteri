@@ -235,4 +235,47 @@ describe("Directive MDAST conformance", () => {
       assertExtMdastConformance(":::container\n> text\n> :::\n> x\n:::\n", DIR);
     });
   });
+
+  // The character class around a `:` decides whether it begins a text
+  // directive. This matters for downstream slug/anchor generation: a
+  // textDirective's `name` is metadata, not a Text child, so heading slugs
+  // computed from `textContent` will silently truncate when a colon is
+  // (mis)read as starting a directive. A real-world hit was a Japanese
+  // heading where `:GatsbyレイアウトをAstro…` was consumed as a directive
+  // named `GatsbyレイアウトをAstro…`, leaving the slug as just `ガイド付き例`.
+  describe("text directives: colon boundary in headings", () => {
+    test("ASCII colon + CJK id_start consumes rest as directive name", () => {
+      assertExtMdastConformanceNoPosition(
+        "## ガイド付き例:GatsbyレイアウトをAstroへ変換する",
+        DIR,
+      );
+    });
+
+    test("ASCII colon + space leaves colon as plain text", () => {
+      assertExtMdastConformanceNoPosition("## 参考: Astro構文への変換する", DIR);
+    });
+
+    test("full-width colon never triggers directive parsing", () => {
+      assertExtMdastConformanceNoPosition(
+        "### ヒント：JSXファイルでReactコンポーネントを定義する方法",
+        DIR,
+      );
+    });
+
+    test("ASCII colon + latin letter consumes following word as directive", () => {
+      assertExtMdastConformance("## Section:Followed by latin", DIR);
+    });
+
+    test("ASCII colon + ASCII digit is a directive name (digits are name-start)", () => {
+      assertExtMdastConformance("## Colon then digit:1234 next", DIR);
+    });
+
+    test("ASCII colon at end of heading is plain text", () => {
+      assertExtMdastConformance("## Trailing colon:", DIR);
+    });
+
+    test("ASCII colon + non-id punctuation (CJK full stop) leaves colon as text", () => {
+      assertExtMdastConformanceNoPosition("## Punct colon:。後ろ", DIR);
+    });
+  });
 });

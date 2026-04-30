@@ -429,6 +429,18 @@ fn remap_string_refs(data: &mut [u8], node_type: u8, base: u32) {
             }
             return;
         }
+        // Directives (ContainerDirective=30, LeafDirective=31, TextDirective=32):
+        // name(0), attr_count(8..12), then each attr: key at 16+i*16, value at 16+i*16+8.
+        30..=32 if data.len() >= 16 => {
+            remap_one_ref(data, 0, base);
+            let attr_count = u32::from_le_bytes([data[8], data[9], data[10], data[11]]) as usize;
+            for i in 0..attr_count {
+                let attr_base = 16 + i * 16;
+                remap_one_ref(data, attr_base, base); // key
+                remap_one_ref(data, attr_base + 8, base); // value
+            }
+            return;
+        }
         _ => {}
     }
 

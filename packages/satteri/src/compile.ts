@@ -62,7 +62,6 @@ function runMdastPluginsOnHandle(
   filename: string,
 ): MdastPipelineResult | Promise<MdastPipelineResult> {
   let pendingCommands: Uint8Array | null = null;
-  const source = getHandleSource(handle);
 
   let i = 0;
   const runNext = (): MdastPipelineResult | Promise<MdastPipelineResult> => {
@@ -74,7 +73,7 @@ function runMdastPluginsOnHandle(
         handle,
         plugin as MdastPluginInstance,
         subs,
-        source,
+        () => getHandleSource(handle),
         filename,
       );
 
@@ -419,6 +418,7 @@ function createHastHandleFromMdast(
 export function markdownToMdast(source: string, options: { features?: Features } = {}): MdastNode {
   const handle = createMdastHandle(source, featuresToNative(options.features));
   const buf = serializeMdastHandle(handle);
+  dropHandle(handle);
   return materializeMdastTree(new MdastReader(buf));
 }
 
@@ -426,6 +426,7 @@ export function markdownToMdast(source: string, options: { features?: Features }
 export function mdxToMdast(source: string, options: { features?: Features } = {}): MdastNode {
   const handle = createMdxMdastHandle(source, featuresToNative(options.features));
   const buf = serializeMdastHandle(handle);
+  dropHandle(handle);
   return materializeMdastTree(new MdastReader(buf));
 }
 

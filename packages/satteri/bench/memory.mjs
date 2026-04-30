@@ -5,8 +5,8 @@
  */
 import { readFileSync } from "node:fs";
 import {
-  compileMarkdownToHtml,
-  compileMdxToJs,
+  markdownToHtml,
+  mdxToJs,
   defineMdastPlugin,
   defineHastPlugin,
 } from "../dist/index.js";
@@ -147,49 +147,49 @@ const filteredHastMulti = defineHastPlugin({
 });
 
 const scenarios = [
-  ["HTML - pure Rust (no plugins)", () => compileMarkdownToHtml(LARGE_MD)],
-  ["HTML - no plugins", () => compileMarkdownToHtml(LARGE_MD)],
+  ["HTML - pure Rust (no plugins)", () => markdownToHtml(LARGE_MD)],
+  ["HTML - no plugins", () => markdownToHtml(LARGE_MD)],
   [
     "HTML - noop mdast plugin",
-    () => compileMarkdownToHtml(LARGE_MD, { mdastPlugins: [noopMdast] }),
+    () => markdownToHtml(LARGE_MD, { mdastPlugins: [noopMdast] }),
   ],
-  ["HTML - noop hast plugin", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [noopHast] })],
+  ["HTML - noop hast plugin", () => markdownToHtml(LARGE_MD, { hastPlugins: [noopHast] })],
   [
     "HTML - mutating mdast",
-    () => compileMarkdownToHtml(LARGE_MD, { mdastPlugins: [mutatingMdast] }),
+    () => markdownToHtml(LARGE_MD, { mdastPlugins: [mutatingMdast] }),
   ],
   [
     "HTML - mutating hast (bare fn)",
-    () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [mutatingHast] }),
+    () => markdownToHtml(LARGE_MD, { hastPlugins: [mutatingHast] }),
   ],
   [
     "HTML - mutating hast (filter)",
-    () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [mutatingHastFiltered] }),
+    () => markdownToHtml(LARGE_MD, { hastPlugins: [mutatingHastFiltered] }),
   ],
   [
     "HTML - element() if a",
-    () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [unfilteredAOnly] }),
+    () => markdownToHtml(LARGE_MD, { hastPlugins: [unfilteredAOnly] }),
   ],
-  ["HTML - filter: [a]", () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [filteredHast] })],
+  ["HTML - filter: [a]", () => markdownToHtml(LARGE_MD, { hastPlugins: [filteredHast] })],
   [
     "HTML - filtered hast [a,h1-h3]",
-    () => compileMarkdownToHtml(LARGE_MD, { hastPlugins: [filteredHastMulti] }),
+    () => markdownToHtml(LARGE_MD, { hastPlugins: [filteredHastMulti] }),
   ],
   [
     "HTML - both (mutating)",
     () =>
-      compileMarkdownToHtml(LARGE_MD, {
+      markdownToHtml(LARGE_MD, {
         mdastPlugins: [mutatingMdast],
         hastPlugins: [mutatingHast],
       }),
   ],
-  ["MDX  - pure Rust (no plugins)", () => compileMdxToJs(LARGE_MDX)],
-  ["MDX  - no plugins", () => compileMdxToJs(LARGE_MDX)],
-  ["MDX  - noop mdast plugin", () => compileMdxToJs(LARGE_MDX, { mdastPlugins: [noopMdast] })],
-  ["MDX  - noop hast plugin", () => compileMdxToJs(LARGE_MDX, { hastPlugins: [noopHast] })],
+  ["MDX  - pure Rust (no plugins)", () => mdxToJs(LARGE_MDX)],
+  ["MDX  - no plugins", () => mdxToJs(LARGE_MDX)],
+  ["MDX  - noop mdast plugin", () => mdxToJs(LARGE_MDX, { mdastPlugins: [noopMdast] })],
+  ["MDX  - noop hast plugin", () => mdxToJs(LARGE_MDX, { hastPlugins: [noopHast] })],
   [
     "MDX  - both (mutating)",
-    () => compileMdxToJs(LARGE_MDX, { mdastPlugins: [mutatingMdast], hastPlugins: [mutatingHast] }),
+    () => mdxToJs(LARGE_MDX, { mdastPlugins: [mutatingMdast], hastPlugins: [mutatingHast] }),
   ],
 ];
 
