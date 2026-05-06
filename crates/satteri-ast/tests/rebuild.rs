@@ -1028,7 +1028,6 @@ fn node_data_preserved_through_keep_children_replace() {
 
 #[test]
 fn hast_text_round_trip_with_source_base() {
-    use satteri_arena::StringRef;
     use satteri_ast::hast::codec::{decode_text_data, encode_text_data};
 
     // Original HAST: root > element. We replace the element with a Text
