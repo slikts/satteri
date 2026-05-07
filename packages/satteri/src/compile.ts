@@ -4,7 +4,12 @@ import {
   resolveMdastSubscriptions,
   type MdastPluginInstance,
 } from "./mdast/mdast-visitor.js";
-import type { MdastPluginDefinition, HastPluginDefinition } from "./plugin.js";
+import type {
+  MdastPluginDefinition,
+  HastPluginDefinition,
+  MdastPluginInput,
+  HastPluginInput,
+} from "./plugin.js";
 import {
   parseToHtml,
   compileMdx,
@@ -57,7 +62,7 @@ type MdastPipelineResult = { handle: MdastHandle; pendingCommands: Uint8Array | 
 
 function runMdastPluginsOnHandle(
   handle: MdastHandle,
-  plugins: MdastPluginDefinition[],
+  plugins: MdastPluginInput[],
   filename: string,
 ): MdastPipelineResult | Promise<MdastPipelineResult> {
   let pendingCommands: Uint8Array | null = null;
@@ -66,7 +71,8 @@ function runMdastPluginsOnHandle(
   const runNext = (): MdastPipelineResult | Promise<MdastPipelineResult> => {
     while (i < plugins.length) {
       const idx = i++;
-      const plugin = plugins[idx]!;
+      const raw = plugins[idx]!;
+      const plugin: MdastPluginDefinition = typeof raw === "function" ? raw() : raw;
       const subs = resolveMdastSubscriptions(plugin as MdastPluginInstance);
       const result = visitMdastHandle(
         handle,
@@ -108,7 +114,7 @@ function runMdastPluginsOnHandle(
 
 function runHastPluginsOnHandle(
   handle: HastHandle,
-  plugins: HastPluginDefinition[],
+  plugins: HastPluginInput[],
   source: string,
   filename: string,
 ): void | Promise<void> {
@@ -117,8 +123,9 @@ function runHastPluginsOnHandle(
   let i = 0;
   const runNext = (): void | Promise<void> => {
     while (i < plugins.length) {
-      const plugin = plugins[i]!;
+      const raw = plugins[i]!;
       i++;
+      const plugin: HastPluginDefinition = typeof raw === "function" ? raw() : raw;
 
       const subs = resolveSubscriptions(plugin);
       const result = visitHastHandle(handle, plugin, subs, source, filename);
@@ -220,8 +227,8 @@ export interface Features {
 }
 
 export interface CompileOptions {
-  mdastPlugins?: MdastPluginDefinition[];
-  hastPlugins?: HastPluginDefinition[];
+  mdastPlugins?: MdastPluginInput[];
+  hastPlugins?: HastPluginInput[];
   features?: Features;
   filename?: string;
 }
@@ -381,7 +388,7 @@ export function evaluate(
 /** Parse + mdast plugins + convert to HAST handle. */
 function createHastHandleFromMdast(
   source: string,
-  mdastPlugins: MdastPluginDefinition[],
+  mdastPlugins: MdastPluginInput[],
   mdx: boolean,
   filename: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

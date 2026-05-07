@@ -1,0 +1,61 @@
+{
+  "name": "satteri-expressive-code",
+  "version": "0.1.0",
+  "description": "Sätteri HAST plugin for Expressive Code",
+  "keywords": [
+    "code-blocks",
+    "documentation",
+    "expressive-code",
+    "satteri",
+    "shiki",
+    "syntax-highlighting"
+  ],
+  "license": "MIT",
+  "author": "Bruits",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bruits/satteri.git",
+    "directory": "packages/satteri-expressive-code"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "hast": [
+        "dist/hast.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./hast": {
+      "types": "./dist/hast.d.ts",
+      "default": "./dist/hast.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "dev": "tsc --watch --project tsconfig.build.json",
+    "test": "vitest run",
+    "test-watch": "vitest"
+  },
+  "dependencies": {
+    "expressive-code": "^0.42.0"
+  },
+  "devDependencies": {
+    "satteri": "workspace:*",
+    "shiki": "^3.2.2",
+    "vitest": "^4"
+  },
+  "peerDependencies": {
+    "satteri": ">=0.2.0"
+  }
+}

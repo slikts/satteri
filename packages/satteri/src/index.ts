@@ -19,7 +19,12 @@ export type {
 
 // Plugin definitions
 export { defineMdastPlugin, defineHastPlugin } from "./plugin.js";
-export type { MdastPluginDefinition, HastPluginDefinition } from "./plugin.js";
+export type {
+  MdastPluginDefinition,
+  HastPluginDefinition,
+  MdastPluginInput,
+  HastPluginInput,
+} from "./plugin.js";
 
 // Visitor types (for plugin authors)
 export type {

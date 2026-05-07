@@ -281,6 +281,82 @@ describe("markdownToHtml", () => {
     expect(html).toContain("<h2");
     expect(html).toContain('data-origin="demoted-from-h1"');
   });
+
+  test("HAST plugin factory shape: invoked per document, closure state resets", () => {
+    let factoryCalls = 0;
+    const makePlugin = () => {
+      factoryCalls++;
+      let firstHeading = true;
+      return defineHastPlugin({
+        name: "tag-first-heading",
+        element: {
+          filter: ["h1"],
+          visit(node, ctx) {
+            ctx.setProperty(node, "data-first", firstHeading ? "yes" : "no");
+            firstHeading = false;
+          },
+        },
+      });
+    };
+
+    const docA = markdownToHtml("# A1\n\n# A2", { hastPlugins: [makePlugin] });
+    const docB = markdownToHtml("# B1\n\n# B2", { hastPlugins: [makePlugin] });
+
+    expect(factoryCalls).toBe(2);
+    expect(docA).toContain('data-first="yes"');
+    expect(docA).toContain('data-first="no"');
+    expect(docB).toContain('data-first="yes"');
+    expect(docB).toContain('data-first="no"');
+  });
+
+  test("HAST plugins: object and factory shapes can be mixed in one array", () => {
+    const addBaseClass = defineHastPlugin({
+      name: "base",
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.setProperty(node, "class", "base");
+        },
+      },
+    });
+
+    const addOrderAttr = () => {
+      let i = 0;
+      return defineHastPlugin({
+        name: "order",
+        element: {
+          filter: ["h1"],
+          visit(node, ctx) {
+            ctx.setProperty(node, "data-order", String(i++));
+          },
+        },
+      });
+    };
+
+    const html = markdownToHtml("# One\n\n# Two", {
+      hastPlugins: [addBaseClass, addOrderAttr],
+    });
+    expect(html).toContain('class="base"');
+    expect(html).toContain('data-order="0"');
+    expect(html).toContain('data-order="1"');
+  });
+
+  test("MDAST plugin factory shape: invoked per document", () => {
+    let factoryCalls = 0;
+    const makePlugin = () => {
+      factoryCalls++;
+      return defineMdastPlugin({
+        name: "noop-mdast-factory",
+        heading() {
+          // observe only
+        },
+      });
+    };
+
+    markdownToHtml("# A", { mdastPlugins: [makePlugin] });
+    markdownToHtml("# B", { mdastPlugins: [makePlugin] });
+    expect(factoryCalls).toBe(2);
+  });
 });
 
 // mdxToJs
