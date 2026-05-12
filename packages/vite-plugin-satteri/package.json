@@ -37,6 +37,7 @@
     "test-watch": "vitest"
   },
   "dependencies": {
+    "smol-toml": "^1.6.1",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

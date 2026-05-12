@@ -128,6 +128,22 @@ tags:
       expect(code).toContain("<h1>Body</h1>");
     });
 
+    test("parses TOML frontmatter into the frontmatter export", async () => {
+      const plugin = makePlugin();
+      const source = `+++
+title = "Hello world"
+draft = false
+tags = ["one", "two"]
++++
+
+# Body`;
+      const code = await compile(plugin, source, "/src/x.md");
+      expect(code).toContain(
+        'export const frontmatter = {"title":"Hello world","draft":false,"tags":["one","two"]};',
+      );
+      expect(code).toContain("<h1>Body</h1>");
+    });
+
     test("frontmatter export is empty when frontmatter feature is disabled", async () => {
       const plugin = makePlugin({ features: { frontmatter: false } });
       const source = "---\ntitle: Hello\n---\n# Body";

@@ -10,6 +10,7 @@ import type {
   MdxOnlyOptions,
 } from "satteri";
 import { parse as parseYaml } from "yaml";
+import { parse as parseToml } from "smol-toml";
 
 /**
  * MDX-specific compile options.
@@ -49,6 +50,7 @@ const MDX_RE = /\.mdx(?:\?|$)/;
 function parseFrontmatter(fm: Frontmatter | null): unknown {
   if (!fm) return {};
   if (fm.kind === "yaml") return parseYaml(fm.value) ?? {};
+  if (fm.kind === "toml") return parseToml(fm.value);
   return {};
 }
 

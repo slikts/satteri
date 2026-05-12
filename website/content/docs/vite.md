@@ -6,8 +6,8 @@ order: 20
 
 `vite-plugin-satteri` lets you `import` Markdown and MDX files
 directly in a Vite project. `.md` imports give you the rendered HTML;
-`.mdx` imports give you a JSX component. Frontmatter comes through as
-a named export either way.
+`.mdx` imports give you a JSX component. YAML or TOML frontmatter
+comes through parsed as a named export either way.
 
 ## Install
 
@@ -41,7 +41,7 @@ now importable.
 ## Importing Markdown
 
 A `.md` import gives you the rendered HTML as a string plus any parsed
-frontmatter:
+frontmatter (YAML between `---` fences, or TOML between `+++` fences):
 
 ```js
 import postHtml, { frontmatter } from "./post.md";
@@ -105,9 +105,9 @@ Plugins given here apply to every Markdown and MDX file. See the
 
 ## TypeScript
 
-Vite doesn't know what a `.md` or `.mdx` import resolves to. Add a
-declaration file (e.g. `src/satteri-modules.d.ts`) so TypeScript stops
-complaining:
+TypeScript does not know by default what a `.md` or `.mdx` import resolves to.
+
+Add a declaration file (e.g. `src/satteri-modules.d.ts`) in order to teach TypeScript:
 
 ```js
 declare module "*.md" {
@@ -125,5 +125,4 @@ declare module "*.mdx" {
 }
 ```
 
-Swap `preact` for `react` (or your framework of choice) to match your
-`jsxImportSource`.
+Swap `preact` for `react` (or your framework of choice) to match your `jsxImportSource`.

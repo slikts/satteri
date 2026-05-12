@@ -142,6 +142,9 @@ importers:
 
   packages/vite-plugin-satteri:
     dependencies:
+      smol-toml:
+        specifier: ^1.6.1
+        version: 1.6.1
       yaml:
         specifier: ^2.6.0
         version: 2.8.3
