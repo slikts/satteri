@@ -510,6 +510,35 @@ describe("mdxToJs", () => {
     expect(js).not.toContain("bar");
   });
 
+  // Mirrors `_mdxExplicitJsx` in @mdx-js/mdx: source-parsed JSX stays literal,
+  // plugin-inserted JSX routes through `_components` so users can override it.
+  test("plugin-inserted mdxJsx with hyphenated name routes through _components", () => {
+    const insertAstroImage = defineHastPlugin({
+      name: "insert-astro-image",
+      element: [
+        {
+          filter: ["h1"],
+          visit(node, ctx) {
+            ctx.insertAfter(node, {
+              type: "mdxJsxFlowElement",
+              name: "astro-image",
+              attributes: [{ type: "mdxJsxAttribute", name: "src", value: "pic.png" }],
+              children: [],
+            } as unknown as HastNode);
+          },
+        },
+      ],
+    });
+
+    const sourceWritten = mdxToJs('<astro-image src="x" />\n').code;
+    expect(sourceWritten).toContain('_jsx("astro-image"');
+    expect(sourceWritten).not.toContain('_components["astro-image"]');
+
+    const pluginInserted = mdxToJs("# hi\n", { hastPlugins: [insertAstroImage] }).code;
+    expect(pluginInserted).toContain('"astro-image": "astro-image"');
+    expect(pluginInserted).toContain('_components["astro-image"]');
+  });
+
   test("HAST plugin setProperty on MDX JSX element preserves existing attributes", () => {
     const injectMeta = defineHastPlugin({
       name: "inject-meta",

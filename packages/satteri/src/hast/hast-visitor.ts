@@ -558,6 +558,7 @@ function readMdxJsxFromBinary(
     Record<string, unknown>;
   nodeIdMap.set(node as object, nodeId);
   makeLazyChildren(node, childIds, resolver);
+  resolver.attachLazyData(node as unknown as Record<string, unknown>, nodeId);
   return node;
 }
 
@@ -612,26 +613,30 @@ class LazyChildResolver {
 
   materializeChildren(childIds: number[]): HastNode[] {
     const reader = this.#ensure();
-    const handle = this.#handle;
     return childIds.map((id) => {
       const node = materializeHastNode(reader, id);
-      // Override data with a lazy getter backed by the Rust arena's node_data.
-      Object.defineProperty(node, "data", {
-        get() {
-          const json = napiGetNodeData(handle, id);
-          const val = json ? (JSON.parse(json) as Record<string, unknown>) : null;
-          Object.defineProperty(this, "data", {
-            value: val,
-            writable: true,
-            enumerable: true,
-            configurable: true,
-          });
-          return val;
-        },
-        configurable: true,
-        enumerable: true,
-      });
+      this.attachLazyData(node as unknown as Record<string, unknown>, id);
       return node;
+    });
+  }
+
+  /** Attach a lazy `data` getter backed by the Rust arena's node_data. */
+  attachLazyData(node: Record<string, unknown>, nodeId: number): void {
+    const handle = this.#handle;
+    Object.defineProperty(node, "data", {
+      get() {
+        const json = napiGetNodeData(handle, nodeId);
+        const val = json ? (JSON.parse(json) as Record<string, unknown>) : null;
+        Object.defineProperty(this, "data", {
+          value: val,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+        return val;
+      },
+      configurable: true,
+      enumerable: true,
     });
   }
 }

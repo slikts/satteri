@@ -732,6 +732,7 @@ fn mdx_jsx_element_string_refs_round_trip() {
         sub.set_data_current(&encode_mdx_jsx_element_data(
             name,
             &[(1, a1_name, a1_value), (0, a2_name, a2_value)],
+            true,
         ));
     });
 

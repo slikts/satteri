@@ -10,7 +10,8 @@ use crate::mdast::{
     decode_footnote_definition_data, decode_heading_data, decode_image_data,
     decode_image_reference_alt, decode_link_data, decode_list_data, decode_list_item_data,
     decode_math_data, decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name,
-    decode_reference_data, decode_table_alignments, encode_mdx_jsx_element_data, ColumnAlign,
+    decode_mdx_jsx_explicit, decode_reference_data, decode_table_alignments,
+    encode_mdx_jsx_element_data, ColumnAlign,
     ListItemData, MdastNodeType,
 };
 use crate::shared::{PROP_BOOL_FALSE, PROP_BOOL_TRUE, PROP_INT, PROP_SPACE_SEP, PROP_STRING};
@@ -1951,6 +1952,7 @@ fn convert_mdx_jsx_element(
     } else {
         0
     };
+    let explicit_jsx = decode_mdx_jsx_explicit(mdast_data);
     let mut attr_tuples = Vec::with_capacity(attr_count as usize);
     for i in 0..attr_count {
         let (kind, attr_name_ref, attr_value_ref) = decode_mdx_jsx_attr(mdast_data, i);
@@ -1958,8 +1960,17 @@ fn convert_mdx_jsx_element(
     }
 
     builder.open_node_raw(hast_type);
-    let encoded = encode_mdx_jsx_element_data(name_ref, &attr_tuples);
+    let encoded = encode_mdx_jsx_element_data(name_ref, &attr_tuples, explicit_jsx);
     builder.set_data_current(&encoded);
+    // Propagate `node_data` (e.g. `_mdxExplicitJsx` for source-parsed nodes,
+    // or any other plugin-attached metadata) from mdast to hast.
+    if let Some(mdast_nd) = view.get_node_data(node_id) {
+        if !mdast_nd.is_empty() {
+            let id = builder.current_node_id();
+            let copy = mdast_nd.to_vec();
+            builder.arena_mut().set_node_data(id, copy);
+        }
+    }
     copy_position(node_id, view, builder);
 
     convert_children(node_id, view, builder, ctx);

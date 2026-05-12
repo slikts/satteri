@@ -31,6 +31,7 @@ use satteri_ast::hast::codec::{
 };
 use satteri_ast::mdast::codec::{
     decode_mdx_jsx_attr, decode_mdx_jsx_attr_count, decode_mdx_jsx_element_name,
+    decode_mdx_jsx_explicit,
 };
 use satteri_ast::shared::{
     MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
@@ -698,8 +699,12 @@ fn transform_mdx_jsx_element<'a>(
     }
 
     let span = node_span(context.view, node_id);
+    // Fast-path mirror of `node.data._mdxExplicitJsx`; see codec.rs.
+    let explicit_jsx = decode_mdx_jsx_explicit(data);
     Ok(Some(if let Some(n) = name {
-        explicit_jsxs.insert(span);
+        if explicit_jsx {
+            explicit_jsxs.insert(span);
+        }
         JSXChild::Element(OxcBox::new_in(
             create_element(alloc, n, attrs, children, span),
             alloc,

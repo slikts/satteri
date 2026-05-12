@@ -353,19 +353,35 @@ export function markdownToHtml(
     nativeFeatures,
   );
 
-  const render = (h: HastHandle, frontmatter: Frontmatter | null): MarkdownToHtmlResult => {
-    const html = renderHandle(h);
-    dropHandle(h);
-    return { html, frontmatter };
+  const renderAndDrop = (h: HastHandle, frontmatter: Frontmatter | null): MarkdownToHtmlResult => {
+    try {
+      const html = renderHandle(h);
+      return { html, frontmatter };
+    } finally {
+      dropHandle(h);
+    }
   };
 
   const runHastThenRender = (
     r: HastWithFrontmatter,
   ): MarkdownToHtmlResult | Promise<MarkdownToHtmlResult> => {
-    const hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, filename);
-    if (hastResult instanceof Promise)
-      return hastResult.then(() => render(r.hastHandle, r.frontmatter));
-    return render(r.hastHandle, r.frontmatter);
+    let hastResult: void | Promise<void>;
+    try {
+      hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, filename);
+    } catch (err) {
+      dropHandle(r.hastHandle);
+      throw err;
+    }
+    if (hastResult instanceof Promise) {
+      return hastResult.then(
+        () => renderAndDrop(r.hastHandle, r.frontmatter),
+        (err) => {
+          dropHandle(r.hastHandle);
+          throw err;
+        },
+      );
+    }
+    return renderAndDrop(r.hastHandle, r.frontmatter);
   };
 
   if (result instanceof Promise) return result.then(runHastThenRender);
@@ -398,19 +414,35 @@ export function mdxToJs(
     nativeFeatures,
   );
 
-  const compile = (h: HastHandle, frontmatter: Frontmatter | null): MdxToJsResult => {
-    const code = compileHandle(h, mdxOptions);
-    dropHandle(h);
-    return { code, frontmatter };
+  const compileAndDrop = (h: HastHandle, frontmatter: Frontmatter | null): MdxToJsResult => {
+    try {
+      const code = compileHandle(h, mdxOptions);
+      return { code, frontmatter };
+    } finally {
+      dropHandle(h);
+    }
   };
 
   const runHastThenCompile = (
     r: HastWithFrontmatter,
   ): MdxToJsResult | Promise<MdxToJsResult> => {
-    const hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, filename);
-    if (hastResult instanceof Promise)
-      return hastResult.then(() => compile(r.hastHandle, r.frontmatter));
-    return compile(r.hastHandle, r.frontmatter);
+    let hastResult: void | Promise<void>;
+    try {
+      hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, filename);
+    } catch (err) {
+      dropHandle(r.hastHandle);
+      throw err;
+    }
+    if (hastResult instanceof Promise) {
+      return hastResult.then(
+        () => compileAndDrop(r.hastHandle, r.frontmatter),
+        (err) => {
+          dropHandle(r.hastHandle);
+          throw err;
+        },
+      );
+    }
+    return compileAndDrop(r.hastHandle, r.frontmatter);
   };
 
   if (result instanceof Promise) return result.then(runHastThenCompile);
@@ -481,27 +513,39 @@ function createHastHandleFromMdast(
     ? createMdxMdastHandle(source, nativeFeatures)
     : createMdastHandle(source, nativeFeatures);
 
-  if (mdastPlugins.length === 0) {
-    const frontmatter = readFrontmatter(mdastHandle);
-    const hastHandle = convertMdastToHastHandle(mdastHandle);
-    return { hastHandle, frontmatter };
-  }
-
-  const mdastResult = runMdastPluginsOnHandle(mdastHandle, mdastPlugins, filename);
-
-  // Splits the previous fused apply+convert call so we can read frontmatter
-  // off the mutated MDAST handle before the conversion consumes it.
+  // finally{drop} is intentional: convertMdastToHastHandle empties the arena
+  // on success, but if any step here throws the handle would otherwise leak.
   const finalize = (r: MdastPipelineResult): HastWithFrontmatter => {
-    if (r.pendingCommands) {
-      applyCommandsToMdastHandle(r.handle, r.pendingCommands);
+    try {
+      if (r.pendingCommands) {
+        applyCommandsToMdastHandle(r.handle, r.pendingCommands);
+      }
+      const frontmatter = readFrontmatter(r.handle);
+      const hastHandle = convertMdastToHastHandle(r.handle);
+      return { hastHandle, frontmatter };
+    } finally {
+      dropHandle(r.handle);
     }
-    const frontmatter = readFrontmatter(r.handle);
-    const hastHandle = convertMdastToHastHandle(r.handle);
-    return { hastHandle, frontmatter };
   };
 
-  if (mdastResult instanceof Promise) return mdastResult.then(finalize);
-  return finalize(mdastResult);
+  try {
+    if (mdastPlugins.length === 0) {
+      return finalize({ handle: mdastHandle, pendingCommands: null });
+    }
+
+    const mdastResult = runMdastPluginsOnHandle(mdastHandle, mdastPlugins, filename);
+
+    if (mdastResult instanceof Promise) {
+      return mdastResult.then(finalize, (err) => {
+        dropHandle(mdastHandle);
+        throw err;
+      });
+    }
+    return finalize(mdastResult);
+  } catch (err) {
+    dropHandle(mdastHandle);
+    throw err;
+  }
 }
 
 // Step-by-step API: individual pipeline stages with materialized trees
@@ -509,31 +553,39 @@ function createHastHandleFromMdast(
 /** Parse Markdown source into a materialized mdast tree. */
 export function markdownToMdast(source: string, options: { features?: Features } = {}): MdastNode {
   const handle = createMdastHandle(source, featuresToNative(options.features));
-  const buf = serializeHandle(handle);
-  dropHandle(handle);
-  return materializeMdastTree(new MdastReader(buf));
+  try {
+    return materializeMdastTree(new MdastReader(serializeHandle(handle)));
+  } finally {
+    dropHandle(handle);
+  }
 }
 
 /** Parse MDX source into a materialized mdast tree. */
 export function mdxToMdast(source: string, options: { features?: Features } = {}): MdastNode {
   const handle = createMdxMdastHandle(source, featuresToNative(options.features));
-  const buf = serializeHandle(handle);
-  dropHandle(handle);
-  return materializeMdastTree(new MdastReader(buf));
+  try {
+    return materializeMdastTree(new MdastReader(serializeHandle(handle)));
+  } finally {
+    dropHandle(handle);
+  }
 }
 
 /** Convert Markdown source to a materialized hast tree. */
 export function markdownToHast(source: string, options: { features?: Features } = {}): HastNode {
   const handle = createHastHandle(source, featuresToNative(options.features));
-  const buf = serializeHandle(handle);
-  dropHandle(handle);
-  return materializeHastTree(new HastReader(buf));
+  try {
+    return materializeHastTree(new HastReader(serializeHandle(handle)));
+  } finally {
+    dropHandle(handle);
+  }
 }
 
 /** Convert MDX source to a materialized hast tree. */
 export function mdxToHast(source: string, options: { features?: Features } = {}): HastNode {
   const handle = createMdxHastHandle(source, featuresToNative(options.features));
-  const buf = serializeHandle(handle);
-  dropHandle(handle);
-  return materializeHastTree(new HastReader(buf));
+  try {
+    return materializeHastTree(new HastReader(serializeHandle(handle)));
+  } finally {
+    dropHandle(handle);
+  }
 }

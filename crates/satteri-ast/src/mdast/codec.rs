@@ -325,9 +325,16 @@ pub fn decode_directive_attr(bytes: &[u8], index: u32) -> (StringRef, StringRef)
 /// `name.len == 0` means a fragment.
 ///
 /// Full layout (variable-length):
-///   [name: StringRef(8B)][attr_count: u32(4B)][_pad: u32(4B)] = 16-byte header
+///   [name: StringRef(8B)][attr_count: u32(4B)][explicit_jsx: u8(1B)][_pad: [u8;3](3B)] = 16-byte header
 ///   then attr_count * 20 bytes each:
 ///     [kind: u8(1B)][_pad: [u8;3](3B)][attr_name: StringRef(8B)][attr_value: StringRef(8B)]
+///
+/// `explicit_jsx` mirrors `_mdxExplicitJsx` from `@mdx-js/mdx`. It's a fast
+/// read path for the hast→recma transform — the same bit is *also* mirrored
+/// into the node's `data` blob (`{"_mdxExplicitJsx":true}`) so plugins can
+/// read/write it as `node.data._mdxExplicitJsx`. The JSON side is the
+/// plugin-visible source of truth; this byte exists so the transform
+/// doesn't have to parse JSON per node.
 ///
 /// Attribute kinds (from jsx_attr_parser):
 ///   0 = BooleanProp (name only, no value)
@@ -510,13 +517,14 @@ pub fn encode_footnote_definition_data(identifier: StringRef, label: StringRef) 
 pub fn encode_mdx_jsx_element_data(
     name: StringRef,
     attrs: &[(u8, StringRef, StringRef)],
+    explicit_jsx: bool,
 ) -> Vec<u8> {
     let mut out = Vec::with_capacity(16 + attrs.len() * 20);
 
-    // 16-byte header: name(8) + attr_count(4) + _pad(4)
     out.extend_from_slice(&name.as_bytes());
     out.extend_from_slice(&(attrs.len() as u32).to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes()); // _pad
+    out.push(if explicit_jsx { 1 } else { 0 });
+    out.extend_from_slice(&[0u8; 3]);
 
     // Attribute entries: 20 bytes each
     for &(kind, attr_name, attr_value) in attrs {
@@ -536,6 +544,12 @@ pub fn decode_mdx_jsx_element_name(bytes: &[u8]) -> StringRef {
 pub fn decode_mdx_jsx_attr_count(bytes: &[u8]) -> u32 {
     assert!(bytes.len() >= 12);
     u32::from_le_bytes(bytes[8..12].try_into().unwrap())
+}
+
+/// Whether the JSX element was authored in MDX source (mirrors
+/// `_mdxExplicitJsx` in `node.data`). Defaults to `false` on short buffers.
+pub fn decode_mdx_jsx_explicit(bytes: &[u8]) -> bool {
+    bytes.get(12).is_some_and(|&b| b != 0)
 }
 
 pub fn decode_mdx_jsx_attr(bytes: &[u8], index: u32) -> (u8, StringRef, StringRef) {

@@ -131,6 +131,17 @@ impl<'a> BufReader<'a> {
     }
 }
 
+/// Whether a plugin-supplied `data` blob carries the `_mdxExplicitJsx: true`
+/// marker — used to set the matching fast-path bit in `MdxJsxElementData`.
+fn js_data_is_mdx_explicit(
+    data: &Option<serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    data.as_ref()
+        .and_then(|m| m.get("_mdxExplicitJsx"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// `data` JSON blob is stored in the per-node `node_data` map; it doesn't
 /// dispatch on node-type bytes, so it's safe under any kind.
 fn apply_data_property<K: ArenaKind>(
@@ -551,7 +562,8 @@ fn encode_js_node_data(
                 builder,
                 js_node.attributes.as_ref().and_then(|a| a.as_jsx()),
             );
-            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
+            let explicit = js_data_is_mdx_explicit(&js_node.data);
+            encode_mdx_jsx_element_data(name_ref, &attr_tuples, explicit)
         }
         MdastNodeType::ContainerDirective
         | MdastNodeType::LeafDirective
@@ -875,7 +887,8 @@ fn encode_hast_js_node_data(
                 builder,
                 js_node.attributes.as_ref().and_then(|a| a.as_jsx()),
             );
-            encode_mdx_jsx_element_data(name_ref, &attr_tuples)
+            let explicit = js_data_is_mdx_explicit(&js_node.data);
+            encode_mdx_jsx_element_data(name_ref, &attr_tuples, explicit)
         }
 
         HastNodeType::MdxFlowExpression

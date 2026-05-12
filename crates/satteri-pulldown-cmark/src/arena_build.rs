@@ -15,6 +15,11 @@ use satteri_ast::shared::{
 use crate::parse::{DefaultParserCallbacks, ItemBody, JsxAttr, ParserInner};
 use crate::{Alignment, HeadingLevel, LinkType, Options};
 
+/// `node.data` marker matching `@mdx-js/mdx`'s `_mdxExplicitJsx: true`,
+/// attached to every source-parsed mdxJsx node. Read at hast→recma time to
+/// keep authored JSX as a literal tag (vs routing through `_components`).
+const MDX_EXPLICIT_JSX_DATA: &[u8] = b"{\"_mdxExplicitJsx\":true}";
+
 /// Default options: GFM (tables, strikethrough, task lists, autolink-literal),
 /// footnotes, math, YAML metadata.
 /// Note: heading attributes (`# Title {#id .cls}`) are intentionally NOT enabled
@@ -927,6 +932,10 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 start, end, start_line, start_col, end_line, end_col,
                             );
                             builder.set_data_current(&data);
+                            let id = builder.current_node_id();
+                            builder
+                                .arena_mut()
+                                .set_node_data(id, MDX_EXPLICIT_JSX_DATA.to_vec());
                             if jsx.is_self_closing {
                                 builder.close_node();
                             } else {
@@ -2919,9 +2928,10 @@ fn split_text_on_jsx_tags(arena: &mut Arena<Mdast>, text_id: u32) {
                     start,
                 );
                 let name_sr = arena.alloc_string(&name);
-                let jsx_data = satteri_ast::mdast::encode_mdx_jsx_element_data(name_sr, &[]);
+                let jsx_data = satteri_ast::mdast::encode_mdx_jsx_element_data(name_sr, &[], true);
                 let jid = arena.alloc_node(MdastNodeType::MdxJsxTextElement as u8);
                 arena.set_type_data(jid, &jsx_data);
+                arena.set_node_data(jid, MDX_EXPLICIT_JSX_DATA.to_vec());
                 arena.set_position(
                     jid,
                     base_start + start as u32,
@@ -2949,9 +2959,10 @@ fn split_text_on_jsx_tags(arena: &mut Arena<Mdast>, text_id: u32) {
                     start,
                 );
                 let name_sr = arena.alloc_string(&name);
-                let jsx_data = satteri_ast::mdast::encode_mdx_jsx_element_data(name_sr, &[]);
+                let jsx_data = satteri_ast::mdast::encode_mdx_jsx_element_data(name_sr, &[], true);
                 let jid = arena.alloc_node(MdastNodeType::MdxJsxTextElement as u8);
                 arena.set_type_data(jid, &jsx_data);
+                arena.set_node_data(jid, MDX_EXPLICIT_JSX_DATA.to_vec());
                 arena.set_position(
                     jid,
                     base_start + start as u32,
@@ -3255,5 +3266,5 @@ fn encode_jsx_element_data(jsx: &JsxElementData<'_>, builder: &mut ArenaBuilder<
         })
         .collect();
 
-    encode_mdx_jsx_element_data(name_ref, &attr_tuples)
+    encode_mdx_jsx_element_data(name_ref, &attr_tuples, true)
 }
