@@ -142,8 +142,7 @@ fn layout_export_default_from() -> Result<(), satteri_arena::mdx_types::Message>
 }
 
 #[test]
-fn element_attribute_name_case_react_default()
--> Result<(), satteri_arena::mdx_types::Message> {
+fn element_attribute_name_case_react_default() -> Result<(), satteri_arena::mdx_types::Message> {
     let result = compile(
         "```js\nconsole.log(1);\n```\n",
         &Options::default(),

@@ -550,9 +550,7 @@ fn transform_element<'a>(
 
         // `style="…"` parses into a JSX expression object regardless of
         // attribute-name casing; key casing is controlled separately.
-        if name == "style"
-            && matches!(value_kind, PROP_STRING | PROP_SPACE_SEP | PROP_COMMA_SEP)
-        {
+        if name == "style" && matches!(value_kind, PROP_STRING | PROP_SPACE_SEP | PROP_COMMA_SEP) {
             let raw = context.view.get_str(value_ref);
             let object = build_style_object(alloc, raw, style_case);
             attrs.push(JSXAttributeItem::Attribute(OxcBox::new_in(
@@ -1099,10 +1097,8 @@ fn build_style_object<'a>(
             StylePropertyNameCase::Css => key_css,
         };
         let key = create_prop_name(alloc, &key_str);
-        let value_expr = Expression::StringLiteral(OxcBox::new_in(
-            create_string_literal(alloc, &value),
-            alloc,
-        ));
+        let value_expr =
+            Expression::StringLiteral(OxcBox::new_in(create_string_literal(alloc, &value), alloc));
         properties.push(ObjectPropertyKind::ObjectProperty(OxcBox::new_in(
             ObjectProperty {
                 node_id: Cell::new(NodeId::DUMMY),
@@ -1261,9 +1257,8 @@ mod tests {
     #[test]
     fn parse_style_respects_quotes_and_parens() {
         // Semicolons inside `url(...)` and quoted strings must not split.
-        let pairs = parse_style_declarations(
-            r#"background: url("a;b.png"); content: ";"; color: red"#,
-        );
+        let pairs =
+            parse_style_declarations(r#"background: url("a;b.png"); content: ";"; color: red"#);
         assert_eq!(
             pairs,
             vec![

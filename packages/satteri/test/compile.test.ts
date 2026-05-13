@@ -658,10 +658,10 @@ describe("mdxToJs", () => {
   });
 
   test("elementAttributeNameCase: 'html' emits HTML attribute names", () => {
-    const { code: js } = mdxToJs(
-      "```js\nconsole.log(1);\n```\n\na[^1]\n\n[^1]: note\n",
-      { elementAttributeNameCase: "html", features: { gfm: true } },
-    );
+    const { code: js } = mdxToJs("```js\nconsole.log(1);\n```\n\na[^1]\n\n[^1]: note\n", {
+      elementAttributeNameCase: "html",
+      features: { gfm: true },
+    });
     expect(js).toContain('class: "language-js"');
     expect(js).not.toContain("className:");
     // GFM footnotes inject className + data-*/aria-*; the latter are already
@@ -710,11 +710,7 @@ describe("mdxToJs", () => {
       element: {
         filter: ["p"],
         visit(node, ctx) {
-          ctx.setProperty(
-            node,
-            "style",
-            "background-color: red; -webkit-line-clamp: 2; --x: 1",
-          );
+          ctx.setProperty(node, "style", "background-color: red; -webkit-line-clamp: 2; --x: 1");
         },
       },
     });
