@@ -42,6 +42,8 @@ jobs:
         with:
           cache-target: release
           bins: cargo-codspeed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build the benchmark target(s)
         run: cargo codspeed build -p satteri-bench
@@ -61,6 +63,8 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: moonrepo/setup-rust@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
