@@ -103,7 +103,7 @@ fn demo() -> Markup {
                         }
                     }
                     div.flex.flex-col {
-                        div.px-4.py-2.text-xs.uppercase.tracking-widest.text-paper.bg-ink.font-bold {
+                        h3.px-4.py-2.text-xs.uppercase.tracking-widest.text-paper.bg-ink.font-bold {
                             "Rendered HTML"
                         }
                         div #demo-output .prose."min-h-[26rem]"."md:min-h-[36rem]"."max-h-[26rem]"."md:max-h-[36rem]".overflow-auto.p-4.text-sm.leading-relaxed {}
