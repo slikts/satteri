@@ -67,21 +67,11 @@ jobs:
           cache: pnpm
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: moonrepo/setup-rust@v1
         with:
           targets: ${{ matrix.settings.target }}
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.napi-rs
-            .cargo-cache
-            target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+          cache-target: release
+          cache-extra-identifier: ${{ matrix.settings.target }}-${{ matrix.settings.host }}
 
       - name: Install dependencies
         run: pnpm install

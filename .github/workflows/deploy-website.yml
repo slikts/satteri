@@ -35,20 +35,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: moonrepo/setup-rust@v1
         with:
           targets: wasm32-wasip1-threads
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-            website/target/
-          key: rust-website-cargo-${{ hashFiles('**/Cargo.lock', 'website/Cargo.toml') }}
+          cache-target: release
+          target-dirs: target, website/target
 
       - name: Build WASM binding
         run: pnpm build:wasm
