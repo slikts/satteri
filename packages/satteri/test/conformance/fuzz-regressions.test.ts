@@ -1598,3 +1598,41 @@ describe("fuzz regressions: autolink URL stops at matched-backtick code span (fi
     expect(actUrl).toBe(refUrl);
   });
 });
+
+describe("fuzz regressions: inline code after a link destination with CJK trail", () => {
+  // The autolink-literal preflight in firstpass walks raw bytes looking
+  // for `http(s)`/`www.` prefixes. It was missing the fact that micromark
+  // tokenizes a CommonMark link `[text](url)` before the autolink-literal
+  // construct runs, so the URL inside the destination parens is invisible
+  // to autolink-literal. We were re-treating it as a candidate, and
+  // because `scan_autolink_literal` greedily consumes non-ASCII bytes,
+  // it gobbled the trailing CJK text past `)` and suppressed a backtick
+  // that should have opened a code span. Pure ASCII trails hid the bug
+  // because the trim pass strips trailing ASCII punctuation back to `)`.
+  test("link + CJK + inline code (originally found in zh-cn/ja docs)", () => {
+    assertMdastConformance("使用 [link](http://x)，即运行`cmd`。");
+    assertHastConformance("使用 [link](http://x)，即运行`cmd`。");
+  });
+
+  test("link + CJK comma + inline code (no trailing text)", () => {
+    assertMdastConformance("使用 [link](http://x)，`cmd`");
+  });
+
+  test("link + backtick directly adjacent (leading CJK only)", () => {
+    assertMdastConformance("使用 [link](http://x)`cmd`");
+  });
+
+  test("image (not link) followed by CJK + inline code", () => {
+    assertMdastConformance("使用 ![alt](http://x)，即运行`cmd`。");
+  });
+
+  test("nested parens in link destination still skipped", () => {
+    assertMdastConformance("[a](http://x(y)z)，即运行`cmd`。");
+  });
+
+  test("bare autolink before CJK still consumes CJK as URL (unchanged)", () => {
+    // Sanity: the fix must not regress micromark's bare-URL behavior, which
+    // *does* treat CJK as part of the URL when there's no enclosing link.
+    assertMdastConformance("use http://x，foo");
+  });
+});
