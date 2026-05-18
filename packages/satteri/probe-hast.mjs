@@ -18,7 +18,13 @@ const refParser = remark()
   .use(remarkDirective)
   .use(remarkMarkAndUnravel);
 
-const PASS_THROUGH = ["mdxJsxFlowElement", "mdxJsxTextElement", "mdxFlowExpression", "mdxTextExpression", "mdxjsEsm"];
+const PASS_THROUGH = [
+  "mdxJsxFlowElement",
+  "mdxJsxTextElement",
+  "mdxFlowExpression",
+  "mdxTextExpression",
+  "mdxjsEsm",
+];
 const empty = () => undefined;
 const REF_HAST_OPTS = {
   allowDangerousHtml: true,
@@ -52,7 +58,9 @@ const file = process.argv[2];
 const input = readFileSync(file, "utf8");
 const refMdast = refParser.runSync(refParser.parse(input));
 const refHast = toHast(refMdast, REF_HAST_OPTS);
-const satHast = mdxToHast(input, { features: { gfm: true, frontmatter: true, directive: true, math: false } });
+const satHast = mdxToHast(input, {
+  features: { gfm: true, frontmatter: true, directive: true, math: false },
+});
 const ref = JSON.stringify(canonical(strip(refHast)), null, 2);
 const sat = JSON.stringify(canonical(strip(satHast)), null, 2);
 const refL = ref.split("\n");

@@ -86,37 +86,82 @@ function ser(o) {
   return JSON.stringify(canonical(strip(o)));
 }
 
-let mdastOK = 0, mdastFail = 0, mdastThrow = 0;
-let hastOK = 0, hastFail = 0, hastThrow = 0;
+let mdastOK = 0,
+  mdastFail = 0,
+  mdastThrow = 0;
+let hastOK = 0,
+  hastFail = 0,
+  hastThrow = 0;
 const mdastDiffs = [];
 const hastDiffs = [];
 const throws = { ref: [], sat: [] };
 
 for (const file of files) {
   let input;
-  try { input = readFileSync(file, "utf8"); } catch { continue; }
+  try {
+    input = readFileSync(file, "utf8");
+  } catch {
+    continue;
+  }
   let refMdast, satMdast;
-  try { refMdast = refParser.runSync(refParser.parse(input)); }
-  catch (e) { throws.ref.push({ file, msg: e.message }); mdastThrow++; continue; }
-  try { satMdast = mdxToMdast(input, { features: { gfm: true, frontmatter: true, directive: true, math: false } }); }
-  catch (e) { throws.sat.push({ file, msg: e.message }); mdastThrow++; continue; }
-  if (ser(refMdast) === ser(satMdast)) mdastOK++; else { mdastFail++; mdastDiffs.push(file); }
+  try {
+    refMdast = refParser.runSync(refParser.parse(input));
+  } catch (e) {
+    throws.ref.push({ file, msg: e.message });
+    mdastThrow++;
+    continue;
+  }
+  try {
+    satMdast = mdxToMdast(input, {
+      features: { gfm: true, frontmatter: true, directive: true, math: false },
+    });
+  } catch (e) {
+    throws.sat.push({ file, msg: e.message });
+    mdastThrow++;
+    continue;
+  }
+  if (ser(refMdast) === ser(satMdast)) mdastOK++;
+  else {
+    mdastFail++;
+    mdastDiffs.push(file);
+  }
 
   let refHast, satHast;
-  try { refHast = toHast(refMdast, REF_HAST_OPTS); }
-  catch (e) { throws.ref.push({ file, msg: e.message }); hastThrow++; continue; }
-  try { satHast = mdxToHast(input, { features: { gfm: true, frontmatter: true, directive: true, math: false } }); }
-  catch (e) { throws.sat.push({ file, msg: e.message }); hastThrow++; continue; }
+  try {
+    refHast = toHast(refMdast, REF_HAST_OPTS);
+  } catch (e) {
+    throws.ref.push({ file, msg: e.message });
+    hastThrow++;
+    continue;
+  }
+  try {
+    satHast = mdxToHast(input, {
+      features: { gfm: true, frontmatter: true, directive: true, math: false },
+    });
+  } catch (e) {
+    throws.sat.push({ file, msg: e.message });
+    hastThrow++;
+    continue;
+  }
   const refHastNorm = normalizeAlignToStyle(refHast);
   if (ser(refHastNorm) === ser(satHast)) hastOK++;
-  else { hastFail++; hastDiffs.push(file); }
+  else {
+    hastFail++;
+    hastDiffs.push(file);
+  }
 }
 
-console.log(JSON.stringify({
-  total: files.length,
-  mdast: { ok: mdastOK, fail: mdastFail, throws: mdastThrow },
-  hast: { ok: hastOK, fail: hastFail, throws: hastThrow },
-  mdastFails: mdastDiffs,
-  hastFails: hastDiffs,
-  throws: { ref: throws.ref.slice(0, 5), sat: throws.sat.slice(0, 5) },
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      total: files.length,
+      mdast: { ok: mdastOK, fail: mdastFail, throws: mdastThrow },
+      hast: { ok: hastOK, fail: hastFail, throws: hastThrow },
+      mdastFails: mdastDiffs,
+      hastFails: hastDiffs,
+      throws: { ref: throws.ref.slice(0, 5), sat: throws.sat.slice(0, 5) },
+    },
+    null,
+    2,
+  ),
+);

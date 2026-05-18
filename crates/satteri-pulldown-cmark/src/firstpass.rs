@@ -1804,12 +1804,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                             .map(|nix| self.tree[nix].item.start)
                             .unwrap_or(start);
                         if let Some((email_start, email_end, full_url)) =
-                            scan_email_forward_from_atext(
-                                bytes,
-                                ix,
-                                begin_text,
-                                paragraph_floor,
-                            )
+                            scan_email_forward_from_atext(bytes, ix, begin_text, paragraph_floor)
                         {
                             if !has_unbalanced_bracket_from(bytes, paragraph_floor, ix)
                                 && !is_inside_code_span(bytes, ix)
