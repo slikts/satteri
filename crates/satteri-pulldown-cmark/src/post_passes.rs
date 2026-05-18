@@ -20,31 +20,6 @@ use satteri_ast::mdast::{codec::LinkData, MdastNodeType};
 
 pub(crate) const MDX_EXPLICIT_JSX_DATA: &[u8] = b"{\"_mdxExplicitJsx\":true}";
 
-pub(crate) fn prev_is_loose_only(bytes: &[u8], ix: usize) -> bool {
-    if ix == 0 {
-        return false;
-    }
-    let prev = bytes[ix - 1];
-    if prev < 0x80 {
-        if prev.is_ascii_alphabetic() {
-            return false; // loose itself fails — neither path applies
-        }
-        let strict = prev.is_ascii_whitespace() || prev.is_ascii_punctuation();
-        return !strict;
-    }
-    match core::str::from_utf8(&bytes[ix.saturating_sub(4)..ix]) {
-        Ok(s) => {
-            let c = s.chars().last().unwrap_or(' ');
-            if c.is_alphabetic() {
-                return false;
-            }
-            let strict = c.is_whitespace() || !c.is_alphanumeric();
-            !strict
-        }
-        Err(_) => false,
-    }
-}
-
 /// Mirror `mdast-util-gfm-autolink-literal`'s `isCorrectDomain`. Domain must
 /// have ≥2 dot-separated parts; the last and penultimate (if non-empty) must
 /// contain an ASCII alphanumeric and must not contain `_`. Empty parts are
@@ -439,7 +414,10 @@ fn is_email_local_char(b: u8) -> bool {
 /// from raw source — micromark would consume the `\X` as an escape token,
 /// resetting `self.previous` to `X` (gfmAtext) and rejecting the email
 /// construct from firing afterward).
-fn scan_email_autolink(bytes: &[u8], at_ix: usize) -> Option<(usize, usize, String, bool)> {
+pub(crate) fn scan_email_autolink(
+    bytes: &[u8],
+    at_ix: usize,
+) -> Option<(usize, usize, String, bool)> {
     if at_ix >= bytes.len() || bytes[at_ix] != b'@' {
         return None;
     }
@@ -546,18 +524,10 @@ fn scan_email_autolink(bytes: &[u8], at_ix: usize) -> Option<(usize, usize, Stri
     if tld.is_empty() || !tld.iter().any(|&b| b.is_ascii_alphabetic()) {
         return None;
     }
-    // Underscore in the last two segments is invalid per remark
-    // (`mdast-util-gfm-autolink-literal`'s `emailWithUnderscoreAtEnd` check).
-    if tld.contains(&b'_') {
-        return None;
-    }
-    if let Some(second_last_dot) = domain[..last_dot].iter().rposition(|&b| b == b'.') {
-        if domain[second_last_dot + 1..last_dot].contains(&b'_') {
-            return None;
-        }
-    } else if domain[..last_dot].contains(&b'_') {
-        return None;
-    }
+    // mdast-util-gfm-autolink-literal's `findEmail` only rejects when the
+    // *last* character of the label is in `[-\d_]`. We already handle
+    // that above. `_` elsewhere in the domain is permitted.
+    let _ = tld;
     let email_str = core::str::from_utf8(&bytes[start..end]).ok()?;
     Some((start, end, format!("mailto:{email_str}"), retry_needed))
 }
@@ -572,21 +542,6 @@ fn scan_email_autolink(bytes: &[u8], at_ix: usize) -> Option<(usize, usize, Stri
 /// GFM autolink would normally consume the whole URL as a single token before
 /// the directive parser sees it, but since satteri's autolink runs as a post-
 /// pass we reconstruct the original run here so autolink can find the URL.
-/// Mirror of mdast-util-gfm-autolink-literal's `isCorrectDomain`: the URL's
-/// domain (between `//` and the first `/`, `?`, `#`, or end) must contain a
-/// dot to count as a valid autolink. Applied only in strict mode — see the
-/// caller.
-fn domain_has_dot(url: &str) -> bool {
-    let after_scheme = match url.find("://") {
-        Some(p) => &url[p + 3..],
-        None => url,
-    };
-    let domain_end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
-    after_scheme[..domain_end].contains('.')
-}
-
 /// Fold the bracket-depth running total forward over one string of text.
 /// Returns `true` after consuming `s` iff there's a `[` (or `![`) with no
 /// matching `]` so far. Backslash-escaped brackets are ignored.
@@ -767,18 +722,18 @@ pub(crate) fn merge_directive_port_splits(arena: &mut Arena<Mdast>) {
     }
 }
 
-pub(crate) fn gfm_autolink_literal_pass(arena: &mut Arena<Mdast>) {
+/// Find-and-replace fallback for GFM autolink literals — the mdast-tree
+/// transform equivalent of `mdast-util-gfm-autolink-literal`'s
+/// `transformGfmAutolinkLiterals`. The inline construct in `firstpass.rs`
+/// handles the common case (URL bytes consumed during tokenization with
+/// source positions); this pass picks up URL/email patterns that survived
+/// in plain Text nodes — typically because the construct path didn't fire
+/// (e.g. preceded by a digit, inside a previously-failed `<...>` autolink,
+/// across container prefixes). All Links emitted here are position-less,
+/// matching `findAndReplace`'s behavior.
+pub(crate) fn gfm_autolink_literal_pass(arena: &mut Arena<Mdast>, source_bytes: &[u8]) {
     let len = arena.len() as u32;
-    // First collect the set of Text nodes containing URL candidates to avoid
-    // mutating while iterating in a way that shifts indices. Alongside each
-    // candidate we track whether we're inside a broken link-label attempt —
-    // remark's autolink-literal skips such text during tokenization, and its
-    // post-transformer then requires a `.` in the domain to match, so we mirror
-    // that "require dot" rule only in the broken-label case.
-    let mut candidates: Vec<(u32, bool)> = Vec::new();
-    // Per-parent running bracket depth. Indexed by node id, sized to the
-    // arena once: avoids the per-text-node HashMap entry/get hot in profiles.
-    let mut bracket_depth_by_parent: Vec<i32> = vec![0; len as usize];
+    let mut candidates: Vec<u32> = Vec::new();
     let text_ty = MdastNodeType::Text as u8;
     for id in 0..len {
         let node = arena.get_node(id);
@@ -790,10 +745,9 @@ pub(crate) fn gfm_autolink_literal_pass(arena: &mut Arena<Mdast>) {
             continue;
         }
         let parent_type = MdastNodeType::from_u8(arena.get_node(parent_id).node_type);
-        // Skip text inside link/linkReference/image/imageReference (mirrors
-        // `mdast-util-gfm-autolink-literal`'s `{ignore: ['link', 'linkReference']}`,
-        // and also avoids nesting links inside image alt text), code, imports,
-        // expressions, or frontmatter.
+        // Mirrors `findAndReplace`'s `{ignore: ['link', 'linkReference']}`,
+        // plus image alt-text (don't nest links there) and code/expression
+        // /frontmatter nodes where literal autolinks shouldn't fire.
         if matches!(
             parent_type,
             Some(
@@ -812,32 +766,6 @@ pub(crate) fn gfm_autolink_literal_pass(arena: &mut Arena<Mdast>) {
         ) {
             continue;
         }
-        // Walk up to find the inline-block ancestor (Paragraph/Heading/
-        // TableCell). Brackets must propagate across nested inline parents
-        // like Emphasis/Strong/Delete — `*![fw*https://example.com` opens
-        // `![` inside Emphasis, but micromark's `previousUnbalanced` sees
-        // an open labelImage when `https` starts, so the construct path
-        // is suppressed (find-and-replace runs without position).
-        let mut block_id = parent_id;
-        loop {
-            let ty = MdastNodeType::from_u8(arena.get_node(block_id).node_type);
-            if matches!(
-                ty,
-                Some(MdastNodeType::Paragraph | MdastNodeType::Heading | MdastNodeType::TableCell)
-            ) {
-                break;
-            }
-            let p = arena.get_node(block_id).parent;
-            if p == u32::MAX || p >= len {
-                break;
-            }
-            block_id = p;
-        }
-        let block_type = MdastNodeType::from_u8(arena.get_node(block_id).node_type);
-        let tracks_brackets = matches!(
-            block_type,
-            Some(MdastNodeType::Paragraph | MdastNodeType::Heading | MdastNodeType::TableCell)
-        );
         let data = arena.get_type_data(id);
         if data.is_empty() {
             continue;
@@ -845,47 +773,137 @@ pub(crate) fn gfm_autolink_literal_pass(arena: &mut Arena<Mdast>) {
         let sr = StringRef::from_bytes(data);
         let text = arena.get_str(sr);
         let bytes = text.as_bytes();
-        let mut matched = false;
-        let mut search_from = 0;
-        while let Some(rel) = memchr::memchr3(b'h', b'w', b'@', &bytes[search_from..]) {
-            let i = search_from + rel;
-            let b = bytes[i];
-            if (b == b'h' || b == b'w') && scan_autolink_literal(bytes, i).is_some() {
-                matched = true;
-                break;
-            }
-            if b == b'@' && scan_email_autolink(bytes, i).is_some() {
-                matched = true;
-                break;
-            }
-            search_from = i + 1;
-        }
-        if tracks_brackets {
-            let slot = &mut bracket_depth_by_parent[block_id as usize];
-            let was_open = *slot > 0;
-            if matched {
-                candidates.push((id, was_open));
-            }
-            if memchr::memchr2(b'[', b']', bytes).is_some() {
-                let now_open = update_bracket_depth(was_open, text);
-                *slot = if now_open { 1 } else { 0 };
-            }
-        } else if matched {
-            candidates.push((id, false));
+        if memchr::memchr3(b'h', b'w', b'@', bytes).is_some() {
+            candidates.push(id);
         }
     }
-
-    for (node_id, strict) in candidates {
-        split_text_with_autolinks(arena, node_id, strict);
+    for node_id in candidates {
+        split_text_with_autolinks_fnr(arena, node_id, source_bytes);
     }
 }
 
-fn split_text_with_autolinks(arena: &mut Arena<Mdast>, text_id: u32, strict_domain: bool) {
-    let node = arena.get_node(text_id);
-    let start_offset = node.start_offset;
-    let end_offset = node.end_offset;
-    let start_line = node.start_line;
-    let start_column = node.start_column;
+/// `previous()` in `mdast-util-gfm-autolink-literal`: prev char must be
+/// whitespace, punctuation, or start-of-string. Stricter than the
+/// construct's `previousProtocol` (`!alphabetic`), since digits and
+/// non-ASCII letters fail.
+fn fnr_prev_ok(bytes: &[u8], ix: usize) -> bool {
+    if ix == 0 {
+        return true;
+    }
+    let prev = bytes[ix - 1];
+    if prev < 0x80 {
+        return prev.is_ascii_whitespace() || prev.is_ascii_punctuation();
+    }
+    // Decode the last char to apply Unicode whitespace/punctuation rules
+    // (matches the `\s` / `\p{P}` / `\p{S}` lookbehind in the regex).
+    match core::str::from_utf8(&bytes[ix.saturating_sub(4)..ix]) {
+        Ok(s) => {
+            let c = s.chars().last().unwrap_or(' ');
+            c.is_whitespace() || !c.is_alphanumeric()
+        }
+        Err(_) => true,
+    }
+}
+
+/// FNR's `findUrl` equivalent. Mirrors the
+/// `(https?:\/\/|www(?=\.))([-.\w]+)([^ \t\r\n]*)` regex + `previous()` +
+/// `isCorrectDomain` + `splitUrl` validation chain from
+/// `mdast-util-gfm-autolink-literal`.
+///
+/// Returns `(start, url_end, full_url, raw_end)` where `url_end..raw_end`
+/// is the splitUrl trail (kept as its own text node by `findAndReplace`).
+fn fnr_find_url(bytes: &[u8], ix: usize) -> Option<(usize, usize, String, usize)> {
+    let (proto_len, is_www) = if bytes[ix..].starts_with(b"http://") {
+        (7, false)
+    } else if bytes[ix..].starts_with(b"https://") {
+        (8, false)
+    } else if bytes[ix..].starts_with(b"www.") {
+        // The www. branch has `(?=\.)` lookahead in the regex — already
+        // satisfied by `starts_with(b"www.")`.
+        (4, true)
+    } else {
+        return None;
+    };
+    let s = ix;
+    if !fnr_prev_ok(bytes, s) {
+        return None;
+    }
+    // Domain class `[-.\w]+` (alphanumeric, `.`, `_`, `-`).
+    let domain_start = s + proto_len;
+    let mut p = domain_start;
+    while p < bytes.len() {
+        let b = bytes[p];
+        if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_') {
+            p += 1;
+        } else {
+            break;
+        }
+    }
+    let domain_end = p;
+    if domain_end == domain_start {
+        return None;
+    }
+    // Path class `[^ \t\r\n]*` (anything except markdown line ending/space).
+    while p < bytes.len() {
+        if matches!(bytes[p], b' ' | b'\t' | b'\r' | b'\n') {
+            break;
+        }
+        p += 1;
+    }
+    let raw_end = p;
+    // `isCorrectDomain`: ≥2 dot parts, no `_` in last/penult, alphanumeric
+    // in non-empty parts.
+    if !is_correct_domain_for_fnr(&bytes[domain_start..domain_end]) {
+        return None;
+    }
+    // `splitUrl` trim — wider than the construct's trim set; includes
+    // `>`, `}`, `&` (which the construct keeps) and excludes `*`, `_`,
+    // `~` (which the construct trims).
+    let url_end = split_url_trim_end(bytes, domain_start, raw_end);
+    if url_end <= domain_start {
+        return None;
+    }
+    let url_str = core::str::from_utf8(&bytes[s..url_end]).ok()?;
+    let full_url = if is_www {
+        format!("http://{url_str}")
+    } else {
+        url_str.to_string()
+    };
+    Some((s, url_end, full_url, raw_end))
+}
+
+/// FNR's `findEmail` equivalent. Mirrors the
+/// `(?<=^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)` regex + the
+/// `previous(_, email=true)` + `/[-\d_]$/` rejection.
+///
+/// Returns `(start, end, "mailto:<addr>", raw_end)`. For emails the regex
+/// has no trail, so `raw_end == end`. Uses `scan_email_autolink`'s walkback
+/// (which retries from a shorter start when the max walkback's prev is
+/// `/` or alphanumeric, matching FNR's `previous(_, true)` semantics).
+fn fnr_find_email(bytes: &[u8], ix: usize) -> Option<(usize, usize, String, usize)> {
+    let (s, e, url, _retry) = scan_email_autolink(bytes, ix)?;
+    // The regex's domain class is `[-\w]+(?:\.[-\w]+)+`. The first domain
+    // char must be `[-\w]` (alphanumeric, `-`, `_`); `.` is rejected.
+    let first_domain = *bytes.get(ix + 1)?;
+    if !(first_domain.is_ascii_alphanumeric() || first_domain == b'-' || first_domain == b'_') {
+        return None;
+    }
+    // FNR lookbehind: whitespace/punctuation/start (Unicode-aware).
+    // `scan_email_autolink`'s walkback rejects ASCII alphanumeric and `/`
+    // but accepts non-ASCII letters (e.g. Cyrillic `п`) as "not atext".
+    // FNR's regex rejects those via the `\p{P}|\p{S}` lookbehind class.
+    if !fnr_prev_ok(bytes, s) {
+        return None;
+    }
+    Some((s, e, url, e))
+}
+
+/// FNR-style scan over a Text node's bytes. Emits position-less Links for
+/// each match; left-over text becomes plain Text nodes between/around them.
+/// `findUrl` returns `[link, text(trail)]` when splitUrl strips trailing
+/// chars — `findAndReplace` then inserts those as adjacent siblings,
+/// keeping the trail distinct from the surrounding text. Mirror that.
+fn split_text_with_autolinks_fnr(arena: &mut Arena<Mdast>, text_id: u32, source_bytes: &[u8]) {
     let data = arena.get_type_data(text_id);
     if data.is_empty() {
         return;
@@ -894,784 +912,92 @@ fn split_text_with_autolinks(arena: &mut Arena<Mdast>, text_id: u32, strict_doma
     let text = arena.get_str(sr).to_string();
     let bytes = text.as_bytes();
 
-    // When a URL's bytes don't appear verbatim in the source span this text
-    // node covers, the source must have been rewritten (e.g. `\X` consumed
-    // a backslash escape inside the URL). micromark's literalAutolink
-    // tokenizer operates on the raw source, so a rewrite inside the URL
-    // means the construct failed at the token level and remark fell back
-    // to `mdast-util-find-and-replace`, which emits position-less nodes.
-    // Use a per-replacement check: a stale full-text comparison would
-    // suppress positions for `=h _ 7\<https://...>` where the `\<` is
-    // *outside* the URL and micromark would still have tokenized.
-    let source_slice: Vec<u8> = {
-        let source_bytes = arena.source.as_bytes();
-        if (start_offset as usize) < source_bytes.len()
-            && (end_offset as usize) <= source_bytes.len()
-        {
-            source_bytes[start_offset as usize..end_offset as usize].to_vec()
-        } else {
-            Vec::new()
-        }
-    };
-    let url_in_source = |url_bytes: &[u8]| -> bool {
-        !source_slice.is_empty()
-            && source_slice
-                .windows(url_bytes.len())
-                .any(|w| w == url_bytes)
-    };
-
-    // Map text-byte positions (post-escape) back to source-byte positions
-    // (raw). When a URL spans `\X` in source it shows up as `X` in text;
-    // remark keeps the raw `\X` in both the URL value and the displayed
-    // link text (the construct tokenizes raw source). Used below to
-    // recover the original bytes when `url_in_source` says the URL was
-    // rewritten by an escape mid-URL.
-    //
-    // Returns `None` if the bytes diverge in any way other than backslash
-    // escapes; we then fall back to text bytes (better-than-nothing).
-    let text_to_source: Option<Vec<usize>> = {
-        // Fast-path: text and source slice are identical → identity map,
-        // skip the `bytes.len() + 1` allocation and full walk.
-        if !source_slice.is_empty() && source_slice == bytes {
-            let mut map = Vec::with_capacity(bytes.len() + 1);
-            for i in 0..=bytes.len() {
-                map.push(i);
-            }
-            Some(map)
-        } else {
-            let mut map = Vec::with_capacity(bytes.len() + 1);
-            let mut s = 0usize;
-            let mut t = 0usize;
-            let mut ok = true;
-            while t < bytes.len() {
-                if s >= source_slice.len() {
-                    ok = false;
-                    break;
-                }
-                if source_slice[s] == b'\\'
-                    && s + 1 < source_slice.len()
-                    && source_slice[s + 1].is_ascii_punctuation()
-                {
-                    s += 1;
-                }
-                // Skip trailing whitespace before a line ending — micromark
-                // trims these out of the inline text but the source bytes
-                // still occupy positions. Without skipping, the map would
-                // mismatch (text `\n` at where source has ` `) and the whole
-                // map would be discarded.
-                while s < source_slice.len()
-                    && matches!(source_slice[s], b' ' | b'\t')
-                    && bytes[t] != source_slice[s]
-                {
-                    let mut peek = s + 1;
-                    while peek < source_slice.len() && matches!(source_slice[peek], b' ' | b'\t') {
-                        peek += 1;
-                    }
-                    if peek < source_slice.len() && matches!(source_slice[peek], b'\n' | b'\r') {
-                        s += 1;
-                    } else {
-                        break;
-                    }
-                }
-                // Also skip leading whitespace right after a line ending —
-                // continuation lines in a paragraph drop their indentation
-                // when collapsed into the inline text (e.g. `z\n i}@…` →
-                // text `z\ni}@…`). Without skipping, source position would
-                // diverge from text position past the wrap.
-                if t > 0
-                    && matches!(bytes[t - 1], b'\n' | b'\r')
-                    && matches!(source_slice[s], b' ' | b'\t')
-                    && bytes[t] != source_slice[s]
-                {
-                    while s < source_slice.len() && matches!(source_slice[s], b' ' | b'\t') {
-                        s += 1;
-                    }
-                }
-                // Blockquote-prefix skip: after a line ending, the source
-                // may carry a `>` marker (optionally with `>` chains and
-                // trailing whitespace) that's stripped from the collapsed
-                // inline text. Without this skip, the map would diverge as
-                // soon as a blockquote continuation line carried real
-                // content (`>bar\n> baz` collapsed to `bar\nbaz` — text[4]
-                // is `b`, source[4] is `>`).
-                if t > 0
-                    && matches!(bytes[t - 1], b'\n' | b'\r')
-                    && source_slice[s] == b'>'
-                    && bytes[t] != b'>'
-                {
-                    while s < source_slice.len() && source_slice[s] == b'>' {
-                        s += 1;
-                        while s < source_slice.len() && matches!(source_slice[s], b' ' | b'\t') {
-                            s += 1;
-                        }
-                    }
-                }
-                if s >= source_slice.len() || source_slice[s] != bytes[t] {
-                    ok = false;
-                    break;
-                }
-                map.push(s);
-                s += 1;
-                t += 1;
-            }
-            if ok {
-                map.push(s);
-                Some(map)
-            } else {
-                None
-            }
-        }
-    };
-
-    // Returns the source-byte position where text[pos] BEGINS being
-    // represented — i.e. the byte AFTER the previous text byte's source
-    // position. For pos == 0 returns 0, so the first emitted chunk's
-    // source span covers any leading escape bytes (e.g. `\[foo` text `[foo`
-    // spans source 0..2 for the leading `[`, not just 1..2).
-    let chunk_src_pos = |pos: usize| -> usize {
-        if let Some(map) = text_to_source.as_ref() {
-            if pos == 0 {
-                0
-            } else {
-                map[pos - 1] + 1
-            }
-        } else {
-            pos
-        }
-    };
-
-    // (start, raw_end, end, url, is_email, fnr_only).
-    // - is_email: URL vs email path. Emails skip raw-source URL recovery
-    //   (the URL value is the `mailto:` prefix + decoded text, not source
-    //   bytes).
-    // - fnr_only: true when only the find-and-replace path accepted (the
-    //   construct path was rejected — e.g. email retry needed, or URL with
-    //   first-char punct accepted only via `isCorrectDomain` + `splitUrl`).
-    //   Combined with an escape-in-span check, this gates position emission:
-    //   find-and-replace doesn't emit positions, so we suppress them here.
-    let mut replacements: Vec<(usize, usize, usize, String, bool, bool)> = Vec::new();
+    let mut matches: Vec<(usize, usize, usize, String)> = Vec::new();
     let mut i = 0;
     while let Some(rel) = memchr::memchr3(b'h', b'w', b'@', &bytes[i..]) {
         i += rel;
         let b = bytes[i];
-        if b == b'h' || b == b'w' {
-            if let Some((s, raw_e, e, url, fnr_only)) = scan_autolink_literal(bytes, i) {
-                if strict_domain && !domain_has_dot(&url) {
-                    i += 1;
-                    continue;
-                }
-                replacements.push((s, raw_e, e, url, false, fnr_only));
-                i = raw_e;
+        let hit = if b == b'h' || b == b'w' {
+            fnr_find_url(bytes, i)
+        } else {
+            fnr_find_email(bytes, i)
+        };
+        if let Some((s, url_end, url, raw_end)) = hit {
+            let last_end = matches.last().map_or(0, |m| m.2);
+            if s >= last_end {
+                matches.push((s, url_end, raw_end, url));
+                i = raw_end;
                 continue;
             }
-        } else if let Some((s, e, url, retry_needed)) = scan_email_autolink(bytes, i) {
-            // Drop entirely when the first domain byte came from a
-            // backslash-escape in source (`2@\.baz` text → `2@.baz`,
-            // but micromark's construct can't tokenize past the escape
-            // and find-and-replace's regex `[-\w]+\.` rejects `.` as
-            // first domain char — so no link is emitted).
-            let drop_email = text_to_source.as_ref().is_some_and(|map| {
-                let after_at = i + 1;
-                if after_at >= bytes.len() {
-                    return false;
-                }
-                let src_after_at = map[after_at];
-                src_after_at > 0
-                    && source_slice[src_after_at - 1] == b'\\'
-                    && (after_at == 0 || bytes[after_at - 1] != b'\\')
-            });
-            if !drop_email
-                && replacements
-                    .last()
-                    .is_none_or(|&(_, _, prev_e, _, _, _)| s >= prev_e)
-            {
-                replacements.push((s, e, e, url, true, retry_needed));
-            }
-            i = e;
-            continue;
         }
         i += 1;
     }
 
-    if replacements.is_empty() {
+    if matches.is_empty() {
         return;
     }
 
-    // `outer_open` is the block-level bracket-open state carried over from
-    // preceding sibling text (e.g. `*![fw*https://…` — the `[` sits inside
-    // an Emphasis text node, not in our bytes, but micromark's
-    // `previousUnbalanced` still sees the open labelImage when we reach
-    // the URL). Tracked via `strict_domain` from the candidate pass.
-    let outer_open = strict_domain;
-    let bracket_open_at = |s: usize| -> bool {
-        let mut depth: i32 = if outer_open { 1 } else { 0 };
-        let mut j = 0;
-        while j < s {
-            let c = bytes[j];
-            if c == b'\\' {
-                j += 2;
-                continue;
-            }
-            // Source-backslash skip: a `[`/`]` in text that came from an
-            // escaped `\[`/`\]` in source must not count toward bracket
-            // balance — micromark's `previousUnbalanced` sees an escape
-            // token, not a labelLink. Without this check, an escaped `\[`
-            // upstream would wrongly trigger find-and-replace's fragmented
-            // text emission for the literal autolink.
-            if c == b'[' || c == b']' {
-                if let Some(map) = text_to_source.as_ref() {
-                    let src_pos = map[j];
-                    if src_pos > 0 && source_slice[src_pos - 1] == b'\\' {
-                        // Confirm the backslash is itself unescaped (`\\` is
-                        // a different escape, but rare here — treat any prior
-                        // `\` as escaping).
-                        j += 1;
-                        continue;
-                    }
-                }
-            }
-            match c {
-                b'[' => depth += 1,
-                b']' if depth > 0 => depth -= 1,
-                _ => {}
-            }
-            j += 1;
-        }
-        depth > 0
+    // Per `mdast-util-gfm-autolink-literal`'s `findAndReplace`, links
+    // emitted here are intentionally position-less — even though they
+    // span a known source range, the F&R transform doesn't carry source
+    // offsets. We mirror that to match REF exactly on inputs where the
+    // construct-level autolink tokenizer didn't fire (e.g. autolinks
+    // preceded by `[`). Don't emit positions on the new nodes.
+    let _ = source_bytes;
+    let pos_for = |_chunk_lo: usize, _chunk_hi: usize| -> Option<(u32, u32, u32, u32, u32, u32)> {
+        None
     };
 
-    // Both autolink paths fail when the preceding char passes only the loose
-    // (token-level) check AND we're inside an unclosed `[`. micromark's
-    // `previousUnbalanced` rejects the construct, and find-and-replace's
-    // strict `previous` (whitespace/punct/start) rejects the fallback. Drop
-    // those replacements entirely (e.g. `[0https://example.com/...` → no link).
-    replacements
-        .retain(|&(s, _, _, _, _, _)| !(bracket_open_at(s) && prev_is_loose_only(bytes, s)));
-    if replacements.is_empty() {
-        return;
-    }
-
-    // Remark-gfm keeps the trailing trim-back chars (e.g. `),` stripped from
-    // the URL) as their own text node — rather than merging with the post-URL
-    // tail — when the preceding text contains an unclosed `[` or `![`. This
-    // mirrors a micromark quirk where the failed label/link attempt around the
-    // autolink leaves fragmented text tokens that never coalesce.
-    let preceded_by_open_bracket: Vec<bool> = replacements
-        .iter()
-        .map(|&(s, _, _, _, _, _)| bracket_open_at(s))
-        .collect();
-
-    // When preceded by an unbalanced `[`/`![`, micromark's `previousUnbalanced`
-    // suppresses the construct path entirely — only find-and-replace can
-    // still accept. find-and-replace's `isCorrectDomain` requires ≥2 dot
-    // segments with alphanumeric content. Drop URL replacements whose
-    // domain doesn't pass that check (emails go through findEmail which
-    // doesn't require this).
-    let to_drop: Vec<bool> = replacements
-        .iter()
-        .enumerate()
-        .map(|(idx, (s, _, _, _, is_email, _))| {
-            if *is_email || !preceded_by_open_bracket[idx] {
-                return false;
-            }
-            // Extract domain from the URL: between `proto://` and first `/?#`.
-            let url_bytes = &bytes[*s..];
-            let proto_len = if url_bytes.starts_with(b"http://") {
-                7
-            } else if url_bytes.starts_with(b"https://") {
-                8
-            } else {
-                0
-            };
-            let domain_start = *s + proto_len;
-            let domain_end = bytes[domain_start..]
-                .iter()
-                .position(|&b| {
-                    matches!(b, b'/' | b'?' | b'#' | b' ' | b'\t' | b'\n' | b'\r' | b'<')
-                })
-                .map(|p| domain_start + p)
-                .unwrap_or(bytes.len());
-            !is_correct_domain_for_fnr(&bytes[domain_start..domain_end])
-        })
-        .collect();
-    let mut keep_iter = to_drop.iter();
-    replacements.retain(|_| !*keep_iter.next().unwrap());
-    if replacements.is_empty() {
-        return;
-    }
-    let preceded_by_open_bracket: Vec<bool> = replacements
-        .iter()
-        .map(|&(s, _, _, _, _, _)| bracket_open_at(s))
-        .collect();
-
-    // When the literalAutolink construct is suppressed (`previousUnbalanced`),
-    // remark falls back to find-and-replace whose `splitUrl` trims a
-    // different set than micromark's tokenizer:
-    //   * construct trims `*`, `_`, `~` (and `'`); splitUrl does not.
-    //   * splitUrl trims `>`, `}`; construct does not.
-    // Both trim `!"&'),.:;<?]` and balanced `)`. To match remark, recompute
-    // the URL end from `raw_e` using `split_url_trim_end`, which uses the
-    // wider splitUrl set. Any chars the construct stripped that splitUrl
-    // would have kept get restored (e.g. trailing `_` in `<URL_**`).
-    for (idx, repl) in replacements.iter_mut().enumerate() {
-        if !preceded_by_open_bracket[idx] {
-            continue;
-        }
-        let (s, raw_e, ref mut e, ref mut url, is_email, _retry) = *repl;
-        if is_email {
-            continue;
-        }
-        let proto_len = if bytes[s..].starts_with(b"http://") {
-            7
-        } else if bytes[s..].starts_with(b"https://") {
-            8
-        } else if bytes[s..].starts_with(b"www.") {
-            4
-        } else {
-            0
-        };
-        let min_end = s + proto_len;
-        // Stop the URL at the first backtick that opens a valid code
-        // span — micromark tokenizes code spans before find-and-replace
-        // runs, so the backticks (and content between them) aren't in
-        // the path bytes that splitUrl sees. Without this, the URL
-        // gobbles `<URL>.\`baz\`` instead of letting the trailing
-        // `\`baz\`` become a separate code span.
-        let mut search_end = raw_e;
-        let mut i = min_end;
-        while i < search_end {
-            if bytes[i] == b'`' {
-                let mut run = 1;
-                let mut j = i + 1;
-                while j < search_end && bytes[j] == b'`' {
-                    run += 1;
-                    j += 1;
-                }
-                let mut k = j;
-                let mut matched = false;
-                while k < search_end {
-                    if bytes[k] == b'`' {
-                        let mut close = 1;
-                        let mut m = k + 1;
-                        while m < search_end && bytes[m] == b'`' {
-                            close += 1;
-                            m += 1;
-                        }
-                        if close == run {
-                            matched = true;
-                            break;
-                        }
-                        k = m;
-                    } else {
-                        k += 1;
-                    }
-                }
-                if matched {
-                    search_end = i;
-                    break;
-                }
-                i = j;
-            } else {
-                i += 1;
-            }
-        }
-        let new_end = split_url_trim_end(bytes, min_end, search_end);
-        if new_end != *e {
-            let url_bytes = &bytes[s..new_end];
-            if let Ok(url_str) = core::str::from_utf8(url_bytes) {
-                *url = if bytes[s..].starts_with(b"www.") {
-                    format!("http://{url_str}")
-                } else {
-                    url_str.to_string()
-                };
-                *e = new_end;
-            }
-        }
-    }
-
-    // Find-and-replace's URL regex (`[^ \t\r\n]*` for path) also consumes
-    // trailing chars that micromark's construct excludes from the URL — most
-    // notably `]`, which my scanner stops BEFORE when followed by a space-
-    // like char. When the URL was emitted via the find-and-replace path
-    // (preceded_by_open_bracket), `splitUrl` then trims those chars and
-    // emits them as a separate text node. Extend `raw_e` forward past trim
-    // chars so the post-URL chunk emission can split URL trail from the
-    // surrounding text. E.g. `[https://foo.barq] x` should produce
-    // `[`, LINK, `]`, ` x` — four nodes.
-    for (idx, repl) in replacements.iter_mut().enumerate() {
-        if !preceded_by_open_bracket[idx] {
-            continue;
-        }
-        // Emails: mdast-util-gfm-autolink-literal's findEmail returns a
-        // Link directly with no `trail` second-element split. So the
-        // chars after the email stay in the surrounding text — no extra
-        // text-node split. Only URL/www literals go through splitUrl.
-        if repl.4 {
-            continue;
-        }
-        let (_s, raw_e, e, _url, _is_email, _retry) =
-            (repl.0, &mut repl.1, repl.2, &repl.3, repl.4, repl.5);
-        let mut walker = e;
-        while walker < bytes.len() {
-            let b = bytes[walker];
-            if matches!(
-                b,
-                b'!' | b'"'
-                    | b'&'
-                    | b'\''
-                    | b','
-                    | b'.'
-                    | b':'
-                    | b';'
-                    | b'<'
-                    | b'>'
-                    | b'?'
-                    | b']'
-                    | b'}'
-            ) {
-                walker += 1;
-            } else {
-                break;
-            }
-        }
-        if walker > *raw_e {
-            *raw_e = walker;
-        }
-    }
-
-    // Build the replacement nodes in order.
     let mut new_children: Vec<u32> = Vec::new();
     let mut cursor = 0usize;
-
-    // micromark's autolink-literal construct is skipped when there's an open
-    // `[`/`![` ahead of it (`previousUnbalanced` in the extension); in that
-    // case `mdast-util-gfm-autolink-literal` falls back to a post-parse
-    // find-and-replace pass that emits bare `{type, value}` / `{type, url, ...}`
-    // objects without position. Mirror that here: emit positioned nodes when
-    // micromark would have tokenized the autolink directly, and leave them
-    // position-less (zero-init) when we're standing in for find-and-replace.
-    // True only when a replacement falls back to find-and-replace (no
-    // raw-source recovery possible). URL replacements with escapes that
-    // we recovered to source bytes still have positions, so they don't
-    // count as "rewritten" for the trailing-chunk position decision.
-    // True when any replacement went through find-and-replace and we
-    // couldn't recover raw source bytes — in those cases remark emits
-    // the trailing post-URL chunk position-less. Includes:
-    //   - URL with escape and no source-mapping fallback (text rewrote).
-    //   - URL accepted only by find-and-replace (construct rejected).
-    //   - Email with retry-needed (max-walkback prev failed).
-    //   - Email with `\X` escape inside the local part.
-    let any_url_rewritten = replacements.iter().any(|(s, _, e, _, is_email, fnr_only)| {
-        let mismatch = !url_in_source(&bytes[*s..*e]);
-        if *is_email {
-            let escape_before = text_to_source.as_ref().is_some_and(|map| {
-                let src_s = map[*s];
-                src_s > 0 && source_slice[src_s - 1] == b'\\' && (*s == 0 || bytes[*s - 1] != b'\\')
-            });
-            return *fnr_only || mismatch || escape_before;
-        }
-        *fnr_only || (mismatch && text_to_source.is_none())
-    });
-
-    // Walk a byte slice (text or source) to compute (line, column) for any
-    // byte offset within it; lines increment on `\n` (or `\r`/`\r\n`),
-    // columns reset. Without this, multi-line text nodes (paragraphs that
-    // contain a soft-wrap) would attribute the autolink to the parent
-    // text's start_line, off by however many wraps preceded it in source.
-    let line_col_in = |slice: &[u8], pos: usize| -> (u32, u32) {
-        let mut line = start_line;
-        let mut col = start_column;
-        let mut i = 0;
-        while i < pos {
-            let b = slice[i];
-            if b == b'\n' {
-                line += 1;
-                col = 1;
-                i += 1;
-            } else if b == b'\r' {
-                line += 1;
-                col = 1;
-                i += 1;
-                if i < pos && slice[i] == b'\n' {
-                    i += 1;
-                }
-            } else if (b & 0xC0) != 0x80 {
-                col += 1;
-                i += 1;
-            } else {
-                i += 1;
-            }
-        }
-        (line, col)
-    };
-    let line_col_at_src = |src_pos: usize| line_col_in(&source_slice, src_pos);
-
-    for (idx, (s, raw_e, e, url, is_email, fnr_only)) in replacements.into_iter().enumerate() {
-        // When the URL spans a backslash-escape in source, recover the
-        // raw source bytes (`\[\>` not `[>`). micromark's literalAutolink
-        // construct tokenizes raw source, so both the URL value and the
-        // displayed text keep the backslashes. The construct succeeded,
-        // so positions ARE emitted, just relative to the source span.
-        //
-        // Skip the recovery when:
-        //  - is_email: the email construct can't tokenize `\` in the
-        //    local-part, so find-and-replace runs on text bytes.
-        //  - preceded_by_open_bracket: the construct is suppressed by
-        //    `previousUnbalanced`, so find-and-replace runs on text bytes
-        //    (e.g. `[=https://example.com?find=\*` → URL `...?find=*`).
-        //  - fnr_only: the URL was accepted only by find-and-replace
-        //    (construct's afterProtocol/seen/underscore rules rejected
-        //    it), so the URL value is the text bytes, not source bytes.
-        let raw_source_url = if !is_email
-            && !preceded_by_open_bracket[idx]
-            && !fnr_only
-            && !url_in_source(&bytes[s..e])
-        {
-            text_to_source.as_ref().and_then(|map| {
-                core::str::from_utf8(&source_slice[map[s]..map[e]])
-                    .ok()
-                    .map(str::to_string)
-            })
-        } else {
-            None
-        };
-        let url_for_node: String = raw_source_url.clone().unwrap_or(url);
-        let displayed: &str = raw_source_url.as_deref().unwrap_or(&text[s..e]);
-
-        // Position emission rules:
-        // - `preceded_by_open_bracket`: micromark suppresses the URL
-        //   construct, find-and-replace runs → no position.
-        // - `fnr_only`: construct rejected, only find-and-replace accepted
-        //   → no position (find-and-replace doesn't propagate positions).
-        // - Email path: position only when the construct path applies —
-        //   no retry was needed AND text bytes appear in source (no
-        //   backslash escape in span). Otherwise find-and-replace → no
-        //   position.
-        // - URL path: position when raw source recovered (construct on
-        //   source bytes) OR text bytes in source (construct on text).
-        // Email construct also fails when the byte directly before the
-        // local-part in source is a backslash that introduced an escape
-        // (e.g. `\+@bar.example.com` → email span text starts at `+` but
-        // source position is past the `\` that was consumed). micromark
-        // tokenizes `\+` as characterEscape, leaving the email construct
-        // unable to walk back across the escape boundary. find-and-replace
-        // then accepts the email — without position.
-        //
-        // Only an *actual* escape blocks the construct — `\e` (where `e`
-        // isn't punctuation) leaves the `\` literal, so the construct is
-        // unaffected (`3\e-gdafoo@…` still emits position on the email).
-        // Detect a real escape via the text-to-source map: if `\` was
-        // consumed as escape, map[s] skips past it (map[s] > previous +
-        // 1); if literal, the `\` shows up in text too and our `s` would
-        // include it. Equivalently: `\` immediately before the local part
-        // in source AND that `\` doesn't appear at text[s-1].
-        let email_escape_before = is_email
-            && text_to_source.as_ref().is_some_and(|map| {
-                let src_s = map[s];
-                src_s > 0 && source_slice[src_s - 1] == b'\\' && (s == 0 || bytes[s - 1] != b'\\')
-            });
-        let email_fnr =
-            is_email && (fnr_only || !url_in_source(&bytes[s..e]) || email_escape_before);
-        let with_position = !preceded_by_open_bracket[idx]
-            && !fnr_only
-            && !email_fnr
-            && (raw_source_url.is_some() || url_in_source(&bytes[s..e]));
-        // Use source-byte offsets for the link/displayed-text spans when we
-        // recovered raw source bytes; the `s..e` text positions don't
-        // correspond to where the URL actually sits in source.
-        let span_offsets = if raw_source_url.is_some() {
-            text_to_source.as_ref().map(|map| (map[s], map[e]))
-        } else {
-            None
-        };
-
+    for (s, url_end, raw_end, url) in matches {
         if s > cursor {
             let chunk = &text[cursor..s];
             let new_text_id = arena.alloc_node(MdastNodeType::Text as u8);
             let chunk_sr = arena.alloc_string(chunk);
             arena.set_type_data(new_text_id, &chunk_sr.as_bytes());
-            if with_position {
-                // Source positions: chunk_src_pos(0) = 0 (so a leading
-                // backslash-escape inside the chunk is included in span);
-                // chunk_src_pos(s) gives where the email/URL starts in
-                // source, accounting for any escapes consumed before it.
-                let cur_src = chunk_src_pos(cursor);
-                let end_src = chunk_src_pos(s);
-                let (sl, sc) = line_col_at_src(cur_src);
-                let (el, ec) = line_col_at_src(end_src);
-                arena.set_position(
-                    new_text_id,
-                    start_offset + cur_src as u32,
-                    start_offset + end_src as u32,
-                    sl,
-                    sc,
-                    el,
-                    ec,
-                );
+            if let Some((so, eo, sl, sc, el, ec)) = pos_for(cursor, s) {
+                arena.set_position(new_text_id, so, eo, sl, sc, el, ec);
             }
             new_children.push(new_text_id);
         }
-
         let link_id = arena.alloc_node(MdastNodeType::Link as u8);
-        let url_sr = arena.alloc_string(&url_for_node);
+        let url_sr = arena.alloc_string(&url);
         let link_data = LinkData {
             url: url_sr,
             title: StringRef::empty(),
         };
         arena.set_type_data(link_id, &link_data.to_bytes());
-        if with_position {
-            // Same chunk-source-position logic as the prior chunk: source
-            // span starts where text[s] is represented (incl. any escapes).
-            // Link start: use text[s]'s actual source position (map[s]), not
-            // chunk_src_pos(s). chunk_src_pos extends back to include consumed
-            // bytes (escapes, dropped indent on continuation lines) — those
-            // belong to the preceding TEXT chunk's end span, not the link's
-            // start. For an email `... \n<space>foo@bar`, the space at
-            // source[s-1] is NOT part of the email's range.
-            let link_start_fallback = || -> usize {
-                if let Some(map) = text_to_source.as_ref() {
-                    if s < map.len() {
-                        map[s]
-                    } else {
-                        chunk_src_pos(s)
-                    }
-                } else {
-                    chunk_src_pos(s)
-                }
-            };
-            let s_src = span_offsets
-                .map(|(a, _)| a)
-                .unwrap_or_else(link_start_fallback);
-            let e_src = span_offsets
-                .map(|(_, b)| b)
-                .unwrap_or_else(|| chunk_src_pos(e));
-            let (sl, sc) = line_col_at_src(s_src);
-            let (el, ec) = line_col_at_src(e_src);
-            arena.set_position(
-                link_id,
-                start_offset + s_src as u32,
-                start_offset + e_src as u32,
-                sl,
-                sc,
-                el,
-                ec,
-            );
-        }
         let link_text_id = arena.alloc_node(MdastNodeType::Text as u8);
-        let disp_sr = arena.alloc_string(displayed);
+        let disp_sr = arena.alloc_string(&text[s..url_end]);
         arena.set_type_data(link_text_id, &disp_sr.as_bytes());
-        if with_position {
-            // Link start: use text[s]'s actual source position (map[s]), not
-            // chunk_src_pos(s). chunk_src_pos extends back to include consumed
-            // bytes (escapes, dropped indent on continuation lines) — those
-            // belong to the preceding TEXT chunk's end span, not the link's
-            // start. For an email `... \n<space>foo@bar`, the space at
-            // source[s-1] is NOT part of the email's range.
-            let link_start_fallback = || -> usize {
-                if let Some(map) = text_to_source.as_ref() {
-                    if s < map.len() {
-                        map[s]
-                    } else {
-                        chunk_src_pos(s)
-                    }
-                } else {
-                    chunk_src_pos(s)
-                }
-            };
-            let s_src = span_offsets
-                .map(|(a, _)| a)
-                .unwrap_or_else(link_start_fallback);
-            let e_src = span_offsets
-                .map(|(_, b)| b)
-                .unwrap_or_else(|| chunk_src_pos(e));
-            let (sl, sc) = line_col_at_src(s_src);
-            let (el, ec) = line_col_at_src(e_src);
-            arena.set_position(
-                link_text_id,
-                start_offset + s_src as u32,
-                start_offset + e_src as u32,
-                sl,
-                sc,
-                el,
-                ec,
-            );
+        if let Some((so, eo, sl, sc, el, ec)) = pos_for(s, url_end) {
+            arena.set_position(link_id, so, eo, sl, sc, el, ec);
+            arena.set_position(link_text_id, so, eo, sl, sc, el, ec);
         }
         arena.set_children(link_id, &[link_text_id]);
         new_children.push(link_id);
-
-        // Emit the URL trail (bytes between the trimmed URL end and the
-        // raw end of the URL-shaped span) as its OWN text node when:
-        //  - the URL was suppressed by an unbalanced `[` AND the trail
-        //    needs to stay literal alongside the original `[`, OR
-        //  - the post-trail content starts on a new line — micromark
-        //    emits the trail as a separate text event, and mdast splits
-        //    text nodes at line boundaries, so a trail-then-newline
-        //    (e.g. `https://../>\nfoo`) produces TWO text nodes.
-        //  - the trail sits at end of text with nothing following
-        //    (still a separate node, since position attaches to the
-        //    trail span itself).
-        //
-        // Otherwise (same-line content follows the trail like `) for x`),
-        // mdast merges trail + post-trail into one text node — emit the
-        // trail as part of the trailing chunk by leaving cursor at `e`.
-        let split_trail = raw_e > e
-            && (preceded_by_open_bracket[idx]
-                || raw_e >= bytes.len()
-                || matches!(bytes.get(raw_e), Some(b'\n' | b'\r')));
-        if split_trail {
-            let chunk = &text[e..raw_e];
-            let new_text_id = arena.alloc_node(MdastNodeType::Text as u8);
-            let chunk_sr = arena.alloc_string(chunk);
-            arena.set_type_data(new_text_id, &chunk_sr.as_bytes());
-            // Trail position emission mirrors the link's: when the link
-            // had a position (construct path accepted), emit a position
-            // for the trail too. find-and-replace doesn't carry positions,
-            // so leave position-less in that case.
-            if with_position {
-                let e_src = chunk_src_pos(e);
-                let raw_e_src = chunk_src_pos(raw_e);
-                let (sl, sc) = line_col_at_src(e_src);
-                let (el, ec) = line_col_at_src(raw_e_src);
-                arena.set_position(
-                    new_text_id,
-                    start_offset + e_src as u32,
-                    start_offset + raw_e_src as u32,
-                    sl,
-                    sc,
-                    el,
-                    ec,
-                );
+        // `findUrl` emits the trail as a separate text node. `findEmail`
+        // has no trail (raw_end == end).
+        if raw_end > url_end {
+            let trail_chunk = &text[url_end..raw_end];
+            let trail_id = arena.alloc_node(MdastNodeType::Text as u8);
+            let trail_sr = arena.alloc_string(trail_chunk);
+            arena.set_type_data(trail_id, &trail_sr.as_bytes());
+            if let Some((so, eo, sl, sc, el, ec)) = pos_for(url_end, raw_end) {
+                arena.set_position(trail_id, so, eo, sl, sc, el, ec);
             }
-            new_children.push(new_text_id);
-            cursor = raw_e;
-        } else {
-            cursor = e;
+            new_children.push(trail_id);
         }
+        cursor = raw_end;
     }
-
     if cursor < bytes.len() {
         let chunk = &text[cursor..];
         let new_text_id = arena.alloc_node(MdastNodeType::Text as u8);
         let chunk_sr = arena.alloc_string(chunk);
         arena.set_type_data(new_text_id, &chunk_sr.as_bytes());
-        // The trailing chunk after the last autolink: emit with position if
-        // every replacement above was position-emitting (the whole text node
-        // was clean of unbalanced brackets) and no URL was rewritten,
-        // else leave it position-less.
-        if !preceded_by_open_bracket.iter().any(|x| *x) && !any_url_rewritten {
-            let cursor_src = chunk_src_pos(cursor);
-            let end_src = chunk_src_pos(bytes.len());
-            let (sl, sc) = line_col_at_src(cursor_src);
-            let (el, ec) = line_col_at_src(end_src);
-            arena.set_position(
-                new_text_id,
-                start_offset + cursor_src as u32,
-                start_offset + end_src as u32,
-                sl,
-                sc,
-                el,
-                ec,
-            );
+        if let Some((so, eo, sl, sc, el, ec)) = pos_for(cursor, bytes.len()) {
+            arena.set_position(new_text_id, so, eo, sl, sc, el, ec);
         }
         new_children.push(new_text_id);
     }

@@ -488,9 +488,13 @@ fn is_digit(c: u8) -> bool {
 }
 
 fn is_valid_unquoted_attr_value_char(c: u8) -> bool {
+    // micromark's html-flow `completeAttributeValueUnquoted` rejects the
+    // same set plus `/` and tab. Matching exactly so `<a k=v/`-style
+    // unquoted-with-slash isn't treated as a single value (it terminates
+    // the attribute, the `/` opens self-close or fails the tag).
     !matches!(
         c,
-        b'\'' | b'"' | b' ' | b'=' | b'>' | b'<' | b'`' | b'\n' | b'\r'
+        b'\'' | b'"' | b' ' | b'\t' | b'=' | b'>' | b'<' | b'`' | b'/' | b'\n' | b'\r'
     )
 }
 
@@ -601,12 +605,16 @@ pub(crate) fn scan_math_fence(data: &[u8]) -> Option<usize> {
 
 pub(crate) fn scan_closing_math_fence(bytes: &[u8], n_fence_char: usize) -> Option<usize> {
     // EOF is handled by parse_math_block's loop-top EOF check; here we only
-    // match an actual `$$+` fence.
+    // match an actual `$$+` fence. The trailing whitespace allowed before
+    // EOL is space OR tab — mdast-util-math accepts both.
     let num_fence_chars_found = scan_ch_repeat(bytes, b'$');
     if num_fence_chars_found < n_fence_char {
         return None;
     }
-    let i = num_fence_chars_found + scan_ch_repeat(&bytes[num_fence_chars_found..], b' ');
+    let mut i = num_fence_chars_found;
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
+        i += 1;
+    }
     scan_eol(&bytes[i..]).map(|_| i)
 }
 
@@ -1025,11 +1033,33 @@ fn parse_hex(bytes: &[u8], limit: usize) -> (usize, usize) {
 }
 
 fn char_from_codepoint(input: usize) -> Option<char> {
-    let codepoint = input.try_into().ok()?;
-    if codepoint == 0 {
+    // HTML / CommonMark numeric character-reference rules: certain codepoints
+    // decode to U+FFFD instead of the literal character. Transcribed from
+    // `micromark-util-decode-numeric-character-reference`:
+    //  * C0 controls except HT (9), LF (10), FF (12), CR (13), space (32)
+    //  * VT (11)
+    //  * Other C0 (14..=31)
+    //  * DEL (127) and C1 controls (128..=159)
+    //  * Surrogates (U+D800..=U+DFFF)
+    //  * Noncharacters U+FDD0..=U+FDEF and the *FFFE/*FFFF in every plane
+    //  * Out of range (> U+10FFFF)
+    let code: u32 = input.try_into().ok()?;
+    if code == 0 {
         return None;
     }
-    char::from_u32(codepoint)
+    let invalid = code < 9
+        || code == 11
+        || (14..=31).contains(&code)
+        || (127..=159).contains(&code)
+        || (0xD800..=0xDFFF).contains(&code)
+        || (0xFDD0..=0xFDEF).contains(&code)
+        || (code & 0xFFFF) == 0xFFFE
+        || (code & 0xFFFF) == 0xFFFF
+        || code > 0x10_FFFF;
+    if invalid {
+        return Some('\u{FFFD}');
+    }
+    char::from_u32(code)
 }
 
 // doesn't bother to check data[0] == '&'
@@ -1277,8 +1307,52 @@ fn scan_attribute_value(
             return None;
         }
         _ => {
-            // unquoted attribute value
+            // Unquoted attribute value. Micromark/remark accept a chain
+            // `name=v1=v2=…` and `name=unquoted="quoted"` as a single
+            // attribute, even though the strict CommonMark grammar would
+            // stop at the first `=`. Mirror that leniency by consuming
+            // additional `=value` segments after the initial unquoted run.
+            // A trailing `=` followed by a quote re-enters the quoted
+            // scanner; a trailing `=` followed by another unquoted run
+            // re-enters this arm.
             i += scan_attr_value_chars(&data[i..]);
+            while data.get(i) == Some(&b'=') {
+                let next = data.get(i + 1).copied();
+                match next {
+                    Some(b'"') | Some(b'\'') => {
+                        let quote = next.unwrap();
+                        i += 2;
+                        while i < data.len() {
+                            if data[i] == quote {
+                                i += 1;
+                                break;
+                            }
+                            if let Some(eol_bytes) = scan_eol(&data[i..]) {
+                                let handler = newline_handler?;
+                                i += eol_bytes;
+                                let skipped_bytes = handler(&data[i..]);
+                                if skipped_bytes > 0 {
+                                    buffer.extend(&data[*buffer_ix..i]);
+                                    *buffer_ix = i + skipped_bytes;
+                                }
+                                i += skipped_bytes;
+                            } else {
+                                i += 1;
+                            }
+                        }
+                    }
+                    Some(c)
+                        if !matches!(
+                            c,
+                            b' ' | b'=' | b'>' | b'<' | b'`' | b'\n' | b'\r'
+                        ) =>
+                    {
+                        i += 1;
+                        i += scan_attr_value_chars(&data[i..]);
+                    }
+                    _ => break,
+                }
+            }
         }
     }
 

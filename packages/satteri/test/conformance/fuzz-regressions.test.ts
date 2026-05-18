@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import {
   assertMdastConformance,
+  assertMdastConformanceNoPosition,
   assertHastConformance,
   assertHtmlConformance,
   assertExtMdastConformance,
@@ -227,6 +228,20 @@ describe("fuzz regressions: GFM tables", () => {
 
   test("trailing text after last `|` is its own cell", () => {
     assertMdastConformance("h | h2 |\n| - | - |\n| a | b |trailing");
+  });
+
+  // A line with ≥4 leading spaces is an indented code block, which
+  // interrupts table continuation.
+  test("≥4 leading spaces after table → indented code, not row", () => {
+    assertMdastConformance("a | b |\n| - | - |\n| 1 | 2 |\n     bar");
+  });
+
+  test("≥4 leading spaces also breaks tables with escaped pipes", () => {
+    assertMdastConformance("a | b |\n| - | - |\n| 1 | 2\\|\n     bar");
+  });
+
+  test("3 leading spaces still allowed as table row", () => {
+    assertMdastConformance("a | b |\n| - | - |\n| 1 | 2 |\n   bar");
   });
 });
 
@@ -987,6 +1002,184 @@ describe("fuzz regressions: `~~` flanking when followed by punctuation", () => {
   });
 });
 
+describe("fuzz regressions: autolink + backtick code-span ordering", () => {
+  // When an unbalanced `[` (or `![`) sits earlier in the paragraph,
+  // micromark disables the literalAutolink construct and lets a forward
+  // backtick pair tokenize as a code span. Satteri's firstpass now
+  // checks for the bracket + forward-matching backtick run before
+  // suppressing the backtick as URL-internal text.
+  test("`[\\nhttps://foo.bar.\\`baz>\\`` splits URL and code span", () => {
+    assertMdastConformance("[\nhttps://foo.bar.`baz>`");
+    assertHastConformance("[\nhttps://foo.bar.`baz>`");
+    assertHtmlConformance("[\nhttps://foo.bar.`baz>`");
+  });
+
+  test("backslash-prefix + multi-line variant", () => {
+    assertMdastConformance("\\@: \t*=8[\nhttps://foo.bar.`baz>`\n");
+    assertHastConformance("\\@: \t*=8[\nhttps://foo.bar.`baz>`\n");
+    assertHtmlConformance("\\@: \t*=8[\nhttps://foo.bar.`baz>`\n");
+  });
+
+  // Without an unbalanced bracket, the URL claims interior backticks
+  // (autolink construct fires first per micromark).
+  test("URL with interior backticks (no bracket) stays as URL", () => {
+    assertMdastConformance("https://foo.bar.`baz>`");
+  });
+});
+
+describe("fuzz regressions: HTML attribute leniency for type-7 blocks", () => {
+  // remark/micromark allow an unquoted attribute value to chain `=value`
+  // segments (`src=title="*"`, `foo=a=b`). `scan_attribute_value` matches
+  // that leniency.
+  test("`<img src=title=\"*\"/>` parses as HTML block", () => {
+    assertMdastConformance('<img src=title="*"/>\n');
+    assertHastConformance('<img src=title="*"/>\n');
+    assertHtmlConformance('<img src=title="*"/>\n');
+  });
+
+  test("unquoted chain `foo=a=b` accepted", () => {
+    assertMdastConformance("<xyzzy foo=a=b/>\n");
+  });
+
+  test("quoted value followed by junk still rejected", () => {
+    assertMdastConformance('<xyzzy foo="a"="b"/>\n');
+    assertMdastConformance('<xyzzy a="b"c="d"/>\n');
+  });
+});
+
+describe("fuzz regressions: strikethrough/emphasis two-pass resolve", () => {
+  // micromark runs each construct's `resolveAll` in the order that
+  // construct first fires. Whichever marker (`*`/`_` vs `~`/`^`) appears
+  // first in the block decides whether attention or strikethrough
+  // resolves first. The runner-up only sees what's left, so spans that
+  // would cross can't form. `parse.rs:handle_inline` mirrors this by
+  // picking the pass order from the first MaybeEmphasis char.
+
+  // Emphasis pairs `*..*`; strikethrough then nests inside it.
+  test("`*~bar~*` → emphasis wraps delete", () => {
+    assertMdastConformance("*~bar~*");
+    assertHtmlConformance("*~bar~*");
+  });
+
+  test("`**~bar~**` → strong wraps delete", () => {
+    assertMdastConformance("**~bar~**");
+  });
+
+  test("`*foo~bar~*` → emphasis(text + delete)", () => {
+    assertMdastConformance("*foo~bar~*");
+  });
+
+  test("`*foo~bar~baz*` → emphasis(text + delete + text)", () => {
+    assertMdastConformance("*foo~bar~baz*");
+  });
+
+  test("`[*~bar~*](url)` → link with emphasis(delete) inside", () => {
+    assertMdastConformance("[*~bar~*](url)");
+  });
+
+  test("`_*~bar~*_` → emphasis(emphasis(delete))", () => {
+    assertMdastConformance("_*~bar~*_");
+  });
+
+  test("`*foo*~bar~*baz*` → emphasis + delete + emphasis (sibling)", () => {
+    assertMdastConformance("*foo*~bar~*baz*");
+  });
+
+  // Emphasis claims its span; strikethrough would cross the
+  // `*..*` boundary so it can't form.
+  test("`_/~z)*~*nf` → emphasis(~), no delete (would cross)", () => {
+    assertMdastConformance("_/~z)*~*nf");
+    assertHastConformance("_/~z)*~*nf");
+    assertHtmlConformance("_/~z)*~*nf");
+  });
+
+  test("`*>+~(-[_~_` emphasis claims its span before single-~ pair", () => {
+    assertMdastConformance("*>+~(-[_~_");
+    assertHastConformance("*>+~(-[_~_");
+    assertHtmlConformance("*>+~(-[_~_");
+  });
+
+  // Strikethrough pairs `~..~`; emphasis nests inside it.
+  test("`~_a_~` → delete(emphasis(a))", () => {
+    assertMdastConformance("~_a_~");
+  });
+
+  test("`~_a_~_b_` → delete(emphasis(a)) + emphasis(b)", () => {
+    assertMdastConformance("~_a_~_b_");
+  });
+
+  // Strikethrough captures the inner `_` as content; the `_` at
+  // offset 4 is left alone because its potential opener (`_` at
+  // offset 1) is now inside the strikethrough.
+  test("`~_~:_<` → delete(_), no emphasis (capturing wins)", () => {
+    assertMdastConformance("~_~:_<");
+  });
+
+  test("`~*~:*<` → delete(*), no emphasis (capturing wins)", () => {
+    assertMdastConformance("~*~:*<");
+  });
+
+  test("`~#\\=_~:_<` → delete with escape, no emphasis", () => {
+    assertMdastConformance("~#\\=_~:_<");
+  });
+
+  test("`#~_n~>=` → strikethrough survives across `_`", () => {
+    assertMdastConformance("#~_n~>=");
+  });
+
+  test("`~foo*bar*~` → delete with emphasis inside", () => {
+    assertMdastConformance("~foo*bar*~");
+  });
+
+  test("`~~text~~` → delete", () => {
+    assertMdastConformance("~~text~~");
+  });
+
+  test("`*~~text~~*` → emphasis(delete)", () => {
+    assertMdastConformance("*~~text~~*");
+  });
+
+  test("`~~!~~` → delete with single char", () => {
+    assertMdastConformance("~~!~~");
+  });
+
+  test("`*~bar~*` keeps single-tilde semantics", () => {
+    assertHastConformance("*~bar~*");
+  });
+});
+
+describe("fuzz regressions: email autolink underscore in domain", () => {
+  // mdast-util-gfm-autolink-literal's `findEmail` only rejects emails
+  // whose label *ends* with `[-\d_]`. Underscores anywhere else in the
+  // domain (penultimate segment, leading underscore, TLD interior) are
+  // permitted. The previous scanner over-rejected on any `_` in the
+  // last two segments.
+
+  test("`xg@_xample.com` → email (leading `_` in penult is fine)", () => {
+    assertMdastConformance("7!xg@_xample.com\n");
+  });
+
+  test("`foo@bar_baz.com` → email (`_` in penult is fine)", () => {
+    assertMdastConformance("foo@bar_baz.com");
+  });
+
+  test("`foo@bar.b_z` → email (`_` in TLD interior is fine)", () => {
+    assertMdastConformance("foo@bar.b_z");
+  });
+
+  test("`foo@bar_.com` → email (`_` at penult end is fine)", () => {
+    assertMdastConformance("foo@bar_.com");
+  });
+
+  test("`foo@a_b.c` → email (`_` mid-penult is fine)", () => {
+    assertMdastConformance("foo@a_b.c");
+  });
+
+  test("`foo@a.b_` → NOT an email (label ends in `_`)", () => {
+    assertMdastConformance("foo@a.b_");
+  });
+});
+
 describe("fuzz regressions: GFM autolink trail split on newline", () => {
   // When the post-trail content starts on a new line, mdast emits the trail
   // and the rest as TWO text nodes (micromark text events split at line
@@ -1596,5 +1789,423 @@ describe("fuzz regressions: autolink URL stops at matched-backtick code span (fi
     const refUrl = JSON.stringify(ref).match(/"url":"([^"]*)"/)?.[1];
     const actUrl = JSON.stringify(act).match(/"url":"([^"]*)"/)?.[1];
     expect(actUrl).toBe(refUrl);
+  });
+});
+
+describe("fuzz regressions: table header pipe count with consecutive backslashes", () => {
+  // `\|` escapes the pipe, but `\\|` is a literal `\` followed by an
+  // unescaped separator pipe. Both the pipe-counting scan that decides
+  // whether a paragraph opens a table AND the cell-splitting scan that
+  // breaks a row into cells must respect backslash run parity, or
+  // `\\|` will be mistaken for a single escaped pipe.
+  test("`lf\\\\| a | b |` produces 3 header cells, not 2 (not a table vs 2-col delim)", () => {
+    assertMdastConformance("lf\\\\| col | val |\n| --- | --- |\n| a   | $x$ |");
+  });
+
+  test("`\\\\|` inside cells: row keeps both backslashes and splits on the pipe", () => {
+    assertMdastConformance("| a\\\\| b |\n| --- | --- |\n");
+  });
+
+  test("`\\|` still escapes the pipe (single backslash)", () => {
+    assertMdastConformance("| a\\| b |\n| --- |\n");
+  });
+
+  test("`\\\\\\|` (three backslashes) escapes the pipe", () => {
+    assertMdastConformance("a\\\\\\| b | c\n--- | ---\n");
+  });
+});
+
+describe("fuzz regressions: ordered list interrupt requires textual `1.`", () => {
+  // Only a *textually* single-digit `1.` or `1)` may interrupt a paragraph.
+  // `01.`, `001.`, `10.`, etc. all parse to numeric 1 but their multi-byte
+  // marker bytes mean micromark refuses the interrupt and leaves the line
+  // as paragraph continuation.
+  test("`foo\\n01. bar` → single paragraph (leading zero forbids interrupt)", () => {
+    assertMdastConformance("foo\n01. bar");
+  });
+
+  test("`foo\\n001. bar` → single paragraph", () => {
+    assertMdastConformance("foo\n001. bar");
+  });
+
+  test("`foo\\n10. bar` → single paragraph (multi-digit forbids interrupt)", () => {
+    assertMdastConformance("foo\n10. bar");
+  });
+
+  test("`foo\\n01) bar` → single paragraph (`)` delim too)", () => {
+    assertMdastConformance("foo\n01) bar");
+  });
+
+  test("`foo\\n1. bar` → paragraph + list (textual `1.` allowed)", () => {
+    assertMdastConformance("foo\n1. bar");
+  });
+
+  test("`foo\\n1) bar` → paragraph + list (textual `1)` allowed)", () => {
+    assertMdastConformance("foo\n1) bar");
+  });
+
+  test("`01. bar` (no preceding paragraph) still opens a list", () => {
+    assertMdastConformance("01. bar");
+  });
+
+  test("`10. bar` (no preceding paragraph) still opens a list", () => {
+    assertMdastConformance("10. bar");
+  });
+
+  test("the math/mdx fuzz finding: `vdpj\\n01. ordered $a$\\n2. items $b$`", () => {
+    assertMdastConformance("vdpj\n01. ordered $a$\n2. items $b$");
+  });
+
+  test("the mdx fuzz finding: `tx\\n01.      indented code\\n…`", () => {
+    assertMdastConformance(
+      "tx\n01.      indented code\n\n   paragraph\n\n       more code\n",
+    );
+  });
+});
+
+describe("fuzz regressions: lazy indented code after empty blockquote doesn't suppress next list", () => {
+  // `>\n\t9\n+`: the empty blockquote's blank-line state propagates
+  // through the lazy one-line indented code that follows. micromark's
+  // `parser.interrupt` is false at `+`, so the empty marker IS allowed
+  // to open a list. A non-lazy indented code (no preceding bq pop)
+  // still keeps the suppression.
+  test("`>\\n\\t9\\n+` → blockquote(), code:'9', list(emptyItem)", () => {
+    assertMdastConformance(">\n\t9\n+");
+  });
+
+  test("`>\\n\\t9^\\n+\\np` → list opens, then paragraph 'p'", () => {
+    assertMdastConformance(">\n\t9^\n+\np");
+  });
+
+  test("`\\t9\\n+` (no preceding bq) keeps suppression: paragraph '+'", () => {
+    assertMdastConformance("\t9\n+");
+  });
+
+  test("`>\\n\\n\\t9\\n+` (blank line between bq and code) keeps suppression", () => {
+    assertMdastConformance(">\n\n\t9\n+");
+  });
+
+  test("`    code\\n\\n2. b` still becomes [code, paragraph]", () => {
+    assertMdastConformance("    code\n\n2. b");
+  });
+});
+
+describe("fuzz regressions: empty list marker can't interrupt refdef-paragraph", () => {
+  // A refdef leaves micromark's `paragraph` token interrupted but not
+  // closed. When the next line opens a blockquote and the FIRST
+  // content inside it is an empty list marker (e.g. `*`, `-`, `+`
+  // alone), the marker is paragraph text, not a list — empty markers
+  // can't interrupt a paragraph (CM example 305). The state has to
+  // propagate through the blockquote opening on the same line.
+  test("`[a]: u\\n>*` keeps `*` as paragraph text inside the blockquote", () => {
+    assertMdastConformance("[a]: u\n>*");
+  });
+
+  test("`[a]: u\\n>-` keeps `-` as paragraph text inside the blockquote", () => {
+    assertMdastConformance("[a]: u\n>-");
+  });
+
+  test("`[a]: u\\n>+` keeps `+` as paragraph text inside the blockquote", () => {
+    assertMdastConformance("[a]: u\n>+");
+  });
+
+  test("`[a]: u\\n>* foo` is still a real list (marker has content)", () => {
+    assertMdastConformance("[a]: u\n>* foo");
+  });
+
+  test("`[a]: u\\n\\n>*` (blank line) opens a fresh blockquote+list", () => {
+    assertMdastConformance("[a]: u\n\n>*");
+  });
+
+  test("`[a]: u\\n\\n  >*` (blank line + indent) opens a fresh blockquote+list", () => {
+    assertMdastConformance("[a]: u\n\n  >*");
+  });
+});
+
+describe("fuzz regressions: HTML block preserves tab-expansion leftover in blockquote", () => {
+  // `>\t<div>` consumes `>` + one column of the tab as the blockquote
+  // marker, leaving 2 columns of phantom whitespace before `<div>`.
+  // remark preserves those as literal spaces in the html value.
+  test("`>\\t<div>` keeps 2 leading spaces in the html value", () => {
+    assertMdastConformance(">\t<div>\nbar\n</div>\n*foo*\n");
+  });
+
+  test("`>\\t<style>` (type 1) keeps tab-leftover spaces", () => {
+    assertMdastConformance(">\t<style>x</style>\n");
+  });
+
+  test("leading space ` <!--…-->` is NOT doubled (raw byte, not phantom)", () => {
+    assertMdastConformance(" <!n=n0p");
+  });
+});
+
+describe("fuzz regressions: code/html block trailing newline depends on terminator", () => {
+  // When an indented or fenced code block (and likewise an HTML block) is
+  // terminated by a sibling list/blockquote opening, remark keeps the
+  // intervening blank lines as code/html content. When terminated by a
+  // leaf block (paragraph/heading/etc.) the blank line is consumed as a
+  // separator and trimmed instead.
+  // Position-only: REF and OUR emit the same value, but EOF accounting for
+  // the trailing blank lines differs (line 4 vs. 5).
+  test("code fence + 2 blanks + new list item keeps both newlines", () => {
+    assertMdastConformanceNoPosition("- ```\n  b\n\n\n2. x");
+  });
+
+  test("code fence + 2 blanks + sibling unordered marker keeps both newlines", () => {
+    assertMdastConformanceNoPosition("- ```\n  b\n\n\n- x");
+  });
+
+  test("code fence + 2 blanks + blockquote keeps both newlines", () => {
+    assertMdastConformanceNoPosition("- ```\n  b\n\n\n> x");
+  });
+
+  test("code fence + 2 blanks + heading still trims separator", () => {
+    assertMdastConformance("- ```\n  b\n\n\n# x");
+  });
+
+  test("HTML block in blockquote ended by sibling list keeps trailing newline", () => {
+    assertMdastConformance(">\t<!r foo\n- bar");
+  });
+
+  test("HTML block in blockquote ended by paragraph still trims trailing newline", () => {
+    assertMdastConformance(">\t<!r foo\nbar");
+  });
+});
+
+describe("fuzz regressions: refdef label decodes HTML entities and backslash escapes", () => {
+  // remark runs the refdef label through entity-and-backslash unescape:
+  // `&amp;` → `&`, `&AElig;` → `Æ`, `\\[` → `[`, etc.
+  test("`[A]\\n\\n[&AElig;]: /url` decodes entity in label", () => {
+    assertMdastConformance("[A]\n\n[&AElig;]: /url\n");
+  });
+
+  test("multi-line label with mixed entities + literal `&S` (invalid)", () => {
+    assertMdastConformance(
+      "[ẞ]\n\n[S&nbsp; &amp; &copy; &AElig; &Dcaron;\n&frac34; &S]: /url\n",
+    );
+  });
+});
+
+describe("fuzz regressions: image alt preserves inline HTML verbatim", () => {
+  // remark's "alt = stripped visible content" rule keeps inline HTML
+  // verbatim in the alt: `![foo<div>bar](u)` → `alt: "foo<div>bar"`.
+  // OUR was dropping the inline HTML.
+  test("`![foo<div>\\n bar](/u \"title\")` keeps `<div>` in alt", () => {
+    assertMdastConformance(
+      'm(q\n~k}y ![foo<div>\n bar](/path/to/train.jpg  "title"   )\n',
+    );
+  });
+
+  test("simpler: `![a<i>b](u)` keeps `<i>`", () => {
+    assertMdastConformance("![a<i>b](u)");
+  });
+});
+
+describe("fuzz regressions: numeric character references map control chars to U+FFFD", () => {
+  // HTML / CommonMark numeric character references in C0 / C1 control ranges,
+  // surrogates, noncharacters, and out-of-range codepoints all decode to
+  // U+FFFD (replacement character) — not the literal codepoint.
+  // Transcribed from `micromark-util-decode-numeric-character-reference`.
+  test("`&#17;` (C0 control U+0011) → U+FFFD", () => {
+    assertMdastConformance("8|o&#17;&#10;bar\n");
+  });
+
+  test("`&#0;` (NULL) → U+FFFD", () => {
+    assertMdastConformance("&#0;");
+  });
+
+  test("`&#22;` (control) mixed with valid hex entities", () => {
+    assertMdastConformance("[&#22; &#XD06; &#xcab;\n");
+  });
+
+  test("`&#xD800;` (surrogate) → U+FFFD", () => {
+    assertMdastConformance("&#xD800;");
+  });
+
+  test("valid `&#9;` (TAB) and `&#10;` (LF) pass through", () => {
+    assertMdastConformance("&#9;");
+  });
+});
+
+describe("fuzz regressions: GFM autolink trail split based on trim-set kind", () => {
+  // Trail chars `>` and `}` are *splitUrl-only* trim chars — the construct
+  // doesn't trim them, so micromark emits them as part of the URL token.
+  // The trim only happens when find-and-replace's `splitUrl` runs, after
+  // which the trail is a structurally distinct text event from the
+  // surrounding text. Other trails (common trim chars like `!"&;,.`)
+  // get merged into the trailing chunk.
+  test("trail `>` + newline + html → split into trail + `\\n` + html", () => {
+    assertMdastConformance("https://../>\n</script>");
+  });
+
+  test("trail `!\";` + newline + html → merge into one text node", () => {
+    assertMdastConformance('a<https://foo.bar/?a!";\n</script>');
+  });
+
+  test("trail `!\";` + newline + paragraph → merge", () => {
+    assertMdastConformance('a<https://x/?a!";\nfoo');
+  });
+
+  test("the full script-block fuzz input", () => {
+    assertMdastConformance(
+      '3[:[a@^o~r(<script type="text/javascript">\n// JavaScript example\n\ndocument.getElementById("demo").innerHTML = "Hello Jav__a<https://foo.bar/?aScript!";\n</script>\nokay\n',
+    );
+  });
+});
+
+describe("fuzz regressions: MDX JSX namespace allows whitespace around `:`", () => {
+  // micromark's JSX scanner permits whitespace around `:` and `.` separators
+  // (`<a :b/>` → name `a:b`, `<a . b/>` → name `a.b`). OUR previously
+  // rejected the space and reported a parse error.
+  test("`<a :b/>` opens flow JSX with name `a:b`", async () => {
+    const { satteriMdxMdast, referenceMdxMdast } = await import("./fuzz/shared.js");
+    expect(satteriMdxMdast("<a :b/>")).toEqual(referenceMdxMdast("<a :b/>"));
+  });
+
+  test("`b<acz :circle/>` inline JSX keeps the namespace", async () => {
+    const { satteriMdxMdast, referenceMdxMdast } = await import("./fuzz/shared.js");
+    expect(satteriMdxMdast("b<acz :circle/>")).toEqual(
+      referenceMdxMdast("b<acz :circle/>"),
+    );
+  });
+});
+
+describe("fuzz regressions: GFM autolink fires during inline tokenization, not as post-pass", () => {
+  // Multi-link soup: `[link](https://exa[![moon](mmple.com#fragment)`.
+  // Inline-link parse on `[link](...)` fails (destination has unbalanced
+  // brackets), so the bytes after `(` fall back to text context. micromark's
+  // gfmAutolinkLiteral construct then claims `https://exa[![moon` as a URL
+  // (path tokenizer allows `[`/`!`, stopping at `]` before `(`).
+  //
+  // Our previous post-pass approach couldn't reach this case: the inline
+  // resolver formed an image out of `![moon](mmple.com#fragment)`, removing
+  // those bytes from the Text node the post-pass scanned. Running the
+  // construct during inline tokenization (firstpass) consumes the URL bytes
+  // before image/bracket resolution sees them.
+  test("[a](https://x[![alt](url) → trailing literal autolink", () => {
+    assertMdastConformance("[a](https://x[![alt](url)");
+  });
+
+  test("multi-link soup with paragraphs", () => {
+    assertMdastConformance(
+      "*r{}>4bnk](#fragment)\n\n[link](https://exa[![moon](mmple.com#fragment)\n\n[link](https://example.com?foo=3#frag)\n",
+    );
+  });
+
+  // The inline autolink construct yields to a pending `<URL>` pointed
+  // autolink when `<` immediately precedes the trigger. But if the `<` is
+  // itself a backslash escape (`\<`), it's literal text and can't form
+  // a pointed autolink — the literal URL should fire.
+  test("`\\<http://foo.bar.baz>` fires literal autolink (escaped `<`)", () => {
+    assertMdastConformance("\\<http://foo.bar.baz>\n");
+  });
+
+  // When the inline autolink ends its URL on a `\` (the construct keeps
+  // backslashes in path bytes), that `\` is URL content — not a
+  // text-context hardbreak marker for the following `\n`.
+  test("URL ending in `\\` before `\\n` is not a hardbreak marker", () => {
+    assertMdastConformance("_<https://foo.bar/bazfoo\\\nb bim>\n");
+  });
+
+  // The FNR email regex's `(?<=^|\s|\p{P}|\p{S})` lookbehind rejects when
+  // the preceding char is a Unicode letter (Cyrillic `п` here).
+  // `scan_email_autolink`'s walkback stops at non-ASCII-atext bytes but
+  // accepts them — we add a Unicode-aware prev check on top.
+  test("email preceded by Cyrillic letter is rejected by FNR", () => {
+    assertMdastConformance("пo\\+@bar.example.com>\n");
+  });
+});
+
+// Each `test.fails` below is a structural divergence Sätteri still has
+// vs remark — discovered by `FUZZ_RUNS=1000000` runs of test/conformance/
+// fuzz/md.test.ts. They are tracked here so that whoever closes the gap
+// will get a green-test signal (vitest's `.fails` inverts the assertion).
+// Frequency note: each case surfaces ≤1× per 200k iterations.
+describe("fuzz known-fails: complex structural divergences (md)", () => {
+  // `*>ss)1.  foo` → REF treats the entire first line as paragraph text;
+  // Sätteri opens a list+blockquote+list-item stack first, which derails
+  // the subsequent indented `\`\`\`` fence + code block + `> bam` nesting.
+  test.fails("list/bq/code-fence/autolink cascade", () => {
+    assertMdastConformance(
+      "*>ss)1.  foo\n\n    ```\n <https://ex   bar\n    ```\n\n    baz\n\n    > bam\n",
+    );
+  });
+
+  // `[\\\n](3*foo)\n` — link label contains a `\\\n` hard-break. REF emits
+  // the link with a `break` child inside the label; Sätteri keeps the
+  // backslash+newline as text and loses the hard-break node.
+  test.fails("link label with backslash-newline hard break", () => {
+    assertMdastConformance("[\\\n](3*foo)\n");
+  });
+
+  // `` `[)4p$[g`https://foo.bar.`baz>` `` — first backtick run opens a
+  // code span whose contents include `https://foo.bar.`. REF pairs the
+  // backticks differently from Sätteri here; downstream `baz>` ends up
+  // in different text nodes.
+  test.fails("code span pairing with autolink-like body", () => {
+    assertMdastConformance("`[)4p$[g`https://foo.bar.`baz>`\n");
+  });
+
+  // `* !!f~\`\`\`\`\naaa\n\`\`\`\n\`\`\`\`\`\`\n    Foo\n    ---\n\n    Foo\n---`
+  // — 4-backtick fence opened inside a list item, 3-backtick content,
+  // 6-backtick close, then indented setext heading then root-level
+  // setext heading. REF keeps the fence and the trailing setext h2
+  // separate; Sätteri collapses them.
+  test.fails("4-tick fence in listitem, then root setext", () => {
+    assertMdastConformance(
+      "* !!f~````\naaa\n```\n``````\n    Foo\n    ---\n\n    Foo\n---",
+    );
+  });
+
+  // `www.     indented code\n\n   paragraph\n\n       more code\n` — `www`
+  // alone (URL `http://www`) is what REF emits for the leading autolink;
+  // mdast-util-gfm-autolink-literal's www-construct accepts even without
+  // a domain tail. Sätteri's construct rejects when no domain follows the
+  // `www.`.
+  test.fails("bare `www` autolink with no domain tail", () => {
+    assertMdastConformance("www.     indented code\n\n   paragraph\n\n       more code\n");
+  });
+
+  // `* [Foo\n  bar]: /url\n\n[Baz][Foo bar]\n` — multi-line refdef label
+  // inside a list item. REF resolves the definition (label spans two
+  // lines) and links `[Baz][Foo bar]` against it. Sätteri's refdef parse
+  // doesn't accept the wrapped label inside the listitem.
+  test.fails("multi-line refdef label inside listitem resolves outer reference", () => {
+    assertMdastConformance("* [Foo\n  bar]: /url\n\n[Baz][Foo bar]\n");
+  });
+
+  // `\nd[37r\\\n]()\n` — link label `37r\\\n` contains a hard-break
+  // (`\\\n`). REF emits the link with a `break` child; Sätteri keeps
+  // the backslash+newline as text inside the label.
+  test.fails("link label with hard break (variant)", () => {
+    assertMdastConformance("\nd[37r\\\n]()\n");
+  });
+});
+
+// MDX-specific known fails. Sätteri's mdx mode either parses where REF
+// errors, or nests where REF emits siblings. Each case found by 1M fuzz
+// of test/conformance/fuzz/mdx.test.ts.
+describe("fuzz known-fails: complex structural divergences (mdx)", () => {
+  // `` l`{yk[[=\t\n<https://foo.bar.`baz>` `` — REF (mdx-js) throws a
+  // parse error on this. Sätteri's code-span path swallows the
+  // `<https://foo.bar.` (an autolink fragment) into the code span body
+  // and finishes without raising the mdx error.
+  test.fails("code span body that contains autolink-like `<…>` errors in mdx", async () => {
+    const { satteriMdxMdast, referenceMdxMdast } = await import("./fuzz/shared.js");
+    expect(satteriMdxMdast("l`{yk[[=\t\n<https://foo.bar.`baz>`\n")).toEqual(
+      referenceMdxMdast("l`{yk[[=\t\n<https://foo.bar.`baz>`\n"),
+    );
+  });
+
+  // `-\n\n  2. b\n\n    3. c\n` — empty bullet list, then numbered list
+  // items at progressively deeper indentation. REF emits `2. b` and
+  // `3. c` as siblings in one ordered list (loose). Sätteri nests `3.`
+  // inside `2.` because its listitem-indent calc inherits the popped
+  // outer-bullet context, narrowing the sibling-match window.
+  test.fails("empty bullet then indent-stepped ordered items stay siblings", async () => {
+    const { satteriMdxMdast, referenceMdxMdast } = await import("./fuzz/shared.js");
+    expect(satteriMdxMdast("-\n\n  2. b\n\n    3. c\n")).toEqual(
+      referenceMdxMdast("-\n\n  2. b\n\n    3. c\n"),
+    );
   });
 });

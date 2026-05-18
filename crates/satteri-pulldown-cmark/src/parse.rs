@@ -473,7 +473,92 @@ impl<'input> ParserInner<'input> {
     /// Note: there's some potential for optimization here, but that's future work.
     pub(crate) fn handle_inline(&mut self, callbacks: &mut dyn ParserCallbacks<'input>) {
         self.handle_inline_pass1(callbacks);
-        self.handle_emphasis_and_hard_break();
+        // Resolve attention (emphasis/strong) and strikethrough/sub/sup.
+        // micromark runs each construct's `resolveAll` in the order each
+        // construct first fires; whichever marker appears first in the
+        // block decides whether emphasis or strikethrough resolves
+        // first. This matters when their would-be spans cross:
+        //   * `*~bar~*`  – first marker `*` → emphasis first, then
+        //     strikethrough inside the emphasis.
+        //   * `~_~:_<`   – first marker `~` → strikethrough first,
+        //     capturing `_` as content; `_` at offset 4 is then alone.
+        //   * `_/~z)*~*nf` – first marker `_`, no `_` closer → emphasis
+        //     first (pairs `*..*`); `~..~` would cross the emphasis so
+        //     it can't form in the second pass.
+        // Each pass is recursive: after pairing at root, it descends
+        // into already-formed spans so that inner markers (e.g.
+        // `~_a_~` → `_a_` inside the strikethrough) still resolve.
+        let st_enabled = self.options.contains(Options::ENABLE_STRIKETHROUGH)
+            || self.options.contains(Options::ENABLE_SUBSCRIPT)
+            || self.options.contains(Options::ENABLE_SUPERSCRIPT);
+        if !st_enabled {
+            self.handle_emphasis_pass();
+            return;
+        }
+        let strikethrough_first = matches!(
+            self.first_inline_marker_char(self.tree.cur()),
+            Some(b'~') | Some(b'^')
+        );
+        if strikethrough_first {
+            self.handle_tildes_carets_pass();
+            self.handle_emphasis_pass();
+        } else {
+            self.handle_emphasis_pass();
+            self.handle_tildes_carets_pass();
+        }
+    }
+
+    /// Find the first MaybeEmphasis token in `start..` whose character
+    /// is one of `*` `_` `~` `^`. Used to pick the resolve order.
+    fn first_inline_marker_char(&self, start: Option<TreeIndex>) -> Option<u8> {
+        let mut cur = start;
+        while let Some(cur_ix) = cur {
+            if let ItemBody::MaybeEmphasis(_, _, _) = self.tree[cur_ix].item.body {
+                let c = self.text.as_bytes()[self.tree[cur_ix].item.start];
+                if matches!(c, b'*' | b'_' | b'~' | b'^') {
+                    return Some(c);
+                }
+            }
+            cur = self.tree[cur_ix].next;
+        }
+        None
+    }
+
+    /// Recursive emphasis pass. Processes `*`/`_` MaybeEmphasis at this
+    /// scope, then descends into any inline containers (Emphasis,
+    /// Strong, Strikethrough, Link, Image, etc.) to do the same in
+    /// their children.
+    fn handle_emphasis_pass(&mut self) {
+        let start = self.tree.cur();
+        self.resolve_emphasis_recursive(start);
+    }
+
+    fn resolve_emphasis_recursive(&mut self, start: Option<TreeIndex>) {
+        // Save and reset the shared inline_stack so each scope works
+        // with a fresh one. Smart-quote state is local to
+        // `handle_emphasis_in_scope`, no save needed.
+        let saved = core::mem::take(&mut self.inline_stack);
+        self.handle_emphasis_in_scope(start);
+        self.inline_stack = saved;
+
+        let mut cur = start;
+        while let Some(cur_ix) = cur {
+            let next = self.tree[cur_ix].next;
+            match self.tree[cur_ix].item.body {
+                ItemBody::Emphasis
+                | ItemBody::Strong
+                | ItemBody::Strikethrough
+                | ItemBody::Subscript
+                | ItemBody::Superscript
+                | ItemBody::Link(_)
+                | ItemBody::Image(_) => {
+                    let child = self.tree[cur_ix].child;
+                    self.resolve_emphasis_recursive(child);
+                }
+                _ => {}
+            }
+            cur = next;
+        }
     }
 
     /// Handle inline HTML, code spans, and links.
@@ -641,6 +726,14 @@ impl<'input> ParserInner<'input> {
                                             // the underline is lazy
                                             // paragraph continuation, so
                                             // accept as text.
+                                            //
+                                            // Same for listitems: if the
+                                            // spine has a ListItem and the
+                                            // underline line starts at a
+                                            // column less than the listitem
+                                            // content column, it's lazy
+                                            // continuation and doesn't
+                                            // promote — accept as text.
                                             let mut ls = start;
                                             while ls > 0
                                                 && !matches!(bytes_block[ls - 1], b'\n' | b'\r')
@@ -653,7 +746,64 @@ impl<'input> ParserInner<'input> {
                                                 k += 1;
                                                 sp += 1;
                                             }
-                                            k < start && bytes_block[k] == b'>'
+                                            if k < start && bytes_block[k] == b'>' {
+                                                true
+                                            } else {
+                                                // Underline line start.
+                                                let mut us = probe;
+                                                while us > 0
+                                                    && !matches!(
+                                                        bytes_block[us - 1],
+                                                        b'\n' | b'\r'
+                                                    )
+                                                {
+                                                    us -= 1;
+                                                }
+                                                let mut underline_col = 0;
+                                                let mut uk = us;
+                                                while uk < probe && bytes_block[uk] == b' ' {
+                                                    uk += 1;
+                                                    underline_col += 1;
+                                                }
+                                                let listitem_indent = self
+                                                    .tree
+                                                    .walk_spine()
+                                                    .filter_map(|&ix| match self.tree[ix].item.body
+                                                    {
+                                                        ItemBody::ListItem(indent, _) => {
+                                                            Some(indent)
+                                                        }
+                                                        _ => None,
+                                                    })
+                                                    .next();
+                                                let in_blockquote = self.tree.walk_spine().any(
+                                                    |&ix| {
+                                                        matches!(
+                                                            self.tree[ix].item.body,
+                                                            ItemBody::BlockQuote(..)
+                                                        )
+                                                    },
+                                                );
+                                                // BlockQuote container: an
+                                                // underline line missing the
+                                                // `>` prefix is lazy
+                                                // continuation and doesn't
+                                                // promote. Detect by checking
+                                                // the underline line's source
+                                                // (not block_text, which has
+                                                // already stripped the
+                                                // prefix).
+                                                let bq_lazy = if in_blockquote {
+                                                    underline_col < 1
+                                                        || !bytes_block[us..probe]
+                                                            .iter()
+                                                            .any(|&b| b == b'>')
+                                                } else {
+                                                    false
+                                                };
+                                                matches!(listitem_indent, Some(i) if underline_col < i)
+                                                    || bq_lazy
+                                            }
                                         }
                                     }
                                 }
@@ -1333,9 +1483,14 @@ impl<'input> ParserInner<'input> {
     }
 
     fn handle_emphasis_and_hard_break(&mut self) {
+        let start = self.tree.cur();
+        self.handle_emphasis_in_scope(start);
+    }
+
+    fn handle_emphasis_in_scope(&mut self, start: Option<TreeIndex>) {
         let mut prev = None;
         let mut prev_ix: TreeIndex;
-        let mut cur = self.tree.cur();
+        let mut cur = start;
 
         let mut single_quote_open: Option<TreeIndex> = None;
         let mut double_quote_open: bool = false;
@@ -1346,6 +1501,19 @@ impl<'input> ParserInner<'input> {
                     let run_length = count;
                     let c = self.text.as_bytes()[self.tree[cur_ix].item.start];
                     let both = can_open && can_close;
+                    // Defer `~`/`^` resolution to the post-pass.
+                    // Without lookahead, the single-pass can't tell whether an
+                    // earlier `*`/`_` opener will pair (in which case the
+                    // `~`/`^` should match inside the future emphasis) or
+                    // remain unmatched (in which case `~`/`^` would cross the
+                    // boundary). micromark handles this with a separate
+                    // strikethrough resolve phase that runs after emphasis.
+                    if c == b'~' || c == b'^' {
+                        prev_ix = cur_ix + count - 1;
+                        prev = Some(prev_ix);
+                        cur = self.tree[prev_ix].next;
+                        continue;
+                    }
                     if can_close {
                         while let Some(el) =
                             self.inline_stack
@@ -1500,6 +1668,159 @@ impl<'input> ParserInner<'input> {
             }
         }
         self.inline_stack.pop_all(&mut self.tree);
+    }
+
+    /// Second-pass strikethrough/sub/sup resolution. Walks the tree
+    /// hierarchically and resolves `~`/`^` MaybeEmphasis tokens within
+    /// each inline scope independently. This matches micromark's
+    /// post-emphasis resolve phase: a `~..~` pair only forms when both
+    /// ends lie within the same enclosing scope (root, emphasis, link,
+    /// etc.). Multi-char `~~` strikethrough was already resolved in
+    /// the main pass.
+    fn handle_tildes_carets_pass(&mut self) {
+        let start = self.tree.cur();
+        self.resolve_tildes_carets_in_scope(start);
+    }
+    fn resolve_tildes_carets_in_scope(&mut self, start: Option<TreeIndex>) {
+        let mut stack: Vec<InlineEl> = Vec::new();
+        let mut cur = start;
+        let mut prev: Option<TreeIndex> = None;
+        while let Some(mut cur_ix) = cur {
+            match self.tree[cur_ix].item.body {
+                ItemBody::MaybeEmphasis(count, can_open, can_close) => {
+                    let c = self.text.as_bytes()[self.tree[cur_ix].item.start];
+                    if c != b'~' && c != b'^' {
+                        prev = Some(cur_ix);
+                        cur = self.tree[cur_ix].next;
+                        continue;
+                    }
+                    let run_length = count;
+                    let mut remaining = count;
+                    if can_close {
+                        while remaining > 0 {
+                            let res = stack.iter().enumerate().rfind(|(_, el)| {
+                                el.c == c && el.run_length == run_length
+                            });
+                            let Some((matching_ix, matching_el)) = res else { break };
+                            let matching_el = matching_el.clone();
+                            if let Some(prev_ix) = prev {
+                                self.tree[prev_ix].next = None;
+                            }
+                            // Convert intermediate `~`/`^` openers above the
+                            // match to text — they failed to find a pair.
+                            for el in &stack[(matching_ix + 1)..] {
+                                for i in 0..el.count {
+                                    self.tree[el.start + i].item.body = ItemBody::Text {
+                                        backslash_escaped: false,
+                                    };
+                                }
+                            }
+                            stack.truncate(matching_ix);
+                            let match_count = core::cmp::min(2, core::cmp::min(remaining, matching_el.count));
+                            let mut end = cur_ix - 1;
+                            let mut sub_start = matching_el.start + matching_el.count;
+                            while sub_start > matching_el.start + matching_el.count - match_count {
+                                let inc = if sub_start > matching_el.start + matching_el.count - match_count + 1 {
+                                    2
+                                } else {
+                                    1
+                                };
+                                let ty = if c == b'~' {
+                                    if inc == 2 {
+                                        if self.options.contains(Options::ENABLE_STRIKETHROUGH) {
+                                            ItemBody::Strikethrough
+                                        } else {
+                                            ItemBody::Text { backslash_escaped: false }
+                                        }
+                                    } else if self.options.contains(Options::ENABLE_SUBSCRIPT) {
+                                        ItemBody::Subscript
+                                    } else if self.options.contains(Options::ENABLE_STRIKETHROUGH) {
+                                        ItemBody::Strikethrough
+                                    } else {
+                                        ItemBody::Text { backslash_escaped: false }
+                                    }
+                                } else if self.options.contains(Options::ENABLE_SUPERSCRIPT) {
+                                    ItemBody::Superscript
+                                } else {
+                                    ItemBody::Text { backslash_escaped: false }
+                                };
+                                let root = sub_start - inc;
+                                end = end + inc;
+                                self.tree[root].item.body = ty;
+                                self.tree[root].item.end = self.tree[end].item.end;
+                                self.tree[root].child = Some(sub_start);
+                                self.tree[root].next = None;
+                                sub_start = root;
+                            }
+                            let new_prev_ix = matching_el.start + matching_el.count - match_count;
+                            let new_cur = self.tree[cur_ix + match_count - 1].next;
+                            self.tree[new_prev_ix].next = new_cur;
+                            prev = Some(new_prev_ix);
+                            if matching_el.count > match_count {
+                                stack.push(InlineEl {
+                                    start: matching_el.start,
+                                    count: matching_el.count - match_count,
+                                    run_length: matching_el.run_length,
+                                    c: matching_el.c,
+                                    both: matching_el.both,
+                                });
+                            }
+                            remaining -= match_count;
+                            if remaining > 0 {
+                                let Some(next_cur) = new_cur else { break };
+                                cur_ix = next_cur;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if remaining > 0 {
+                        if can_open {
+                            stack.push(InlineEl {
+                                start: cur_ix,
+                                count: remaining,
+                                run_length,
+                                c,
+                                both: can_open && can_close,
+                            });
+                        } else {
+                            for i in 0..remaining {
+                                self.tree[cur_ix + i].item.body = ItemBody::Text {
+                                    backslash_escaped: false,
+                                };
+                            }
+                        }
+                        let prev_ix = cur_ix + remaining - 1;
+                        prev = Some(prev_ix);
+                        cur = self.tree[prev_ix].next;
+                    } else {
+                        cur = self.tree[prev.unwrap()].next;
+                    }
+                    continue;
+                }
+                ItemBody::Emphasis
+                | ItemBody::Strong
+                | ItemBody::Strikethrough
+                | ItemBody::Subscript
+                | ItemBody::Superscript
+                | ItemBody::Link(_)
+                | ItemBody::Image(_) => {
+                    let child = self.tree[cur_ix].child;
+                    self.resolve_tildes_carets_in_scope(child);
+                }
+                _ => {}
+            }
+            prev = Some(cur_ix);
+            cur = self.tree[cur_ix].next;
+        }
+        // End of scope: any remaining openers couldn't find a closer.
+        for el in stack {
+            for i in 0..el.count {
+                self.tree[el.start + i].item.body = ItemBody::Text {
+                    backslash_escaped: false,
+                };
+            }
+        }
     }
 
     fn disable_all_links(&mut self) {
@@ -1698,7 +2019,7 @@ impl<'input> ParserInner<'input> {
                 // 4 spaces of a 5-indent item and over-strip the code
                 // span's trailing whitespace.
                 let from = span_start + ix;
-                let scanned = skip_container_prefixes(
+                let (scanned, leftover) = skip_container_prefixes_with_remaining(
                     &self.tree,
                     &self.text.as_bytes()[from..],
                     self.options,
@@ -1706,6 +2027,12 @@ impl<'input> ParserInner<'input> {
                 let scanned = scanned.min(spanned_bytes.len() - ix);
                 ix += scanned;
                 start_ix = ix;
+                // Preserve leftover virtual columns from a tab the
+                // container only partially consumed (e.g. `\t` in a 2-col
+                // listitem leaves 2 spaces of content).
+                for _ in 0..leftover {
+                    buf.push(' ');
+                }
             } else if c == b'\\'
                 && spanned_bytes.get(ix + 1) == Some(&b'|')
                 && self.tree.is_in_table()
@@ -1786,7 +2113,7 @@ impl<'input> ParserInner<'input> {
                 // 4 spaces of a 5-indent item and over-strip the code
                 // span's trailing whitespace.
                 let from = span_start + ix;
-                let scanned = skip_container_prefixes(
+                let (scanned, leftover) = skip_container_prefixes_with_remaining(
                     &self.tree,
                     &self.text.as_bytes()[from..],
                     self.options,
@@ -1794,6 +2121,12 @@ impl<'input> ParserInner<'input> {
                 let scanned = scanned.min(spanned_bytes.len() - ix);
                 ix += scanned;
                 start_ix = ix;
+                // Preserve leftover virtual columns from a tab the
+                // container only partially consumed (e.g. `\t` in a 2-col
+                // listitem leaves 2 spaces of content).
+                for _ in 0..leftover {
+                    buf.push(' ');
+                }
             } else if c == b'\\'
                 && spanned_bytes.get(ix + 1) == Some(&b'|')
                 && self.tree.is_in_table()
@@ -1943,6 +2276,22 @@ pub(crate) fn skip_container_prefixes(tree: &Tree<Item>, bytes: &[u8], options: 
     let mut line_start = LineStart::new(bytes);
     let _ = scan_containers(tree, &mut line_start, options);
     line_start.bytes_scanned()
+}
+
+/// Like `skip_container_prefixes`, but also returns the leftover virtual
+/// space columns from tab-stop expansion past the last consumed container
+/// prefix. Used by math-span content extraction to faithfully reproduce
+/// indentation that the container "ate" only partially — e.g. a single
+/// `\t` (4 cols) in a list item with 2-col content indent leaves 2
+/// trailing spaces of content.
+fn skip_container_prefixes_with_remaining(
+    tree: &Tree<Item>,
+    bytes: &[u8],
+    options: Options,
+) -> (usize, usize) {
+    let mut line_start = LineStart::new(bytes);
+    let _ = scan_containers(tree, &mut line_start, options);
+    (line_start.bytes_scanned(), line_start.remaining_space())
 }
 
 impl Tree<Item> {
@@ -2141,23 +2490,6 @@ impl InlineStack {
 
         if let Some((matching_ix, matching_el)) = res {
             let matching_ix = matching_ix + lowerbound;
-            // Phase-ordering approximation for single-`~`/`^` (GFM
-            // strikethrough's `~..~` form and the subscript extension).
-            // Micromark resolves emphasis before these single-char
-            // markers; if the matched `~`/`^` opener has an unmatched
-            // `*`/`_` opener earlier on the stack, that opener was
-            // already pending when `~` opened, so emphasis claims its
-            // pair first. `~~` strikethrough has standalone priority
-            // (matches GFM's two-pass `~~..~~` recognition) and is
-            // unaffected.
-            if (c == b'~' || c == b'^')
-                && run_length == 1
-                && self.stack[..matching_ix]
-                    .iter()
-                    .any(|el| el.c == b'*' || el.c == b'_')
-            {
-                return None;
-            }
             for el in &self.stack[(matching_ix + 1)..] {
                 for i in 0..el.count {
                     tree[el.start + i].item.body = ItemBody::Text {

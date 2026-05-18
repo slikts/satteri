@@ -81,10 +81,21 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     let mut image_alt_buf: Option<String> = None;
     let mut image_depth: usize = 0;
 
-    // JSX tag pairing state.
-    let mut jsx_stack: Vec<(String, u32)> = Vec::new();
+    // JSX tag pairing state. The third element is `is_flow` — true if the
+    // open tag was on its own block line (MdxJsxFlowElement), false if it
+    // was inline (MdxJsxTextElement). mdx-js requires the closing tag to
+    // match in mode: a flow open can't be paired with an inline close, so
+    // `<Foo>\n</Foo>X` (close has trailing text → inline mode) errors.
+    let mut jsx_stack: Vec<(String, u32, bool)> = Vec::new();
     let mut mdx_errors: Vec<(usize, String)> = Vec::new();
     let mut paragraph_open_depth: Vec<usize> = Vec::new();
+    // jsx_stack length snapshot taken when a structural container
+    // (blockquote, list item, container directive) opens. When the
+    // container closes, any JSX entry pushed inside it that's still on
+    // the stack is unclosed-within-the-container and triggers an
+    // mdx-js-style "Expected a closing tag … before the end of `…`"
+    // error — see §B in plans/mdx-conformance.md.
+    let mut container_jsx_snapshot: Vec<(MdastNodeType, usize)> = Vec::new();
 
     // Refdefs in source order. Each container close pass claims the defs whose
     // source range lies inside it; the rest get emitted at root. `emitted`
@@ -355,6 +366,26 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         builder.close_node();
                     }
                     ItemBody::ListItem(_, item_spread) => {
+                        // Drain unclosed JSX opens before refdef pull and
+                        // spread computation — mirrors the regular-close
+                        // arm's blockquote handling but inline here since
+                        // ListItem close has its own arm. See §B.
+                        if let Some(&(snap_kind, snap_len)) = container_jsx_snapshot.last() {
+                            if snap_kind == MdastNodeType::ListItem {
+                                container_jsx_snapshot.pop();
+                                while jsx_stack.len() > snap_len {
+                                    let (name, offset, _is_flow) = jsx_stack.pop().unwrap();
+                                    let loc = byte_offset_to_line_col(source, offset as usize);
+                                    mdx_errors.push((
+                                        offset as usize,
+                                        format!(
+                                            "Expected a closing tag for `<{name}>` ({loc}) before the end of `listItem`"
+                                        ),
+                                    ));
+                                    builder.close_node();
+                                }
+                            }
+                        }
                         let id = builder.current_node_id();
                         let node = builder.arena_ref().get_node(id);
                         let orig_start_offset = node.start_offset;
@@ -513,7 +544,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         if matches!(item.body, ItemBody::Paragraph | ItemBody::TightParagraph) {
                             if let Some(opened_at) = paragraph_open_depth.pop() {
                                 while builder.stack_depth() > opened_at {
-                                    if let Some((name, offset)) = jsx_stack.pop() {
+                                    if let Some((name, offset, _is_flow)) = jsx_stack.pop() {
                                         let loc = byte_offset_to_line_col(source, offset as usize);
                                         mdx_errors.push((
                                             offset as usize,
@@ -523,6 +554,38 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                         ));
                                     }
                                     builder.close_node();
+                                }
+                            }
+                        }
+                        // Drain unclosed JSX opens that were pushed inside a
+                        // structural container (blockquote, list item) when
+                        // that container closes. mdx-js errors structurally
+                        // — see §B.
+                        let container_kind_for_drain = match item.body {
+                            ItemBody::BlockQuote(_) => Some(MdastNodeType::Blockquote),
+                            ItemBody::ListItem(..) => Some(MdastNodeType::ListItem),
+                            _ => None,
+                        };
+                        if let Some(kind) = container_kind_for_drain {
+                            if let Some(&(snap_kind, snap_len)) = container_jsx_snapshot.last() {
+                                if snap_kind == kind {
+                                    container_jsx_snapshot.pop();
+                                    while jsx_stack.len() > snap_len {
+                                        let (name, offset, _is_flow) = jsx_stack.pop().unwrap();
+                                        let loc = byte_offset_to_line_col(source, offset as usize);
+                                        let container_label = match kind {
+                                            MdastNodeType::Blockquote => "blockQuote",
+                                            MdastNodeType::ListItem => "listItem",
+                                            _ => "container",
+                                        };
+                                        mdx_errors.push((
+                                            offset as usize,
+                                            format!(
+                                                "Expected a closing tag for `<{name}>` ({loc}) before the end of `{container_label}`"
+                                            ),
+                                        ));
+                                        builder.close_node();
+                                    }
                                 }
                             }
                         }
@@ -639,6 +702,16 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             inner.tree.next_sibling(cur_ix);
                             continue;
                         }
+                        ItemBody::SynthesizeText(cow_ix) => {
+                            // Tab-expansion leftover spaces have no raw-byte
+                            // representation (e.g. inside `>\t<div>` the 2
+                            // synthesized spaces are the part of the tab past
+                            // the blockquote marker).
+                            let cow = inner.allocs.take_cow(*cow_ix);
+                            buf.push_str(&cow);
+                            inner.tree.next_sibling(cur_ix);
+                            continue;
+                        }
                         _ => {}
                     }
                 }
@@ -692,6 +765,17 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             let cow = inner.allocs.take_cow(*cow_ix);
                             buf.push_str(&cow);
                         }
+                        // Inline HTML appears verbatim in the alt text —
+                        // remark preserves `![foo<div>bar](u)` → alt
+                        // = `foo<div>bar`. This includes raw and
+                        // normalized-wrap forms.
+                        ItemBody::InlineHtml => {
+                            buf.push_str(&source[item.start..item.end]);
+                        }
+                        ItemBody::OwnedInlineHtml(cow_ix) => {
+                            let cow = inner.allocs.take_cow(*cow_ix);
+                            buf.push_str(&cow);
+                        }
                         ItemBody::Image(_) => {
                             image_depth += 1;
                             inner.tree.push();
@@ -734,6 +818,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
+                        container_jsx_snapshot
+                            .push((MdastNodeType::Blockquote, jsx_stack.len()));
                         inner.tree.push();
                     }
                     ItemBody::MathBlock(_) => {
@@ -815,6 +901,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             start, end, start_line, start_col, end_line, end_col,
                         );
                         builder.set_data_current(&ListItemData { checked: 2, spread }.to_bytes());
+                        container_jsx_snapshot
+                            .push((MdastNodeType::ListItem, jsx_stack.len()));
                         inner.tree.push();
                     }
                     ItemBody::Table(align_ix) => {
@@ -1038,7 +1126,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
 
                         if jsx.is_closing {
                             let close_name = jsx.name.as_ref();
-                            if let Some((open_name, open_offset)) = jsx_stack.pop() {
+                            if let Some((open_name, open_offset, open_is_flow)) = jsx_stack.pop() {
                                 if close_name != open_name {
                                     let open_loc =
                                         byte_offset_to_line_col(source, open_offset as usize);
@@ -1047,6 +1135,23 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                         format!(
                                             "Unexpected closing tag `</{close_name}>`, expected \
                                              corresponding closing tag for `<{open_name}>` ({open_loc})"
+                                        ),
+                                    ));
+                                } else if open_is_flow != is_flow {
+                                    // mdx-js: a flow-mode open (`<Foo>` alone on its
+                                    // line) cannot be closed by an inline close
+                                    // (`</Foo>` followed by content on its line)
+                                    // and vice versa. The mismatch indicates the
+                                    // open's block context didn't actually close
+                                    // structurally.
+                                    let open_loc =
+                                        byte_offset_to_line_col(source, open_offset as usize);
+                                    mdx_errors.push((
+                                        start as usize,
+                                        format!(
+                                            "Expected the closing tag `</{close_name}>` either after \
+                                             the end of `paragraph` or another opening tag after the \
+                                             start of `paragraph` (`<{open_name}>` opened at {open_loc})"
                                         ),
                                     ));
                                 }
@@ -1089,7 +1194,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             if jsx.is_self_closing {
                                 builder.close_node();
                             } else {
-                                jsx_stack.push((jsx.name.to_string(), start));
+                                jsx_stack.push((jsx.name.to_string(), start, is_flow));
                             }
                         }
                         inner.tree.next_sibling(cur_ix);
@@ -1692,7 +1797,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     }
 
     // Check for unclosed JSX tags.
-    for (name, offset) in &jsx_stack {
+    for (name, offset, _is_flow) in &jsx_stack {
         let loc = byte_offset_to_line_col(source, *offset as usize);
         mdx_errors.push((
             *offset as usize,
@@ -1752,7 +1857,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
             crate::post_passes::merge_directive_port_splits(&mut arena);
         }
         if memchr::memchr3(b'h', b'w', b'@', source_bytes).is_some() {
-            crate::post_passes::gfm_autolink_literal_pass(&mut arena);
+            crate::post_passes::gfm_autolink_literal_pass(&mut arena, source_bytes);
         }
     }
 
@@ -1818,9 +1923,13 @@ fn emit_pending_refdef(
         None => StringRef::empty(),
     };
     let raw_label = extract_definition_label(source, start).unwrap_or(rd.label.as_str());
-    let label_ref = match unescape_label_backslashes(raw_label) {
-        Some(unescaped) => builder.alloc_string(&unescaped),
-        None => builder.alloc_string(raw_label),
+    // remark decodes HTML entities AND backslash escapes in the refdef label.
+    // `&amp;` → `&`, `&AElig;` → `Æ`, etc. Invalid entities pass through.
+    let unescaped = crate::scanners::unescape(raw_label, false);
+    let label_ref = if unescaped.as_ref() == raw_label {
+        builder.alloc_string(raw_label)
+    } else {
+        builder.alloc_string(&unescaped)
     };
     let identifier_ref = builder.alloc_string(&normalize_identifier(&rd.label));
     let data = DefinitionData {

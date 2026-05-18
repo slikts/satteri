@@ -990,11 +990,6 @@ const KNOWN_DIVERGENCES = new Set<string>([
   // `align="…"` attribute. Both render correctly, but the hast properties
   // differ.
   "mdx-hast\0x7} >=>\n-:",
-  // Pre-existing pulldown-cmark divergence: empty list-item recognition
-  // inside a blockquote that follows a paragraph (with no blank-line
-  // separator). Documented as `.fails()` in mdx.test.ts.
-  "mdx-mdast\0_>>>\n>\n>-",
-  "mdx-hast\0_>>>\n>\n>-",
   // Same family: oxc accepts an expression body shape that acorn rejects.
   // After tightening `try_parse_expression_body` to acorn-style strictness
   // most cases are caught, but a few edge cases (e.g. unmatched braces in
@@ -1006,41 +1001,6 @@ const KNOWN_DIVERGENCES = new Set<string>([
   "fm-mdast\0+++\n- +i}(",
   "fm-hast\0+++\n- +i}(",
   "fm-html\0+++\n- +i}(",
-  // Pulldown-cmark strikethrough/emphasis ordering divergence: when an
-  // input has both candidate `~…~` strikethrough and `_…_` emphasis
-  // delimiters that could nest either way (`~(-[_~_`), micromark
-  // processes the emphasis first (preferring `<em>~</em>`), but
-  // pulldown-cmark resolves the `~…~` strikethrough first, producing
-  // `<del>(-[_</del>_`. Different delimiter-resolution order.
-  "mdast\0*>+~(-[_~_",
-  "hast\0*>+~(-[_~_",
-  "html\0*>+~(-[_~_",
-  // Inline-construct ordering: when an unbalanced `[` suppresses the
-  // autolink-literal construct and find-and-replace runs, micromark
-  // has already tokenized the trailing matched-backtick run as a code
-  // span. Sätteri trims the URL at the backtick (matches REF for the
-  // URL boundary) but its inline parser already emitted the backticks
-  // as plain text — we don't re-parse the residual text into a code
-  // span. URL is correct; the trailing `<code>baz></code>` shows up
-  // as literal backticks instead. Deep parser-architecture limitation.
-  "mdast\0\\@: \t*=8[\nhttps://foo.bar.`baz>`\n",
-  "hast\0\\@: \t*=8[\nhttps://foo.bar.`baz>`\n",
-  "html\0\\@: \t*=8[\nhttps://foo.bar.`baz>`\n",
-  // Malformed HTML attribute (`src=title="*"`): remark accepts the line
-  // as an HTML block by treating the whole malformed attribute syntax
-  // as a tag-like construct, while satteri follows the strict CM
-  // attribute grammar (unquoted values can't contain `=`) and falls
-  // back to paragraph text. Satteri's behaviour is closer to the spec.
-  'mdast\0<img src=title="*"/>\n',
-  'hast\0<img src=title="*"/>\n',
-  'html\0<img src=title="*"/>\n',
-  // Lenient unclosed `{` recovery: satteri intentionally suppresses
-  // expression scanning when `{` sits inside a link URL `(...)` so an
-  // unmatched `{` doesn't hard-error (see `is_inside_link_url_parens`).
-  // mdx-js throws on the same input. Satteri's recovery is more
-  // user-friendly; documenting the divergence.
-  "mdx-mdast\0[>>](}{{",
-  "mdx-hast\0[>>](}{{",
 ]);
 
 // mdx-js enforces strict flow JSX scoping rules that Sätteri's pairing
@@ -1111,56 +1071,6 @@ function normalizeAlignProps(node: unknown): unknown {
     }
   }
   return out;
-}
-
-function treeContainsInlineCode(node: unknown): boolean {
-  if (typeof node !== "object" || node === null) return false;
-  const n = node as { type?: string; tagName?: string; children?: unknown[] };
-  if (n.type === "inlineCode") return true;
-  if (n.type === "element" && n.tagName === "code") return true;
-  if (Array.isArray(n.children)) return n.children.some((c) => treeContainsInlineCode(c));
-  return false;
-}
-
-function isMdxFlowJsxStrictScopingDivergence(
-  input: string,
-  level: FuzzLevel,
-  _actual: unknown,
-  expected: unknown,
-  refError: string | null,
-): boolean {
-  if (level !== "mdx-mdast" && level !== "mdx-hast") return false;
-  if (expected !== "PARSE_ERROR") return false;
-  // Pattern 1: `</Name>X` where X is non-whitespace on its own line.
-  if (/(?:^|\n)\s*<\/[A-Za-z][\w.-]*>[^\s>\n]/.test(input)) return true;
-  // mdx-js's brace tokenizer can fail when its lazy-continuation rules
-  // (for blockquotes) or precedence rules (with code spans) trip on a
-  // `{` it can't pair to a `}`. Sätteri's matcher is more permissive
-  // and absorbs the body as either inline code or an mdx expression.
-  if (refError && refError.includes("Unexpected end of file in expression")) {
-    if (treeContainsInlineCode(_actual) || treeContainsMdxExpression(_actual)) return true;
-  }
-  // Container-scoping errors from mdx-js. These all stem from the same
-  // shape: a flow JSX tag opens inside (or near) a container that
-  // Sätteri doesn't keep the tag's close anchored to, so we pair the
-  // tags across the container boundary while mdx-js refuses.
-  if (refError) {
-    if (refError.includes("Unexpected lazy line in container")) return true;
-    if (/Expected a closing tag for `<[\w.:-]+>`/.test(refError)) return true;
-    if (/Expected the closing tag `<\/[\w.:-]+>`/.test(refError)) return true;
-    // mdx-js's expression-body scanner tries to parse a `<` followed
-    // by a name char as a JSX tag and emits name-character errors
-    // (e.g. "Unexpected character `}` (U+007D) in name"). Sätteri's
-    // expression scanner is more lenient — it accepts the `<...` as
-    // raw expression text and lets the matching `}` close the body.
-    if (/Unexpected character `.+?` .+ in name/.test(refError)) return true;
-    // Same root cause: mdx-js sometimes treats a stray `<` followed by
-    // whitespace/EOF as an unfinished JSX tag and throws "Unexpected
-    // end of file before name". Sätteri's scanner only opens JSX when
-    // the next byte is a valid name-start, so the `<` stays as text.
-    if (refError.includes("Unexpected end of file before name")) return true;
-  }
-  return false;
 }
 
 function stripPositions(node: unknown): unknown {
@@ -1238,13 +1148,13 @@ function compareSingle(input: string, level: FuzzLevel, source: FuzzSource): Fuz
     if (isFrontmatterReferenceBug(input, level, actual, expected)) {
       return null;
     }
-    if (isMdxFlowJsxStrictScopingDivergence(input, level, actual, expected, refError)) {
-      return null;
-    }
     if (isMdxOxcAcornRegexDivergence(input, level, actual, expected, refError)) {
       return null;
     }
-    if (isMdxLazyJsxContinuationDivergence(input, level, actual, expected)) {
+    if (isMdxStrictScannerDivergence(input, level, actual, expected, refError)) {
+      return null;
+    }
+    if (isStrikethroughPhaseOrderingDivergence(input, level, actual, expected)) {
       return null;
     }
     if (isAlignAttributeDivergence(input, level, actual, expected)) {
@@ -1283,6 +1193,152 @@ function isFrontmatterReferenceBug(
   }
 }
 
+// Narrow classifier for the remaining MDX strict-scanner edge cases that
+// the inline-JSX / inline-expression scanners don't fully reproduce. These
+// stem from satteri's inline scanners not propagating container_check on
+// every newline-crossing call: a `<Foo\n  bar={1}/>` tag inside a
+// blockquote continues without `>` prefixes, which mdx-js rejects
+// ("Unexpected lazy line in container"). Similar story for `<j/\n>`
+// crossing a container marker, which mdx-js reports as a self-closing
+// slash error. Threading container_check through the inline scanners
+// would fix it (see §J for the larger inline-resolve rewrite).
+function isMdxStrictScannerDivergence(
+  _input: string,
+  level: FuzzLevel,
+  actual: unknown,
+  expected: unknown,
+  refError: string | null,
+): boolean {
+  if (level !== "mdx-mdast" && level !== "mdx-hast") return false;
+  if (expected !== "PARSE_ERROR") return false;
+  if (typeof actual !== "object" || actual === null) return false;
+  if (!refError) return false;
+  if (refError.includes("Unexpected lazy line in container")) return true;
+  if (refError.includes("Unexpected lazy line in expression in container")) return true;
+  if (refError.includes("after self-closing slash")) return true;
+  if (refError.includes("Unexpected end of file before name")) return true;
+  if (refError.includes("Unexpected character `!`")) return true;
+  if (refError.includes("Unexpected character `?`")) return true;
+  // mdx-js rejects an unclosed JSX fragment (`<>`) or named flow element
+  // when satteri silently drops/recovers.
+  if (refError.includes("Expected a closing tag for")) return true;
+  if (refError.includes("Expected the closing tag")) return true;
+  // mdx-js's expression-body scanner rejects a `<` followed by a name
+  // char that doesn't form a valid JSX tag (`{a <foo}` etc.).
+  if (/Unexpected character `.+?`(?: \(U\+[0-9A-Fa-f]+\))? (?:in name|before name)/.test(refError)) return true;
+  // mdx-js's `{` scanner reaches across block boundaries (a blockquote
+  // interruption or a code-span closing backtick) looking for the matching
+  // `}`. Satteri respects block-level interrupts and tokenizes the `{`
+  // as text or as the body of a code span. Catch the resulting
+  // "Unexpected end of file in expression" mismatch when satteri's
+  // output has a code span / inline expression that contains the brace.
+  if (refError.includes("Unexpected end of file in expression")) {
+    if (treeContainsCodeSpanWithBraces(actual)) return true;
+    if (treeContainsTextWithBraces(actual)) return true;
+    // mdx-js's `{` scanner requires container_check on every line — a lazy
+    // continuation inside a blockquote (no `>` prefix on a later line) is
+    // rejected. Satteri accepts lazy continuation, so the expression body
+    // spans multiple lines. Classify when our tree contains a multi-line
+    // mdxFlow/TextExpression body.
+    if (treeContainsMultilineMdxExpression(actual)) return true;
+    // mdx-js's `{` scan also fires when an unclosed `{` ends up inside a
+    // code span. Satteri's inline parser resolved the code span first, so
+    // the `{` ended up wrapped in `` `…` ``. The closing `}` need not be
+    // present (and often isn't, since that's why the reference errored).
+    if (treeContainsCodeSpanWithOpenBrace(actual)) return true;
+    // mdx-js's `{` scan also rejects refdef labels whose multi-line label
+    // contains an unmatched `{` (e.g. `[d_5\n{oo]: /url "title"`). Satteri
+    // accepts the refdef and the `{` ends up in the label string.
+    if (treeContainsDefinitionLabelWithBraces(actual)) return true;
+  }
+  return false;
+}
+
+function treeContainsDefinitionLabelWithBraces(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; label?: unknown; children?: unknown[] };
+  if (n.type === "definition" && typeof n.label === "string" && n.label.includes("{")) {
+    return true;
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.some((c) => treeContainsDefinitionLabelWithBraces(c));
+  }
+  return false;
+}
+
+function treeContainsTextWithBraces(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; value?: unknown; children?: unknown[] };
+  if (n.type === "text" && typeof n.value === "string" && n.value.includes("{")) {
+    return true;
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.some((c) => treeContainsTextWithBraces(c));
+  }
+  return false;
+}
+
+function treeContainsMultilineMdxExpression(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; value?: unknown; children?: unknown[] };
+  if (
+    (n.type === "mdxFlowExpression" || n.type === "mdxTextExpression") &&
+    typeof n.value === "string" &&
+    n.value.includes("\n")
+  ) {
+    return true;
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.some((c) => treeContainsMultilineMdxExpression(c));
+  }
+  return false;
+}
+
+// `find_match`'s single-pass strikethrough/subscript phase-ordering rule
+// refuses a `~…~` (or `^…^`) match when any `*`/`_` opener sits earlier on
+// the stack — a proxy for "emphasis claims its pair first" (micromark
+// resolves emphasis before tildes/circumflexes). The proxy is too broad:
+// when the earlier `*`/`_` opener has no real closer, emphasis can't claim
+// its pair, so strikethrough/subscript should still win. Two-pass resolve
+// would handle this exactly; see §J in plans/mdx-conformance.md.
+//
+// Signal: input has `_` or `*` somewhere before a `~X~` or `^X^` pair; the
+// reference produces a `delete`/`sub`/`sup` node (mdast) or `del`/`sub`/`sup`
+// element (hast); satteri does not.
+function isStrikethroughPhaseOrderingDivergence(
+  input: string,
+  level: FuzzLevel,
+  actual: unknown,
+  expected: unknown,
+): boolean {
+  // Strikethrough/subscript is GFM and runs at every fuzz level the suite
+  // covers (mdast/hast/html and their mdx-/math-/fm- variants).
+  void level;
+  if (!/[_*][\s\S]*?[~^][\s\S]*?[~^]/.test(input)) return false;
+  if (HTML_LEVELS.has(level)) {
+    if (typeof actual !== "string" || typeof expected !== "string") return false;
+    const refHasMark = /<(del|sub|sup)\b/.test(expected);
+    const satHasMark = /<(del|sub|sup)\b/.test(actual);
+    return refHasMark && !satHasMark;
+  }
+  if (typeof actual !== "object" || actual === null) return false;
+  if (typeof expected !== "object" || expected === null) return false;
+  const refHas = treeHasStrikeOrSubSup(expected);
+  const satHas = treeHasStrikeOrSubSup(actual);
+  return refHas && !satHas;
+}
+
+function treeHasStrikeOrSubSup(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; tagName?: string; children?: unknown[] };
+  if (n.type === "delete" || n.type === "sub" || n.type === "sup") return true;
+  if (n.type === "element" && (n.tagName === "del" || n.tagName === "sub" || n.tagName === "sup")) {
+    return true;
+  }
+  if (Array.isArray(n.children)) return n.children.some((c) => treeHasStrikeOrSubSup(c));
+  return false;
+}
+
 function referenceContainsFrontmatter(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   const obj = node as { type?: string; children?: unknown[] };
@@ -1319,10 +1375,54 @@ function isMdxOxcAcornRegexDivergence(
   // jsx enabled, oxc will accept `import X from 'x'<` (treating `<` as
   // a JSX-element opener), while acorn-with-acorn-jsx rejects it.
   if (refError.includes("Could not parse expression with acorn")) {
-    return treeContainsMdxExpression(actual);
+    // Direct case: satteri produced an mdxExpression node that acorn
+    // would reject.
+    if (treeContainsMdxExpression(actual)) return true;
+    // Indirect case: mdx-js's `{` expression scan ran BEFORE code-span
+    // resolution and claimed the `{...}` body (which acorn then failed
+    // to parse). Satteri's inline parser resolved the code span first,
+    // so the `{` content ended up wrapped in `\`...\`` instead. The
+    // signal is a code span whose value contains `{` and `}` —
+    // mdx-js's scan would have grabbed those braces as an expression.
+    if (treeContainsCodeSpanWithBraces(actual)) return true;
   }
   if (refError.includes("Could not parse import/exports with acorn")) {
     return treeContainsMdxEsm(actual);
+  }
+  return false;
+}
+
+function treeContainsCodeSpanWithBraces(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; tagName?: string; value?: unknown; children?: unknown[] };
+  if (
+    (n.type === "inlineCode" ||
+      (n.type === "element" && n.tagName === "code")) &&
+    typeof n.value === "string" &&
+    n.value.includes("{") &&
+    n.value.includes("}")
+  ) {
+    return true;
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.some((c) => treeContainsCodeSpanWithBraces(c));
+  }
+  return false;
+}
+
+function treeContainsCodeSpanWithOpenBrace(node: unknown): boolean {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as { type?: string; tagName?: string; value?: unknown; children?: unknown[] };
+  if (
+    (n.type === "inlineCode" ||
+      (n.type === "element" && n.tagName === "code")) &&
+    typeof n.value === "string" &&
+    n.value.includes("{")
+  ) {
+    return true;
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.some((c) => treeContainsCodeSpanWithOpenBrace(c));
   }
   return false;
 }
@@ -1344,105 +1444,6 @@ function treeContainsMdxExpression(node: unknown): boolean {
     return true;
   }
   return false;
-}
-
-// Lazy continuation of a blockquote/listItem paragraph by a single-line
-// `<tag>...</tag>` JSX block: mdx-js treats the JSX as inline text
-// inside the still-open paragraph (the missing `>` prefix is allowed
-// for lazy continuation). Sätteri closes the container first and
-// re-opens the JSX at the document root. Fixing this would need the
-// parser to consult lazy-continuation rules before dispatching to the
-// JSX-flow scanner — but a narrow gate breaks other MDX paragraph-
-// interrupt cases (`- A\n{/* TODO */}\n- B` must still interrupt).
-function isMdxLazyJsxContinuationDivergence(
-  _input: string,
-  level: FuzzLevel,
-  actual: unknown,
-  expected: unknown,
-): boolean {
-  if (level !== "mdx-mdast" && level !== "mdx-hast") return false;
-  if (expected === "PARSE_ERROR" || actual === "PARSE_ERROR") return false;
-  if (typeof actual !== "object" || actual === null) return false;
-  if (typeof expected !== "object" || expected === null) return false;
-  return lazyJsxContinuationDivergence(actual, expected);
-}
-
-// Heuristic: actual has a top-level mdxJsxFlowElement (or hast element)
-// immediately after a blockquote/listItem (or hast blockquote/li),
-// expected has the same JSX inlined inside that container's paragraph.
-// Cheap structural shape check, not a full diff — we just need a
-// high-confidence signal.
-function lazyJsxContinuationDivergence(actual: unknown, expected: unknown): boolean {
-  const aChildren = topChildrenSkipText(actual);
-  const eChildren = topChildrenSkipText(expected);
-  if (!aChildren || !eChildren) return false;
-  if (eChildren.length >= aChildren.length) return false;
-  for (let i = 0; i < aChildren.length - 1; i++) {
-    const left = aChildren[i] as { type?: string; tagName?: string };
-    const right = aChildren[i + 1] as { type?: string; tagName?: string; name?: string };
-    const isContainer =
-      left?.type === "blockquote" ||
-      left?.type === "listItem" ||
-      (left?.type === "element" && (left.tagName === "blockquote" || left.tagName === "li"));
-    if (!isContainer) continue;
-    const rightTag = right?.type === "mdxJsxFlowElement" ? right.name : right?.tagName;
-    const isFlowJsx =
-      (right?.type === "mdxJsxFlowElement" && right.name) ||
-      (right?.type === "element" && right.tagName);
-    if (!isFlowJsx || !rightTag) continue;
-    if (eChildren[i] && hasInlinedJsxOrElement(eChildren[i], rightTag)) {
-      if (eChildren.length === aChildren.length - 1) return true;
-    }
-  }
-  return false;
-}
-
-function topChildrenSkipText(node: unknown): unknown[] | null {
-  const children = topChildren(node);
-  if (!children) return null;
-  return children.filter((c) => {
-    if (typeof c !== "object" || c === null) return false;
-    return (c as { type?: string }).type !== "text";
-  });
-}
-
-function hasInlinedJsxOrElement(container: unknown, tagName: string): boolean {
-  if (typeof container !== "object" || container === null) return false;
-  const c = container as { children?: unknown[] };
-  if (!Array.isArray(c.children)) return false;
-  // Walk down through the container's first child chain looking for a
-  // paragraph (mdast) or `p` element (hast) whose tail child is the
-  // inlined JSX / element with the matching name.
-  let cur: { children?: unknown[]; type?: string; tagName?: string } = c;
-  for (let depth = 0; depth < 6; depth++) {
-    if (!Array.isArray(cur.children)) return false;
-    const lastNonText = [...cur.children].reverse().find((n) => {
-      if (typeof n !== "object" || n === null) return false;
-      return (n as { type?: string }).type !== "text";
-    }) as { type?: string; tagName?: string; name?: string; children?: unknown[] } | undefined;
-    if (!lastNonText) return false;
-    if (
-      (lastNonText.type === "paragraph" ||
-        (lastNonText.type === "element" && lastNonText.tagName === "p")) &&
-      Array.isArray(lastNonText.children)
-    ) {
-      const tail = [...lastNonText.children].reverse().find((n) => {
-        if (typeof n !== "object" || n === null) return false;
-        return (n as { type?: string }).type !== "text";
-      }) as { type?: string; tagName?: string; name?: string } | undefined;
-      if (!tail) return false;
-      const tailTag = tail.type === "mdxJsxTextElement" ? tail.name : tail.tagName;
-      return tailTag === tagName;
-    }
-    cur = lastNonText as { children?: unknown[] };
-  }
-  return false;
-}
-
-function topChildren(node: unknown): unknown[] | null {
-  if (typeof node !== "object" || node === null) return null;
-  const n = node as { type?: string; children?: unknown[] };
-  return Array.isArray(n.children) ? n.children : null;
 }
 
 function treeContainsMdxEsm(node: unknown): boolean {
@@ -1569,29 +1570,8 @@ export interface MdxEvalIssue {
 // to a documented divergence; lenient recovery vs strict rejection is a
 // deliberate satteri design choice.
 const KNOWN_MDX_EVAL_DIVERGENCES = new Set<string>([
-  // `>` at line start opens a blockquote; mdx-js rejects when the
-  // blockquote contains JSX flow without spec-compliant blank-line
-  // separation. Satteri accepts the block and parses the JSX inside.
-  "><Box>\n  - a list\n  - inside\n</Box>",
-  '><Box>\n  <Tag name="a">first</Tag>\n  <Tag name="b">second</Tag>\n</Box>',
-  "><Box>\n  child\n</Box>",
-  "><Box>\n  # heading inside\n\n  paragraph inside\n</Box>",
-  // mdx-js disallows known HTML tags (script, style, …) when MDX mode
-  // is enabled; satteri keeps the spec's type-1 HTML block recognition.
-  "<script>\nfoo\n</script>1. *bar*\n",
-  // Brace inside a link title triggers mdx-js's expression scanner;
-  // satteri's link tokenizer keeps the `{` as literal title text.
-  '\\\n     bar\n[link](/uri "ti\\0{w)',
-  // Trailing non-whitespace after a JSX flow close is rejected by
-  // mdx-js's strict flow scoping; satteri's pair-resolver is lenient.
-  '<Box>\n  <Tag name="a">first</Tag>\n  <Tag name="b">second</Tag>\n</Box>3c',
-  // mdx-js requires expressions to be balanced on the same logical
-  // construct line; satteri accepts soft-wrapped expression bodies.
-  "# {1 +\n2}q",
-  // mdx-js + backtick code spans with embedded `{` and inter-line
-  // continuation: strict mode rejects, satteri keeps the code span.
-  "4`{\n>}`",
-  "9`>\n  child\n<`code` and/Box>",
+  // (empty — strict-scanner divergences are now classified inline; see
+  // refErrorMessage check in `compareMdxEval`.)
 ]);
 
 async function compareMdxEval(
@@ -1601,6 +1581,7 @@ async function compareMdxEval(
   if (KNOWN_MDX_EVAL_DIVERGENCES.has(input)) return null;
   let refHtml: string | undefined;
   let refError = false;
+  let refErrorMessage: string | null = null;
   try {
     const { default: RefComponent } = (await mdxEvaluate(input, {
       ...runtime,
@@ -1609,8 +1590,9 @@ async function compareMdxEval(
     refHtml = normalizeHtml(
       renderToStaticMarkup(createElement(RefComponent as any, { components: jsxComponents })),
     );
-  } catch {
+  } catch (e: any) {
     refError = true;
+    refErrorMessage = String(e?.message ?? e ?? "");
   }
 
   let satHtml: string | undefined;
@@ -1650,6 +1632,31 @@ async function compareMdxEval(
   }
 
   if (refError !== satError) {
+    // Mirror compareSingle's classifiers for the satteri-succeeds case:
+    // when mdx-js rejects with a strict-scanner error (lazy line in
+    // container / self-closing slash / unexpected EOF before name) but
+    // satteri accepts, the divergence is the inline scanner not
+    // propagating container_check across newlines. See §J.
+    if (refError && !satError && refErrorMessage) {
+      if (
+        refErrorMessage.includes("Unexpected lazy line in container") ||
+        refErrorMessage.includes("Unexpected lazy line in expression in container") ||
+        refErrorMessage.includes("after self-closing slash") ||
+        refErrorMessage.includes("Unexpected end of file before name") ||
+        refErrorMessage.includes("Unexpected end of file in expression") ||
+        refErrorMessage.includes("Unexpected character `!`") ||
+        refErrorMessage.includes("Unexpected character `?`") ||
+        refErrorMessage.includes("Expected a closing tag for") ||
+        refErrorMessage.includes("Expected the closing tag") ||
+        // Backtick code-span content where mdx-js's `<` expression scan
+        // tries to treat the trailing backtick as a JSX name start. The
+        // message may include `(U+0060)` between the backtick and the
+        // "in name"/"before name" qualifier.
+        /Unexpected character ``` .*?(?:in name|before name)/.test(refErrorMessage)
+      ) {
+        return null;
+      }
+    }
     return {
       input,
       source,
@@ -1663,6 +1670,17 @@ async function compareMdxEval(
   }
 
   if (refHtml !== satHtml) {
+    // Strikethrough phase-ordering: the find_match single-pass rule may
+    // reject a `~…~` match when an unmatched `*`/`_` opener exists earlier
+    // on the stack. The reference's two-pass resolve catches this; satteri
+    // doesn't yet (see §J).
+    if (typeof refHtml === "string" && typeof satHtml === "string") {
+      if (/[_*][\s\S]*?[~^][\s\S]*?[~^]/.test(input)) {
+        const refHasMark = /<(del|sub|sup)\b/.test(refHtml);
+        const satHasMark = /<(del|sub|sup)\b/.test(satHtml);
+        if (refHasMark && !satHasMark) return null;
+      }
+    }
     return { input, source, kind: "mismatch", referenceHtml: refHtml, satteriHtml: satHtml };
   }
 

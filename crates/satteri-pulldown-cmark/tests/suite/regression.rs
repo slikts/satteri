@@ -2974,7 +2974,7 @@ fn regression_test_169() {
     let expected = r##"<ul>
 <li>
 <foo>
-<bar>
+  <bar>
 </li>
 </ul>
 "##;
@@ -2992,8 +2992,8 @@ fn regression_test_170() {
     let expected = r##"<ul>
 <li>
 <p>test</p>
- <foo>
-<bar>
+   <foo>
+  <bar>
 </li>
 </ul>
 "##;
@@ -3009,8 +3009,8 @@ fn regression_test_171() {
 "##;
     let expected = r##"<ul>
 <li>
- <div>
- <div>
+   <div>
+   <div>
 </li>
 </ul>
 "##;
@@ -3026,8 +3026,8 @@ fn regression_test_172() {
 "##;
     let expected = r##"<ul>
 <li>
-<div>
-<div>
+  <div>
+  <div>
 </li>
 </ul>
 "##;

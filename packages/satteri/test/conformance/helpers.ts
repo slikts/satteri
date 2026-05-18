@@ -247,6 +247,15 @@ export function assertMdastConformance(md: string): void {
   expect(satteriMdast(md)).toEqual(referenceMdast(md));
 }
 
+/** Like `assertMdastConformance` but strips `position` fields before
+ * comparing. Useful when the structural mdast matches but offsets diverge
+ * in non-load-bearing ways (e.g. EOF accounting around trailing blanks). */
+export function assertMdastConformanceNoPosition(md: string): void {
+  expect(stripPositions(serialize(markdownToMdast(md, { features: BASE_FEATURES })))).toEqual(
+    stripPositions(serialize(mdastProcessor.parse(md))),
+  );
+}
+
 export function assertHastConformance(md: string): void {
   expect(satteriHast(md)).toEqual(referenceHast(md));
 }

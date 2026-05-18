@@ -1,6 +1,8 @@
 use memchr::memchr;
 
 use oxc_allocator::Allocator;
+use oxc_ast::ast::{BigIntLiteral, NumericLiteral};
+use oxc_ast_visit::Visit;
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::SourceType;
 
@@ -329,6 +331,19 @@ pub(crate) fn try_parse_expression_body(
         .with_options(ParseOptions::default())
         .parse();
     if ret.errors.is_empty() {
+        // oxc accepts legacy octal literals (`01`, `09`, `0123`) even in
+        // .mjs / module sources. acorn (used by mdx-js) rejects them as
+        // "Invalid number" / "Octal literals are not allowed in strict
+        // mode" in any expression context. Walk the AST to surface them.
+        let mut finder = LegacyOctalFinder::default();
+        finder.visit_program(&ret.program);
+        if let Some(offset) = finder.offset {
+            // Span is in wrapped coords; subtract 1 for the leading `(`.
+            return Some((
+                offset.saturating_sub(1),
+                "Invalid number".to_string(),
+            ));
+        }
         return None;
     }
 
@@ -380,6 +395,42 @@ pub(crate) fn try_parse_expression_body(
         .map(|o| o.saturating_sub(1))
         .unwrap_or(value.len());
     Some((err_offset, first.message.to_string()))
+}
+
+/// Walks an oxc AST looking for numeric literals whose raw text starts with
+/// a `0` followed by another digit — i.e. legacy octals (`01`, `0123`) or
+/// "non-octal decimal" literals (`08`, `09`). acorn rejects both in strict
+/// mode; oxc accepts both even in `.mjs` source.
+#[derive(Default)]
+struct LegacyOctalFinder {
+    offset: Option<usize>,
+}
+
+impl LegacyOctalFinder {
+    fn check_raw(&mut self, raw: Option<&str>, span_start: u32) {
+        if self.offset.is_some() {
+            return;
+        }
+        let raw = match raw {
+            Some(r) => r.as_bytes(),
+            None => return,
+        };
+        if raw.len() >= 2 && raw[0] == b'0' && raw[1].is_ascii_digit() {
+            self.offset = Some(span_start as usize);
+        }
+    }
+}
+
+impl<'a> Visit<'a> for LegacyOctalFinder {
+    fn visit_numeric_literal(&mut self, lit: &NumericLiteral<'a>) {
+        self.check_raw(lit.raw.as_deref(), lit.span.start);
+    }
+
+    fn visit_big_int_literal(&mut self, lit: &BigIntLiteral<'a>) {
+        // `01n`, `0o7n` etc. — only legacy-octal-looking BigInts are an
+        // error; `0n` and `0x1n` / `0o1n` / `0b1n` are valid.
+        self.check_raw(lit.raw.as_deref(), lit.span.start);
+    }
 }
 
 pub(crate) fn try_parse_esm(value: &str, allocator: &mut Allocator) -> EsmParseResult {
@@ -869,10 +920,12 @@ fn scan_mdx_jsx_tag_end_inner(
     let is_closing = ix < bytes.len() && bytes[ix] == b'/';
     if is_closing {
         ix += 1;
-        // Micromark-extension-mdx-jsx tolerates whitespace between `</` and
-        // the tag name (e.g. `</ Details>`). Skip ASCII whitespace here.
-        while ix < bytes.len() && matches!(bytes[ix], b' ' | b'\t') {
-            ix += 1;
+        // micromark-extension-mdx-jsx routes through `esWhitespaceStart`
+        // after the `/`, which accepts both markdown whitespace (` `, `\t`,
+        // line endings) and Unicode ES whitespace before the closing-tag
+        // name or `>`.
+        while ix < bytes.len() && is_mdx_unicode_whitespace(bytes, ix) {
+            ix += char_len_utf8(bytes[ix]);
         }
     }
 
@@ -892,32 +945,60 @@ fn scan_mdx_jsx_tag_end_inner(
     // chain (`a.b.c` — any number of `.` segments, each a fresh name-start).
     // Mixing namespace and member (`a:b.c`) is rejected by mdx-js, and so
     // is a name-continue char following `.` (e.g. `a..b`, `a.1`).
+    //
+    // micromark permits whitespace around `.` and `:` separators
+    // (`<a :b/>` → name `a:b`, `<a . b/>` → name `a.b`), so we
+    // peek past intra-name whitespace before deciding the loop is done.
     let mut saw_namespace = false;
-    while ix < bytes.len() {
-        if bytes[ix] == b':' {
-            if saw_namespace {
-                return None;
-            }
-            saw_namespace = true;
-            ix += 1;
-            if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
-                return None;
-            }
+    let mut saw_member = false;
+    loop {
+        while ix < bytes.len() && is_jsx_name_continue(bytes, ix) {
             ix += char_len_utf8(bytes[ix]);
-        } else if bytes[ix] == b'.' {
-            if saw_namespace {
-                return None;
-            }
-            ix += 1;
-            if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
-                return None;
-            }
+        }
+        // If the (optional ws) + (`:` or `.`) + (optional ws) + name-start
+        // peek fails, restore `ix` — the skipped bytes become the post-name
+        // area for the caller's structural checks (ws / `>` / `/` / `{` /
+        // attribute start).
+        let save = ix;
+        while ix < bytes.len() && is_mdx_unicode_whitespace(bytes, ix) {
             ix += char_len_utf8(bytes[ix]);
-        } else if is_jsx_name_continue(bytes, ix) {
-            ix += char_len_utf8(bytes[ix]);
-        } else {
+        }
+        if ix >= bytes.len() {
+            ix = save;
             break;
         }
+        match bytes[ix] {
+            b':' => {
+                // mdx-js rejects namespace after a member (`a.b:c`) and a
+                // second namespace marker (`a:b:c`).
+                if saw_namespace || saw_member {
+                    ix = save;
+                    break;
+                }
+                saw_namespace = true;
+                ix += 1;
+            }
+            b'.' => {
+                if saw_namespace {
+                    ix = save;
+                    break;
+                }
+                saw_member = true;
+                ix += 1;
+            }
+            _ => {
+                ix = save;
+                break;
+            }
+        }
+        // After `:` or `.`, optional whitespace then a name-start.
+        while ix < bytes.len() && is_mdx_unicode_whitespace(bytes, ix) {
+            ix += char_len_utf8(bytes[ix]);
+        }
+        if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
+            return None;
+        }
+        ix += char_len_utf8(bytes[ix]);
     }
 
     // After tag name: must be whitespace, `>`, `/`, or `{`
@@ -1184,13 +1265,14 @@ pub(crate) fn scan_mdx_jsx_block(
     let is_closing = bytes[1] == b'/';
     let mut name_start = if is_closing { 2 } else { 1 };
 
-    // Micromark-extension-mdx-jsx allows whitespace between `</` and the
-    // closing tag name — e.g. `</ Name>`. Probe past it for the name-start
+    // Micromark-extension-mdx-jsx allows ES whitespace (including line
+    // endings) between `</` and the closing tag name / `>` — e.g.
+    // `</ Name>` or `</\n  Name>`. Probe past it for the name-start
     // check, but leave `scan_mdx_jsx_tag_end_inner` to consume the same
     // whitespace so positions stay aligned.
     if is_closing {
-        while name_start < bytes.len() && matches!(bytes[name_start], b' ' | b'\t') {
-            name_start += 1;
+        while name_start < bytes.len() && is_mdx_unicode_whitespace(bytes, name_start) {
+            name_start += char_len_utf8(bytes[name_start]);
         }
     }
 
@@ -1339,11 +1421,12 @@ fn scan_mdx_inline_jsx_inner(
     let is_closing = bytes[1] == b'/';
     let mut name_start = if is_closing { 2 } else { 1 };
 
-    // Micromark-extension-mdx-jsx tolerates whitespace between `</` and the
-    // closing tag name (e.g. `</ Name>`).
+    // Micromark-extension-mdx-jsx tolerates ES whitespace (incl. line
+    // endings) between `</` and the closing tag name / `>` — e.g.
+    // `</ Name>` or `</\n>` (fragment close split over lines).
     if is_closing {
-        while name_start < bytes.len() && matches!(bytes[name_start], b' ' | b'\t') {
-            name_start += 1;
+        while name_start < bytes.len() && is_mdx_unicode_whitespace(bytes, name_start) {
+            name_start += char_len_utf8(bytes[name_start]);
         }
     }
 
@@ -1362,31 +1445,48 @@ fn scan_mdx_inline_jsx_inner(
 
     let mut ix = name_start + char_len_utf8(bytes[name_start]);
     let mut saw_namespace = false;
-    while ix < bytes.len() {
-        if bytes[ix] == b':' {
-            if saw_namespace {
-                return None;
-            }
-            saw_namespace = true;
-            ix += 1;
-            if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
-                return None;
-            }
+    let mut saw_member = false;
+    loop {
+        while ix < bytes.len() && is_jsx_name_continue(bytes, ix) {
             ix += char_len_utf8(bytes[ix]);
-        } else if bytes[ix] == b'.' {
-            if saw_namespace {
-                return None;
-            }
-            ix += 1;
-            if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
-                return None;
-            }
+        }
+        let save = ix;
+        while ix < bytes.len() && is_mdx_unicode_whitespace(bytes, ix) {
             ix += char_len_utf8(bytes[ix]);
-        } else if is_jsx_name_continue(bytes, ix) {
-            ix += char_len_utf8(bytes[ix]);
-        } else {
+        }
+        if ix >= bytes.len() {
+            ix = save;
             break;
         }
+        match bytes[ix] {
+            b':' => {
+                if saw_namespace || saw_member {
+                    ix = save;
+                    break;
+                }
+                saw_namespace = true;
+                ix += 1;
+            }
+            b'.' => {
+                if saw_namespace {
+                    ix = save;
+                    break;
+                }
+                saw_member = true;
+                ix += 1;
+            }
+            _ => {
+                ix = save;
+                break;
+            }
+        }
+        while ix < bytes.len() && is_mdx_unicode_whitespace(bytes, ix) {
+            ix += char_len_utf8(bytes[ix]);
+        }
+        if ix >= bytes.len() || !is_jsx_name_start(bytes, ix) {
+            return None;
+        }
+        ix += char_len_utf8(bytes[ix]);
     }
 
     // After the tag name: must be whitespace, `>`, `/`, or `{`.
@@ -1724,6 +1824,15 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                 {
                     col += 4
                 }
+                // A `:::name` container directive's body is indented by 4
+                // columns past the directive marker, matching how mdast-
+                // util-directive computes inner-content positions. Affects
+                // dedent math for multi-line attribute expressions inside.
+                ItemBody::ContainerDirective(..)
+                    if self.options.contains(crate::Options::ENABLE_DIRECTIVE) =>
+                {
+                    col += 4
+                }
                 _ => {}
             }
         }
@@ -1974,7 +2083,7 @@ pub(crate) fn parse_jsx_tag_with_column<'a>(
 
     // Closing tag: `</Name>` (optionally with whitespace between `</` and the name)
     if let Some(rest) = s.strip_prefix("</") {
-        let name = extract_tag_name(rest.trim_start());
+        let name = extract_tag_name(rest.trim_start()).into_owned();
         return JsxElementData {
             name: name.into(),
             attrs: Vec::new(),
@@ -2018,7 +2127,7 @@ pub(crate) fn parse_jsx_tag_with_column<'a>(
     let attrs = parse_jsx_attrs(s, container_content_col);
 
     JsxElementData {
-        name: name.into(),
+        name: name.into_owned().into(),
         attrs,
         raw: raw.into(),
         is_closing: false,
@@ -2026,11 +2135,70 @@ pub(crate) fn parse_jsx_tag_with_column<'a>(
     }
 }
 
-fn extract_tag_name(s: &str) -> &str {
-    let end = s
-        .find(|c: char| c.is_whitespace() || c == '/' || c == '>' || c == '{')
-        .unwrap_or(s.len());
-    &s[..end]
+fn extract_tag_name(s: &str) -> alloc::borrow::Cow<'_, str> {
+    use alloc::borrow::Cow;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && is_jsx_name_continue(bytes, i) {
+        i += char_len_utf8(bytes[i]);
+    }
+    let primary_end = i;
+
+    // Peek past whitespace for a `.` (member) or `:` (namespace) followed
+    // (after more optional whitespace) by another name-start. mdx-js / the
+    // micromark JSX scanner permits this — `<a :b/>` is a tag with name
+    // `a:b`. If the peek fails, the primary segment is the full name.
+    let mut j = primary_end;
+    let mut saw_namespace = false;
+    let mut owned: Option<alloc::string::String> = None;
+    loop {
+        let save = j;
+        while j < bytes.len() && is_mdx_unicode_whitespace(bytes, j) {
+            j += char_len_utf8(bytes[j]);
+        }
+        if j >= bytes.len() {
+            return Cow::Borrowed(&s[..primary_end]);
+        }
+        let sep = bytes[j];
+        let is_member = sep == b'.';
+        let is_namespace = sep == b':';
+        if !is_member && !is_namespace {
+            return owned.map_or_else(
+                || Cow::Borrowed(&s[..primary_end]),
+                Cow::Owned,
+            );
+        }
+        if is_namespace && saw_namespace {
+            return owned.map_or_else(
+                || Cow::Borrowed(&s[..primary_end]),
+                Cow::Owned,
+            );
+        }
+        if is_namespace {
+            saw_namespace = true;
+        }
+        j += 1;
+        let after_sep = j;
+        while j < bytes.len() && is_mdx_unicode_whitespace(bytes, j) {
+            j += char_len_utf8(bytes[j]);
+        }
+        if j >= bytes.len() || !is_jsx_name_start(bytes, j) {
+            let _ = save;
+            return owned.map_or_else(
+                || Cow::Borrowed(&s[..primary_end]),
+                Cow::Owned,
+            );
+        }
+        let name_chunk_start = j;
+        j += char_len_utf8(bytes[j]);
+        while j < bytes.len() && is_jsx_name_continue(bytes, j) {
+            j += char_len_utf8(bytes[j]);
+        }
+        let acc = owned.get_or_insert_with(|| s[..primary_end].into());
+        acc.push(sep as char);
+        let _ = after_sep;
+        acc.push_str(&s[name_chunk_start..j]);
+    }
 }
 
 /// Extract the opening tag portion (up to the first unbalanced `>`).
@@ -2091,14 +2259,45 @@ fn parse_jsx_attrs<'a>(text: &'a str, container_content_col: usize) -> Vec<JsxAt
     // Skip tag name. Use the shared JSX identifier rules (which know about
     // `$` and Unicode `is_id_start` / `is_id_continue`) and additionally
     // accept the JSX tag-name separators `.` (member) and `:` (namespace).
-    while i < len {
-        if matches!(bytes[i], b'.' | b':') {
-            i += 1;
-        } else if is_jsx_name_continue(bytes, i) {
+    // micromark also tolerates whitespace AROUND `.` and `:` (`<a :b/>`
+    // → name `a:b`), so peek past whitespace before deciding the name has
+    // ended.
+    let mut saw_namespace = false;
+    loop {
+        while i < len && is_jsx_name_continue(bytes, i) {
             i += char_len_utf8(bytes[i]);
-        } else {
+        }
+        let save = i;
+        while i < len && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= len {
+            i = save;
             break;
         }
+        match bytes[i] {
+            b':' if !saw_namespace => {
+                saw_namespace = true;
+                i += 1;
+            }
+            b'.' if !saw_namespace => {
+                i += 1;
+            }
+            _ => {
+                i = save;
+                break;
+            }
+        }
+        while i < len && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= len || !is_jsx_name_start(bytes, i) {
+            // Separator without a following name. Bail out — leave i past
+            // the separator; the attribute loop will surface this as an
+            // invalid attribute name, matching mdx-js's error mode.
+            break;
+        }
+        i += char_len_utf8(bytes[i]);
     }
 
     loop {
