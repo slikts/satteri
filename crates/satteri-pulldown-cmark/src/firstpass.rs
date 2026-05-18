@@ -1794,22 +1794,26 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                     // skipping the MaybeEmphasis emission keeps `_-_@…`
                     // from forming an emphasis pair that hides the email.
                     if c == b'_' && self.options.contains(Options::ENABLE_GFM) {
+                        // Run the cheap structural scan first — most `_`
+                        // in prose can't reach an `@` through atext chars
+                        // and we want to bail before paying for the
+                        // paragraph-scan predicates.
                         let paragraph_floor = self
                             .tree
                             .peek_up()
                             .map(|nix| self.tree[nix].item.start)
                             .unwrap_or(start);
-                        if !has_unbalanced_bracket_from(bytes, paragraph_floor, ix)
-                            && !is_inside_code_span(bytes, ix)
-                            && !is_inside_link_destination(bytes, ix)
+                        if let Some((email_start, email_end, full_url)) =
+                            scan_email_forward_from_atext(
+                                bytes,
+                                ix,
+                                begin_text,
+                                paragraph_floor,
+                            )
                         {
-                            if let Some((email_start, email_end, full_url)) =
-                                scan_email_forward_from_atext(
-                                    bytes,
-                                    ix,
-                                    begin_text,
-                                    paragraph_floor,
-                                )
+                            if !has_unbalanced_bracket_from(bytes, paragraph_floor, ix)
+                                && !is_inside_code_span(bytes, ix)
+                                && !is_inside_link_destination(bytes, ix)
                             {
                                 let link_ix = self.allocs.allocate_link(
                                     LinkType::Email,
@@ -2292,6 +2296,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                         paragraph_floor,
                         begin_text,
                         backslash_escaped,
+                        self.options,
                         &mut self.tree,
                         &mut self.allocs,
                     );
@@ -3653,7 +3658,16 @@ fn scan_paragraph_interrupt_no_table(
 /// boundary (e.g. `$<https://x$` — the `$` pair owns those bytes).
 fn is_inside_math_span(bytes: &[u8], pos: usize) -> bool {
     let (para_start, para_end) = scope_for_inline(bytes, pos);
-    let mut runs: Vec<(usize, usize)> = Vec::new();
+    // Fast reject: need at least one `$` on each side of `pos` to form a
+    // span. Skips the per-byte walk when the paragraph has no `$`.
+    if pos <= para_start
+        || pos >= para_end
+        || memchr::memchr(b'$', &bytes[para_start..pos]).is_none()
+        || memchr::memchr(b'$', &bytes[pos..para_end]).is_none()
+    {
+        return false;
+    }
+    let mut runs: Vec<(usize, usize)> = Vec::with_capacity(4);
     let mut i = para_start;
     while i < para_end {
         if bytes[i] == b'\\' && i + 1 < para_end {
@@ -3699,12 +3713,23 @@ fn is_inside_math_span(bytes: &[u8], pos: usize) -> bool {
 
 fn is_inside_code_span(bytes: &[u8], pos: usize) -> bool {
     let (para_start, para_end) = scope_for_inline(bytes, pos);
+    // Fast reject: a code span needs at least two backtick runs around
+    // `pos`. If there's no backtick on either side, we're not in one.
+    // memchr is SIMD-accelerated and a lot cheaper than the bracket-aware
+    // walk below.
+    if pos <= para_start
+        || pos >= para_end
+        || memchr::memchr(b'`', &bytes[para_start..pos]).is_none()
+        || memchr::memchr(b'`', &bytes[pos..para_end]).is_none()
+    {
+        return false;
+    }
     // Collect backtick runs in the paragraph, skipping backslash-escaped
     // ones. Each run records its `[`-bracket nesting depth at the opening
     // byte so that backticks inside a `[label]` (e.g. a directive label
     // or a link's body) only pair with backticks at the same depth — not
     // with backticks in the surrounding paragraph text.
-    let mut runs: Vec<(usize, usize, i32)> = Vec::new(); // (start, count, bracket_depth)
+    let mut runs: Vec<(usize, usize, i32)> = Vec::with_capacity(8);
     let mut bracket_depth: i32 = 0;
     let mut i = para_start;
     while i < para_end {
@@ -3877,6 +3902,15 @@ fn scope_end_with_prefix(bytes: &[u8], cur_line_start: usize, prefix: usize) -> 
 /// CommonMark forbids URLs from spanning a blank line, so per-line scans
 /// are sufficient in both directions.
 fn is_inside_link_url_parens(bytes: &[u8], pos: usize) -> bool {
+    // Fast reject: walkback returns false on first newline, so a `(` past
+    // the current line can't reach pos. Skip the walk when this line has
+    // no `(` before pos.
+    let line_start = memchr::memrchr2(b'\n', b'\r', &bytes[..pos])
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    if memchr::memchr(b'(', &bytes[line_start..pos]).is_none() {
+        return false;
+    }
     let mut paren_depth: i32 = 0;
     let mut i = pos;
     while i > 0 {
@@ -4439,65 +4473,28 @@ fn try_emit_gfm_autolink<'a>(
     paragraph_start: usize,
     begin_text: usize,
     backslash_escaped: bool,
+    options: Options,
     tree: &mut Tree<Item>,
     allocs: &mut Allocations<'a>,
 ) -> Option<(usize, usize)> {
-    // previousUnbalanced: suppress when an unclosed `[`/`![` precedes the
-    // trigger in this paragraph. Micromark gates the construct on the
-    // event-stream's last labelLink/labelImage; we approximate with a
-    // byte-level bracket-depth walk over the paragraph so far. Bounded
-    // to `paragraph_start` so brackets from a previous block (e.g. an
-    // indented code line containing `[`) don't leak into the check.
-    if has_unbalanced_bracket_from(bytes, paragraph_start, ix) {
-        return None;
-    }
-    // Link/image destination precedence: when the trigger sits inside a
-    // `[label](DEST)` destination, micromark's `labelEnd` resolver has
-    // already claimed those bytes as resource content — the text-context
-    // autolink construct never fires there. Our linear walk runs *before*
-    // bracket pairing, so detect "inside an unmatched `(` immediately
-    // preceded by `]`" and suppress.
-    if is_inside_link_destination(bytes, ix) {
-        return None;
-    }
-    // Code span precedence: in micromark the codeText construct fires from
-    // the opening backtick run and consumes everything up to its match, so
-    // text-context triggers inside the span never see those bytes. Our
-    // firstpass emits MaybeCode markers but doesn't claim the bytes yet, so
-    // we mirror the precedence by suppressing when the trigger lands inside
-    // a balanced backtick pair.
-    if is_inside_code_span(bytes, ix) {
-        return None;
-    }
-    // Math span precedence: same story for `$...$`. The math construct in
-    // mdast-util-math is a text construct that fires from `$` and consumes
-    // the body up to the closing run. If the URL trigger sits inside a
-    // valid math pair, defer — math will form first and the URL bytes
-    // become part of its content.
-    if is_inside_math_span(bytes, ix) {
-        return None;
-    }
-    // MDX JSX tag precedence: if the trigger byte sits inside an open
-    // inline JSX tag (`<a href="https://…">`), the bytes are an attribute
-    // value, not text. micromark's mdx-jsx text construct fires on `<`
-    // first and claims the whole tag including attributes; the autolink
-    // construct never sees those bytes. We have a separate JSX-block
-    // scanner, but the inline byte stream still walks the same bytes —
-    // suppress here to mirror the precedence.
-    if is_inside_open_inline_jsx_tag(bytes, ix) {
-        return None;
-    }
-
+    // Fast structural reject: every `h`/`H`/`w`/`W`/`@` in prose fires this
+    // path, but only a tiny fraction can actually start an autolink. The
+    // precedence predicates below each cost O(paragraph) to evaluate, so
+    // bail out on the cheap byte-level check first.
     match byte {
         b'h' | b'H' | b'w' | b'W' => {
+            let rest = &bytes[ix..];
+            if !(rest.starts_with(b"http://")
+                || rest.starts_with(b"https://")
+                || rest.starts_with(b"www."))
+            {
+                return None;
+            }
             // Pointed-autolink precedence: when an *unescaped* `<`
             // immediately precedes AND a `>` closer exists before line
             // end / whitespace, the CommonMark autolink construct will
-            // claim these bytes during MaybeHtml resolution. micromark's
-            // construct ordering fires `<` first, so the literalAutolink
-            // never sees text-context here. Skip when the `<` is itself
-            // backslash-escaped (`\<`) — that `<` is literal text and
-            // can't form an autolink/HTML tag.
+            // claim these bytes during MaybeHtml resolution. Cheap, so
+            // run before the paragraph-scan predicates.
             if ix > 0 && bytes[ix - 1] == b'<' {
                 let backslashes_before_lt = bytes[..ix - 1]
                     .iter()
@@ -4515,6 +4512,40 @@ fn try_emit_gfm_autolink<'a>(
                     }
                 }
             }
+        }
+        b'@' => {
+            // Email requires at least one atext char immediately before @.
+            if ix == 0 || !is_email_local_char(bytes[ix - 1]) {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+
+    // previousUnbalanced: suppress when an unclosed `[`/`![` precedes the
+    // trigger in this paragraph.
+    if has_unbalanced_bracket_from(bytes, paragraph_start, ix) {
+        return None;
+    }
+    // Link/image destination precedence.
+    if is_inside_link_destination(bytes, ix) {
+        return None;
+    }
+    // Code span precedence.
+    if is_inside_code_span(bytes, ix) {
+        return None;
+    }
+    // Math span precedence (only matters when math is enabled).
+    if options.contains(Options::ENABLE_MATH) && is_inside_math_span(bytes, ix) {
+        return None;
+    }
+    // MDX JSX tag precedence (only matters when MDX is enabled).
+    if options.contains(Options::ENABLE_MDX) && is_inside_open_inline_jsx_tag(bytes, ix) {
+        return None;
+    }
+
+    match byte {
+        b'h' | b'H' | b'w' | b'W' => {
             // previousProtocol / previousWww are checked inside
             // `scan_autolink_literal` (loose check: prev not ASCII
             // alphabetic). `fnr_only=false` means the *construct* path
@@ -4682,6 +4713,15 @@ fn is_inside_link_destination(bytes: &[u8], pos: usize) -> bool {
     if pos < 2 {
         return false;
     }
+    // Fast reject: the walkback stops at the first newline, so a `(`
+    // outside the current source line can't reach `pos`. If there's none
+    // on this line before `pos`, no link tail is possible.
+    let line_start = memchr::memrchr2(b'\n', b'\r', &bytes[..pos])
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    if memchr::memchr(b'(', &bytes[line_start..pos]).is_none() {
+        return false;
+    }
     let mut paren_close_excess: i32 = 0;
     let mut paren_start: Option<usize> = None;
     let mut i = pos;
@@ -4825,6 +4865,12 @@ fn has_unbalanced_bracket_from(bytes: &[u8], floor: usize, pos: usize) -> bool {
     if pos <= floor {
         return false;
     }
+    // Fast reject: if no `[` appears anywhere between floor and pos there
+    // can't be an unbalanced bracket — bypass both the blank-line walkback
+    // and the bracket-depth walk.
+    if memchr::memchr(b'[', &bytes[floor..pos]).is_none() {
+        return false;
+    }
     let mut search_start = floor;
     {
         let mut i = pos;
@@ -4844,6 +4890,11 @@ fn has_unbalanced_bracket_from(bytes: &[u8], floor: usize, pos: usize) -> bool {
                 }
             }
         }
+    }
+    // Re-check after narrowing the floor: the only `[` in the range may
+    // have been before a blank line we just skipped past.
+    if memchr::memchr(b'[', &bytes[search_start..pos]).is_none() {
+        return false;
     }
     let mut depth: i32 = 0;
     let mut i = search_start;
