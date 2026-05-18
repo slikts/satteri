@@ -4304,7 +4304,39 @@ fn is_inside_gfm_autolink_url(bytes: &[u8], pos: usize) -> bool {
         }
         match b {
             b'[' => bracket_depth += 1,
-            b']' if bracket_depth > 0 => bracket_depth -= 1,
+            b']' if bracket_depth > 0 => {
+                bracket_depth -= 1;
+                // Closed link text `]` followed by `(` is a CommonMark link
+                // destination — micromark tokenizes the link first, so the URL
+                // inside isn't visible to the autolink-literal construct. Skip
+                // past the matching `)` so e.g. `[a](http://x)，`code`` doesn't
+                // gobble the trailing text into a phantom URL.
+                if bracket_depth == 0 && bytes.get(i + 1) == Some(&b'(') {
+                    let mut j = i + 2;
+                    let mut paren_depth: i32 = 1;
+                    while j < bytes.len() && paren_depth > 0 {
+                        let c = bytes[j];
+                        if c == b'\\' && j + 1 < bytes.len() && bytes[j + 1].is_ascii_punctuation()
+                        {
+                            j += 2;
+                            continue;
+                        }
+                        if matches!(c, b'\n' | b'\r') {
+                            break;
+                        }
+                        match c {
+                            b'(' => paren_depth += 1,
+                            b')' => paren_depth -= 1,
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    if paren_depth == 0 {
+                        i = j;
+                        continue;
+                    }
+                }
+            }
             _ => {}
         }
         // `scan_autolink_literal` rejects false positives, so the prefix
