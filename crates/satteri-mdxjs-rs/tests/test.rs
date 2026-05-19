@@ -1090,3 +1090,79 @@ fn function_body_with_exports() -> Result<(), satteri_arena::mdx_types::Message>
     );
     Ok(())
 }
+
+// Components defined at module scope (via export const / function / class,
+// or via imports) must resolve to that binding rather than being destructured
+// out of `props.components`. Mirrors `@mdx-js/mdx` (via `estree-util-scope`).
+#[test]
+fn module_scope_component_not_destructured() -> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "export const Comp = () => <span>Comp</span>\n\n<Comp />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        !result.contains("{ Comp }"),
+        "must not destructure `Comp` from components when it is bound at module scope: {result}"
+    );
+    assert!(
+        !result.contains("_missingMdxReference(\"Comp\""),
+        "must not emit a missing-ref guard for a module-bound component: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn module_scope_exported_function_component_not_destructured()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "export function FnComp() { return <span /> }\n\n<FnComp />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(!result.contains("{ FnComp }"), "{result}");
+    assert!(!result.contains("_missingMdxReference(\"FnComp\""), "{result}");
+    Ok(())
+}
+
+#[test]
+fn module_scope_exported_class_component_not_destructured()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "export class ClassComp { render() { return null } }\n\n<ClassComp />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(!result.contains("{ ClassComp }"), "{result}");
+    assert!(!result.contains("_missingMdxReference(\"ClassComp\""), "{result}");
+    Ok(())
+}
+
+// Only identifiers without a module-scope binding should be destructured.
+// `Comp` is exported locally; `Other` is imported; `NotInScope` has no binding.
+#[test]
+fn mixed_module_scope_and_dynamic_components()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "import Other from './other.jsx'\nexport const Comp = () => <span>Comp</span>\n\n<Comp /> and <Other /> and <NotInScope />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("const { NotInScope } = _components;"),
+        "only the unbound `NotInScope` should be destructured: {result}"
+    );
+    assert!(
+        !result.contains("_missingMdxReference(\"Comp\""),
+        "no missing-ref guard for module-bound `Comp`: {result}"
+    );
+    assert!(
+        !result.contains("_missingMdxReference(\"Other\""),
+        "no missing-ref guard for imported `Other`: {result}"
+    );
+    assert!(
+        result.contains("_missingMdxReference(\"NotInScope\""),
+        "still emit guard for unbound `NotInScope`: {result}"
+    );
+    Ok(())
+}

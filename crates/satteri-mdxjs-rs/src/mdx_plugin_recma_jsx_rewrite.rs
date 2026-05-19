@@ -378,6 +378,30 @@ fn collect_defined_names(stmt: &Statement, defined: &mut FxHashSet<String>) {
                 }
             }
         }
+        // `export const X`, `export function X() {}`, `export class X {}`
+        // bind `X` at module scope just like their non-exported counterparts.
+        Statement::ExportNamedDeclaration(export) => {
+            if let Some(decl) = &export.declaration {
+                match decl {
+                    Declaration::VariableDeclaration(var_decl) => {
+                        for declarator in &var_decl.declarations {
+                            collect_binding_names(&declarator.id, defined);
+                        }
+                    }
+                    Declaration::FunctionDeclaration(func) => {
+                        if let Some(id) = &func.id {
+                            defined.insert(id.name.to_string());
+                        }
+                    }
+                    Declaration::ClassDeclaration(class) => {
+                        if let Some(id) = &class.id {
+                            defined.insert(id.name.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         _ => {}
     }
 }
