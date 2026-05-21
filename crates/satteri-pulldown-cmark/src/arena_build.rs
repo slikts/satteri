@@ -81,12 +81,15 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     let mut image_alt_buf: Option<String> = None;
     let mut image_depth: usize = 0;
 
-    // JSX tag pairing state. The third element is `is_flow` — true if the
-    // open tag was on its own block line (MdxJsxFlowElement), false if it
-    // was inline (MdxJsxTextElement). mdx-js requires the closing tag to
-    // match in mode: a flow open can't be paired with an inline close, so
-    // `<Foo>\n</Foo>X` (close has trailing text → inline mode) errors.
-    let mut jsx_stack: Vec<(String, u32, bool)> = Vec::new();
+    // JSX tag pairing state: `(name, start_offset, is_flow, node_id)`.
+    // `is_flow` is true if the open tag was on its own block line
+    // (MdxJsxFlowElement), false if inline (MdxJsxTextElement). mdx-js
+    // requires the closing tag to match in mode: a flow open can't be
+    // paired with an inline close, so `<Foo>\n</Foo>X` (close has trailing
+    // text → inline mode) errors. `node_id` is the open element's arena
+    // node, used to verify a closing tag actually closes that element
+    // rather than a container that absorbed the tag.
+    let mut jsx_stack: Vec<(String, u32, bool, u32)> = Vec::new();
     let mut mdx_errors: Vec<(usize, String)> = Vec::new();
     let mut paragraph_open_depth: Vec<usize> = Vec::new();
     // jsx_stack length snapshot taken when a structural container
@@ -94,7 +97,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     // container closes, any JSX entry pushed inside it that's still on
     // the stack is unclosed-within-the-container and triggers an
     // mdx-js-style "Expected a closing tag … before the end of `…`"
-    // error — see §B in plans/mdx-conformance.md.
+    // error.
     let mut container_jsx_snapshot: Vec<(MdastNodeType, usize)> = Vec::new();
 
     // Refdefs in source order. Each container close pass claims the defs whose
@@ -373,12 +376,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         // Drain unclosed JSX opens before refdef pull and
                         // spread computation — mirrors the regular-close
                         // arm's blockquote handling but inline here since
-                        // ListItem close has its own arm. See §B.
+                        // ListItem close has its own arm.
                         if let Some(&(snap_kind, snap_len)) = container_jsx_snapshot.last() {
                             if snap_kind == MdastNodeType::ListItem {
                                 container_jsx_snapshot.pop();
                                 while jsx_stack.len() > snap_len {
-                                    let (name, offset, _is_flow) = jsx_stack.pop().unwrap();
+                                    let (name, offset, _is_flow, _id) =
+                                        jsx_stack.pop().unwrap();
                                     let loc = byte_offset_to_line_col(source, offset as usize);
                                     mdx_errors.push((
                                         offset as usize,
@@ -548,7 +552,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         if matches!(item.body, ItemBody::Paragraph | ItemBody::TightParagraph) {
                             if let Some(opened_at) = paragraph_open_depth.pop() {
                                 while builder.stack_depth() > opened_at {
-                                    if let Some((name, offset, _is_flow)) = jsx_stack.pop() {
+                                    if let Some((name, offset, _is_flow, _id)) = jsx_stack.pop() {
                                         let loc = byte_offset_to_line_col(source, offset as usize);
                                         mdx_errors.push((
                                             offset as usize,
@@ -563,8 +567,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         }
                         // Drain unclosed JSX opens that were pushed inside a
                         // structural container (blockquote, list item) when
-                        // that container closes. mdx-js errors structurally
-                        // — see §B.
+                        // that container closes. mdx-js errors structurally.
                         let container_kind_for_drain = match item.body {
                             ItemBody::BlockQuote(_) => Some(MdastNodeType::Blockquote),
                             ItemBody::ListItem(..) => Some(MdastNodeType::ListItem),
@@ -575,7 +578,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 if snap_kind == kind {
                                     container_jsx_snapshot.pop();
                                     while jsx_stack.len() > snap_len {
-                                        let (name, offset, _is_flow) = jsx_stack.pop().unwrap();
+                                        let (name, offset, _is_flow, _id) =
+                                            jsx_stack.pop().unwrap();
                                         let loc = byte_offset_to_line_col(source, offset as usize);
                                         let container_label = match kind {
                                             MdastNodeType::Blockquote => "blockQuote",
@@ -1128,8 +1132,12 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
 
                         if jsx.is_closing {
                             let close_name = jsx.name.as_ref();
-                            if let Some((open_name, open_offset, open_is_flow)) = jsx_stack.pop() {
-                                if close_name != open_name {
+                            if let Some((open_name, open_offset, open_is_flow, open_node_id)) =
+                                jsx_stack.pop()
+                            {
+                                let name_mismatch = close_name != open_name;
+                                let mode_mismatch = !name_mismatch && open_is_flow != is_flow;
+                                if name_mismatch {
                                     let open_loc =
                                         byte_offset_to_line_col(source, open_offset as usize);
                                     mdx_errors.push((
@@ -1139,7 +1147,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                              corresponding closing tag for `<{open_name}>` ({open_loc})"
                                         ),
                                     ));
-                                } else if open_is_flow != is_flow {
+                                } else if mode_mismatch {
                                     // mdx-js: a flow-mode open (`<Foo>` alone on its
                                     // line) cannot be closed by an inline close
                                     // (`</Foo>` followed by content on its line)
@@ -1157,20 +1165,44 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                         ),
                                     ));
                                 }
-                                let id = builder.current_node_id();
-                                let node = builder.arena_ref().get_node(id);
-                                let orig_start = node.start_offset;
-                                let orig_start_line = node.start_line;
-                                let orig_start_col = node.start_column;
-                                builder.set_position_current(
-                                    orig_start,
-                                    end,
-                                    orig_start_line,
-                                    orig_start_col,
-                                    end_line,
-                                    end_col,
-                                );
-                                builder.close_node();
+                                // A clean closing tag must close the element
+                                // currently open on the builder. When it does
+                                // not, the tag was absorbed into a nested
+                                // container (e.g. a lazy-continuation line of a
+                                // list item) and never structurally closes the
+                                // element. Closing the builder's current node
+                                // would close the wrong node and desync the
+                                // stack, corrupting later nodes; leave the
+                                // element open for `builder.finish` and report
+                                // it as unclosed instead.
+                                let absorbed = !name_mismatch
+                                    && !mode_mismatch
+                                    && builder.current_node_id() != open_node_id;
+                                if absorbed {
+                                    let open_loc =
+                                        byte_offset_to_line_col(source, open_offset as usize);
+                                    mdx_errors.push((
+                                        open_offset as usize,
+                                        format!(
+                                            "Expected a closing tag for `<{open_name}>` ({open_loc})"
+                                        ),
+                                    ));
+                                } else {
+                                    let id = builder.current_node_id();
+                                    let node = builder.arena_ref().get_node(id);
+                                    let orig_start = node.start_offset;
+                                    let orig_start_line = node.start_line;
+                                    let orig_start_col = node.start_column;
+                                    builder.set_position_current(
+                                        orig_start,
+                                        end,
+                                        orig_start_line,
+                                        orig_start_col,
+                                        end_line,
+                                        end_col,
+                                    );
+                                    builder.close_node();
+                                }
                             } else {
                                 mdx_errors.push((
                                     start as usize,
@@ -1196,7 +1228,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             if jsx.is_self_closing {
                                 builder.close_node();
                             } else {
-                                jsx_stack.push((jsx.name.to_string(), start, is_flow));
+                                jsx_stack.push((jsx.name.to_string(), start, is_flow, id));
                             }
                         }
                         inner.tree.next_sibling(cur_ix);
@@ -1799,7 +1831,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     }
 
     // Check for unclosed JSX tags.
-    for (name, offset, _is_flow) in &jsx_stack {
+    for (name, offset, _is_flow, _id) in &jsx_stack {
         let loc = byte_offset_to_line_col(source, *offset as usize);
         mdx_errors.push((
             *offset as usize,

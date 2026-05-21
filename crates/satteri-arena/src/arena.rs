@@ -192,10 +192,23 @@ impl<K: ArenaKind> Arena<K> {
         self.set_children(parent_id, &new_children);
     }
 
+    /// Resolves a `StringRef`. A corrupted ref — out of bounds or off a
+    /// UTF-8 boundary — yields `""` rather than panicking, so malformed
+    /// MDX can never abort the host process.
     pub fn get_str(&self, string_ref: StringRef) -> &str {
         let start = string_ref.offset as usize;
-        let end = start + string_ref.len as usize;
-        &self.source[start..end]
+        let end = start.saturating_add(string_ref.len as usize);
+        match self.source.get(start..end) {
+            Some(s) => s,
+            None => {
+                debug_assert!(
+                    false,
+                    "StringRef {start}..{end} out of bounds for source of len {}",
+                    self.source.len()
+                );
+                ""
+            }
+        }
     }
 
     pub fn get_node_data(&self, node_id: u32) -> Option<&[u8]> {

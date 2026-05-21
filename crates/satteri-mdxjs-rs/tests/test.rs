@@ -1171,3 +1171,36 @@ fn mixed_module_scope_and_dynamic_components() -> Result<(), satteri_arena::mdx_
     );
     Ok(())
 }
+
+// A closing tag absorbed into a nested container (here, `</Card>` indented as
+// a lazy-continuation line of a list item) used to corrupt the unclosed
+// element's name `StringRef` and abort the process via an out-of-bounds slice.
+// It must now degrade to a catchable error.
+#[test]
+fn closing_tag_absorbed_by_list_item_errors_not_panics() {
+    let result = compile(
+        "<Card>\n  body\n\n1. one\n   </Card>\n",
+        &Options::default(),
+        MDX_OPTS,
+    );
+    let err = result.expect_err("malformed MDX must error, not compile");
+    assert!(
+        err.reason.contains("closing tag for `<Card>`"),
+        "should report the unclosed element: {err:?}"
+    );
+}
+
+// The fix must not regress well-formed elements whose closing tag does line up
+// with the element — including flow elements wrapping block-level children.
+#[test]
+fn closing_tag_paired_with_element_still_compiles(
+) -> Result<(), satteri_arena::mdx_types::Message> {
+    compile("<Card>\nbody\n</Card>\n", &Options::default(), MDX_OPTS)?;
+    compile(
+        "<Card>\n\n# Heading\n\n</Card>\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    compile("<Box><Card>x</Card></Box>", &Options::default(), MDX_OPTS)?;
+    Ok(())
+}
