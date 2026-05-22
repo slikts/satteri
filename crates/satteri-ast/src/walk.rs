@@ -16,20 +16,37 @@
 //!   per matched node: inline resolved data (format depends on node type)
 //! ```
 //!
-//! ### Element data layout (node_type=1)
+//! Every HAST node payload shares the same prelude (matching `serialize_mdast_node_inline`):
+//! ```text
+//! [node_data: u32 len + utf8 JSON bytes]   ; 0-length when the node has no `data`
+//! [position: 6×u32 = 24B]                  ; start_offset, end_offset, start_line, start_col, end_line, end_col
+//! [child_count: u16][child_ids: child_count × u32]
+//! [type-specific resolved data]
+//! ```
+//! Synthesized nodes (no source range) store all-zero position; JS surfaces those as `position: undefined`.
+//!
+//! Type-specific tails (after the shared prelude):
+//!
+//! ### Element (node_type=1)
 //! ```text
 //! [tag_name_len: u16][tag_name: utf8...]
 //! [prop_count: u16]
-//! per prop:
-//!   [name_len: u16][name: utf8...][value_kind: u8][value_len: u16][value: utf8...]
+//! per prop: [name_len: u16][name: utf8...][value_kind: u8][value_len: u16][value: utf8...]
 //! ```
 //!
-//! ### Text/comment/raw data layout (node_type=2,3,5)
+//! ### MDX JSX flow/text element (node_type=10, 11)
+//! ```text
+//! [name_len: u16][name: utf8...]
+//! [attr_count: u16]
+//! per attr: [kind: u8][name_len: u16][name: utf8...][value_len: u32][value: utf8...]
+//! ```
+//!
+//! ### Text/comment/raw/MDX expression/MDX ESM (node_type=2, 3, 5, 12, 13, 14)
 //! ```text
 //! [value_len: u32][value: utf8...]
 //! ```
 //!
-//! ### Code data layout (node_type=8)
+//! ### Code (node_type=8)
 //! ```text
 //! [lang_len: u16][lang: utf8...][meta_len: u16][meta: utf8...][value_len: u32][value: utf8...]
 //! ```
@@ -47,21 +64,41 @@ pub struct Subscription {
 use crate::hast::HastNodeType;
 
 const HAST_ELEMENT_TYPE: u8 = HastNodeType::Element as u8;
+const HAST_MDX_JSX_FLOW_TYPE: u8 = HastNodeType::MdxJsxElement as u8;
+const HAST_MDX_JSX_TEXT_TYPE: u8 = HastNodeType::MdxJsxTextElement as u8;
+
+/// Node types whose `type_data[0..8]` is a `StringRef` to a name that
+/// `tag_filter` should compare against. HAST elements use the HTML tag name;
+/// MDX JSX flow/text elements use the component name (`<Box/>` → `"Box"`).
+fn hast_node_has_name(node_type: u8) -> bool {
+    matches!(
+        node_type,
+        HAST_ELEMENT_TYPE | HAST_MDX_JSX_FLOW_TYPE | HAST_MDX_JSX_TEXT_TYPE
+    )
+}
 
 /// Walk an MDAST arena and return matched nodes as a flat binary buffer.
 pub fn walk_mdast(arena: &Arena<Mdast>, subscriptions: &[Subscription]) -> Vec<u8> {
-    walk_and_collect_inner(arena, subscriptions, serialize_mdast_node_inline)
+    // MDAST has no tag-filtering: any non-empty tag_filter on an MDAST
+    // subscription is a no-op (matches nothing in the current API).
+    walk_and_collect_inner(arena, subscriptions, serialize_mdast_node_inline, |_| false)
 }
 
 /// Walk a HAST arena and return matched nodes as a flat binary buffer.
 pub fn walk_hast(arena: &Arena<Hast>, subscriptions: &[Subscription]) -> Vec<u8> {
-    walk_and_collect_inner(arena, subscriptions, serialize_hast_node_inline)
+    walk_and_collect_inner(
+        arena,
+        subscriptions,
+        serialize_hast_node_inline,
+        hast_node_has_name,
+    )
 }
 
 fn walk_and_collect_inner<K: ArenaKind>(
     arena: &Arena<K>,
     subscriptions: &[Subscription],
     serialize: fn(&Arena<K>, u32, u8, &[u8], &mut Vec<u8>),
+    has_name: fn(u8) -> bool,
 ) -> Vec<u8> {
     if subscriptions.is_empty() {
         return 0u32.to_le_bytes().to_vec();
@@ -88,8 +125,9 @@ fn walk_and_collect_inner<K: ArenaKind>(
         if !subs.is_empty() {
             let type_data = arena.get_type_data(node_id);
 
-            // For elements with tag filter, read tag name once
-            let tag_name = if node_type == HAST_ELEMENT_TYPE && type_data.len() >= 8 {
+            // For named nodes (HAST elements + MDX JSX flow/text), resolve the
+            // name once so tag_filter comparisons can short-circuit.
+            let tag_name = if has_name(node_type) && type_data.len() >= 8 {
                 let tag_ref = read_string_ref(type_data, 0);
                 Some(arena.get_str(tag_ref))
             } else {
@@ -377,22 +415,45 @@ fn serialize_hast_node_inline(
     type_data: &[u8],
     out: &mut Vec<u8>,
 ) {
+    let node = arena.get_node(node_id);
+
+    // Shared prelude (mirrors serialize_mdast_node_inline):
+    // [data: u32 len + bytes][position: 24B][child_count: u16][child_ids: N×u32]
+
+    // Node data (JSON bytes), length-prefixed, always first so JS can read it at a known offset
+    if let Some(data) = arena.get_node_data(node_id) {
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    } else {
+        out.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    out.extend_from_slice(&node.start_offset.to_le_bytes());
+    out.extend_from_slice(&node.end_offset.to_le_bytes());
+    out.extend_from_slice(&node.start_line.to_le_bytes());
+    out.extend_from_slice(&node.start_column.to_le_bytes());
+    out.extend_from_slice(&node.end_line.to_le_bytes());
+    out.extend_from_slice(&node.end_column.to_le_bytes());
+
+    let children = arena.get_children(node_id);
+    out.extend_from_slice(&(children.len() as u16).to_le_bytes());
+    for &child_id in children {
+        out.extend_from_slice(&child_id.to_le_bytes());
+    }
+
     match node_type {
-        // HAST element
+        // HAST element: tag + properties
         1 => {
             if type_data.len() < 16 {
                 out.extend_from_slice(&0u16.to_le_bytes()); // empty tag
                 out.extend_from_slice(&0u16.to_le_bytes()); // 0 props
-                out.extend_from_slice(&0u16.to_le_bytes()); // 0 children
                 return;
             }
-            // Tag name
             let tag_ref = read_string_ref(type_data, 0);
             let tag = arena.get_str(tag_ref);
             out.extend_from_slice(&(tag.len() as u16).to_le_bytes());
             out.extend_from_slice(tag.as_bytes());
 
-            // Properties
             let prop_count = u32::from_le_bytes(type_data[8..12].try_into().unwrap()) as usize;
             out.extend_from_slice(&(prop_count as u16).to_le_bytes());
             for i in 0..prop_count {
@@ -408,39 +469,20 @@ fn serialize_hast_node_inline(
                 out.extend_from_slice(&(val.len() as u16).to_le_bytes());
                 out.extend_from_slice(val.as_bytes());
             }
-
-            // Child IDs
-            let children = arena.get_children(node_id);
-            out.extend_from_slice(&(children.len() as u16).to_le_bytes());
-            for &child_id in children {
-                out.extend_from_slice(&child_id.to_le_bytes());
-            }
-
-            // Node data (JSON bytes for plugin-visible `data` property)
-            if let Some(data) = arena.get_node_data(node_id) {
-                out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-                out.extend_from_slice(data);
-            } else {
-                out.extend_from_slice(&0u32.to_le_bytes());
-            }
         }
 
-        // MDX JSX elements (flow=10, text=11), same layout as HAST element
-        // but uses name + attributes instead of tagName + properties
+        // MDX JSX elements (flow=10, text=11): name + attributes
         10 | 11 => {
             if type_data.len() < 16 {
                 out.extend_from_slice(&0u16.to_le_bytes()); // empty name
                 out.extend_from_slice(&0u16.to_le_bytes()); // 0 attrs
-                out.extend_from_slice(&0u16.to_le_bytes()); // 0 children
                 return;
             }
-            // Name
             let name_ref = read_string_ref(type_data, 0);
             let name = arena.get_str(name_ref);
             out.extend_from_slice(&(name.len() as u16).to_le_bytes());
             out.extend_from_slice(name.as_bytes());
 
-            // Attributes: [kind: u8][_pad: 3B][name: StringRef(8B)][value: StringRef(8B)]
             let attr_count = u32::from_le_bytes(type_data[8..12].try_into().unwrap()) as usize;
             out.extend_from_slice(&(attr_count as u16).to_le_bytes());
             for i in 0..attr_count {
@@ -456,16 +498,9 @@ fn serialize_hast_node_inline(
                 out.extend_from_slice(&(attr_val.len() as u32).to_le_bytes());
                 out.extend_from_slice(attr_val.as_bytes());
             }
-
-            // Child IDs
-            let children = arena.get_children(node_id);
-            out.extend_from_slice(&(children.len() as u16).to_le_bytes());
-            for &child_id in children {
-                out.extend_from_slice(&child_id.to_le_bytes());
-            }
         }
 
-        // HAST text / comment / raw / MDX expressions / MDX ESM
+        // HAST text / comment / raw / MDX expressions / MDX ESM: single value
         2 | 3 | 5 | 12 | 13 | 14 => {
             if type_data.len() >= 8 {
                 let val_ref = read_string_ref(type_data, 0);
@@ -477,7 +512,7 @@ fn serialize_hast_node_inline(
             }
         }
 
-        // MDAST code (type 8)
+        // Code (type 8): lang + meta + value
         8 => {
             if type_data.len() >= 24 {
                 let lang_ref = read_string_ref(type_data, 0);
@@ -497,10 +532,8 @@ fn serialize_hast_node_inline(
             }
         }
 
-        // MDAST heading (type 2 in MDAST context)
-        // depth is a single u8
         _ => {
-            // Generic: just copy raw type_data
+            // Generic: copy raw type_data as length-prefixed blob
             out.extend_from_slice(&(type_data.len() as u16).to_le_bytes());
             out.extend_from_slice(type_data);
         }
@@ -610,11 +643,12 @@ mod tests {
         let data_offset = u32::from_le_bytes(buf[4 + 6..4 + 10].try_into().unwrap()) as usize;
         let data_len = u16::from_le_bytes(buf[4 + 10..4 + 12].try_into().unwrap()) as usize;
         assert!(data_len > 0);
-        // First 2 bytes of data = tag_name_len
+        // Skip prelude: [data_len=0: 4B][position: 24B][child_count=1: 2B][child_id: 4B] = 34B
+        let tag_off = data_offset + 4 + 24 + 2 + 4;
         let tag_len =
-            u16::from_le_bytes(buf[data_offset..data_offset + 2].try_into().unwrap()) as usize;
+            u16::from_le_bytes(buf[tag_off..tag_off + 2].try_into().unwrap()) as usize;
         assert_eq!(tag_len, 1); // "a"
-        let tag = std::str::from_utf8(&buf[data_offset + 2..data_offset + 2 + tag_len]).unwrap();
+        let tag = std::str::from_utf8(&buf[tag_off + 2..tag_off + 2 + tag_len]).unwrap();
         assert_eq!(tag, "a");
     }
 }

@@ -1,5 +1,5 @@
 import { materializeHastNode, type HastNode } from "./hast-materializer.js";
-import type { HastNodeInternal, HastRaw, MdxJsxAttributeUnion } from "../types.js";
+import type { HastNodeInternal, HastRaw, MdxJsxAttributeUnion, Position } from "../types.js";
 import type { Element, Text, Comment, Doctype } from "hast";
 import type { Program } from "estree-jsx";
 import type { MdxJsxFlowElementHast, MdxJsxTextElementHast } from "../mdx-types.js";
@@ -85,22 +85,21 @@ export interface HastVisitorContext {
 
 /** Inject `_hast: true` marker on a HastNode and all its children for JSON serialization. */
 function markHast(node: HastNode): Record<string, unknown> {
-  const n = node as unknown as Record<string, unknown>;
   const obj: Record<string, unknown> = { _hast: true, type: node.type };
-  if ("tagName" in node) obj.tagName = n.tagName;
-  if ("properties" in node) obj.properties = n.properties;
-  if ("value" in node) obj.value = n.value;
-  if ("name" in node) obj.name = n.name;
-  if ("attributes" in node) obj.attributes = n.attributes;
-  if ("data" in node && n.data != null) obj.data = n.data;
+  if ("tagName" in node) obj.tagName = node.tagName;
+  if ("properties" in node) obj.properties = node.properties;
+  if ("value" in node) obj.value = node.value;
+  if ("name" in node) obj.name = node.name;
+  if ("attributes" in node) obj.attributes = node.attributes;
+  if ("data" in node && node.data != null) obj.data = node.data;
   if ("children" in node) {
-    obj.children = (n.children as HastNode[]).map(markHast);
+    obj.children = node.children.map(markHast);
   }
   return obj;
 }
 
 function nid(node: HastNode): number {
-  return nodeIdMap.get(node as object) ?? (node as HastNodeInternal)._nodeId;
+  return nodeIdMap.get(node) ?? (node as HastNodeInternal)._nodeId;
 }
 
 class HastVisitorContextImpl implements HastVisitorContext {
@@ -168,9 +167,10 @@ class HastVisitorContextImpl implements HastVisitorContext {
 
     if (node.type === "mdxJsxFlowElement" || node.type === "mdxJsxTextElement") {
       // MDX JSX nodes use `attributes`, not `properties`, keep replaceNode path
-      const current = this.#pendingNodes.get(id) ?? node;
-      const updated: Record<string, unknown> = { ...current };
-      const attrs = [...((updated.attributes as MdxJsxAttributeUnion[] | undefined) ?? [])];
+      const pending = this.#pendingNodes.get(id);
+      const current = (pending ?? node) as MdxJsxFlowElementHast | MdxJsxTextElementHast;
+      const updated = { ...current };
+      const attrs: MdxJsxAttributeUnion[] = [...(updated.attributes ?? [])];
       const idx = attrs.findIndex((a) => a.type === "mdxJsxAttribute" && a.name === key);
       if (idx !== -1) attrs.splice(idx, 1);
       const attrValue =
@@ -178,10 +178,10 @@ class HastVisitorContextImpl implements HastVisitorContext {
           ? null
           : typeof value === "string"
             ? value
-            : `${value as string | number | boolean}`;
+            : String(value);
       attrs.push({ type: "mdxJsxAttribute", name: key, value: attrValue });
       updated.attributes = attrs;
-      this.replaceNode(node, updated as unknown as HastNode);
+      this.replaceNode(node, updated);
       return;
     }
 
@@ -349,6 +349,21 @@ function decodeProperties(
   return properties;
 }
 
+/** Decode the 24-byte position block written by `serialize_hast_node_inline`. */
+function readPositionPrefix(view: DataView, offset: number): Position | undefined {
+  const startOffset = view.getUint32(offset, true);
+  const endOffset = view.getUint32(offset + 4, true);
+  const startLine = view.getUint32(offset + 8, true);
+  const startColumn = view.getUint32(offset + 12, true);
+  const endLine = view.getUint32(offset + 16, true);
+  const endColumn = view.getUint32(offset + 20, true);
+  if (startLine === 0 && startOffset === 0) return undefined;
+  return {
+    start: { offset: startOffset, line: startLine, column: startColumn },
+    end: { offset: endOffset, line: endLine, column: endColumn },
+  };
+}
+
 /**
  * Walk-path element node: uses prototype getters instead of per-instance
  * Object.defineProperty. V8 optimises shared hidden classes far better,
@@ -360,14 +375,14 @@ function decodeProperties(
 class WalkElement {
   readonly type = "element" as const;
   declare tagName: string;
+  declare position?: Position | undefined;
+  declare data?: Record<string, unknown> | undefined;
 
   /** @internal */ _view!: DataView;
   /** @internal */ _buf!: Uint8Array;
   /** @internal */ _propsPos!: number;
   /** @internal */ _childIds!: number[];
   /** @internal */ _resolver!: LazyChildResolver;
-  /** @internal */ _dataPos!: number;
-  /** @internal */ _dataLen!: number;
 
   get properties(): Record<string, string | number | boolean | string[]> {
     const val = decodeProperties(this._view, this._buf, this._propsPos);
@@ -390,30 +405,19 @@ class WalkElement {
     });
     return val;
   }
-
-  get data(): Record<string, unknown> | undefined {
-    if (this._dataPos < 0) return undefined;
-    const val = JSON.parse(
-      textDecoder.decode(this._buf.subarray(this._dataPos, this._dataPos + this._dataLen)),
-    ) as Record<string, unknown>;
-    Object.defineProperty(this, "data", {
-      value: val,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-    return val;
-  }
 }
 
-/** Read a matched element node from the binary data section into a HastNode.
- *  Only tagName is decoded eagerly; properties, children, and data are lazy. */
+/** Read the tail of a matched element node (tag + properties).
+ *  Common prelude (data/position/children) is already consumed by `readMatchedNode`. */
 function readElementFromBinary(
   view: DataView,
   buf: Uint8Array,
   offset: number,
   nodeId: number,
   resolver: LazyChildResolver,
+  position: Position | undefined,
+  childIds: number[],
+  data: Record<string, unknown> | null,
 ): HastNode {
   let pos = offset;
 
@@ -423,41 +427,19 @@ function readElementFromBinary(
   const tagName = textDecoder.decode(buf.subarray(pos, pos + tagLen));
   pos += tagLen;
 
-  // Pre-scan: find section byte offsets without decoding strings
   const propsPos = pos;
-  const propCount = view.getUint16(pos, true);
-  pos += 2;
-  for (let i = 0; i < propCount; i++) {
-    const nLen = view.getUint16(pos, true);
-    pos += 2 + nLen + 1; // name + kind byte
-    const vLen = view.getUint16(pos, true);
-    pos += 2 + vLen; // value
-  }
-
-  const childCount = view.getUint16(pos, true);
-  pos += 2;
-  const childIdsPos = pos;
-  pos += childCount * 4;
-
-  const nodeDataLen = view.getUint32(pos, true);
-  pos += 4;
-  const nodeDataPos = nodeDataLen > 0 ? pos : -1;
-
-  // Collect child IDs for lazy materialization
-  const ids: number[] = [];
-  for (let i = 0; i < childCount; i++) ids.push(view.getUint32(childIdsPos + i * 4, true));
 
   // Build node using class (prototype getters, no per-instance defineProperty)
   const node = new WalkElement();
   node.tagName = tagName;
+  if (position !== undefined) node.position = position;
+  if (data !== null) node.data = data;
   node._view = view;
   node._buf = buf;
   node._propsPos = propsPos;
-  node._childIds = ids;
+  node._childIds = childIds;
   node._resolver = resolver;
-  node._dataPos = nodeDataPos;
-  node._dataLen = nodeDataLen;
-  nodeIdMap.set(node as object, nodeId);
+  nodeIdMap.set(node, nodeId);
 
   return node as unknown as HastNode;
 }
@@ -478,11 +460,16 @@ function readTextFromBinary(
   offset: number,
   nodeId: number,
   nodeType: number,
+  position: Position | undefined,
+  data: Record<string, unknown> | null,
 ): HastNode {
   const valLen = view.getUint32(offset, true);
   const value = textDecoder.decode(buf.subarray(offset + 4, offset + 4 + valLen));
-  const node = { type: TEXT_NODE_TYPES[nodeType]!, value } as unknown as HastNode;
-  nodeIdMap.set(node as object, nodeId);
+  const base: Record<string, unknown> = { type: TEXT_NODE_TYPES[nodeType]!, value };
+  if (position !== undefined) base.position = position;
+  if (data !== null) base.data = data;
+  const node = base as unknown as HastNode;
+  nodeIdMap.set(node, nodeId);
   if (nodeType === HAST_MDX_FLOW_EXPRESSION || nodeType === HAST_MDX_TEXT_EXPRESSION) {
     attachParseExpression(node, napiParseExpression);
   } else if (nodeType === HAST_MDX_ESM) {
@@ -499,6 +486,9 @@ function readMdxJsxFromBinary(
   nodeId: number,
   nodeType: number,
   resolver: LazyChildResolver,
+  position: Position | undefined,
+  childIds: number[],
+  data: Record<string, unknown> | null,
 ): HastNode {
   let pos = offset;
 
@@ -508,7 +498,7 @@ function readMdxJsxFromBinary(
   const name = nameLen > 0 ? textDecoder.decode(buf.subarray(pos, pos + nameLen)) : null;
   pos += nameLen;
 
-  // Attributes: [kind: u8][nameLen: u16][name][valLen: u16][val]
+  // Attributes: [kind: u8][nameLen: u16][name][valLen: u32][val]
   const attrCount = view.getUint16(pos, true);
   pos += 2;
   const attributes: { type: string; name?: string; value: unknown }[] = [];
@@ -544,22 +534,13 @@ function readMdxJsxFromBinary(
     }
   }
 
-  // Child IDs
-  const childCount = view.getUint16(pos, true);
-  pos += 2;
-  const childIds: number[] = [];
-  for (let i = 0; i < childCount; i++) {
-    childIds.push(view.getUint32(pos, true));
-    pos += 4;
-  }
-
   const typeName = nodeType === HAST_MDX_JSX_ELEMENT ? "mdxJsxFlowElement" : "mdxJsxTextElement";
-  const node = { type: typeName, name, attributes } as unknown as HastNode &
-    Record<string, unknown>;
-  nodeIdMap.set(node as object, nodeId);
-  makeLazyChildren(node, childIds, resolver);
-  resolver.attachLazyData(node as unknown as Record<string, unknown>, nodeId);
-  return node;
+  const base: Record<string, unknown> = { type: typeName, name, attributes };
+  if (position !== undefined) base.position = position;
+  if (data !== null) base.data = data;
+  nodeIdMap.set(base, nodeId);
+  makeLazyChildren(base, childIds, resolver);
+  return base as unknown as HastNode;
 }
 
 function readMatchedNode(
@@ -570,8 +551,39 @@ function readMatchedNode(
   nodeType: number,
   resolver: LazyChildResolver,
 ): HastNode {
+  let pos = offset;
+
+  // Shared prelude (matches serialize_hast_node_inline / serialize_mdast_node_inline):
+  //   [data_len: u32][data_bytes][position: 24B][child_count: u16][child_ids: N×u32]
+
+  // Data (JSON), eagerly parsed
+  const dataLen = view.getUint32(pos, true);
+  pos += 4;
+  let data: Record<string, unknown> | null = null;
+  if (dataLen > 0) {
+    const jsonStr = textDecoder.decode(buf.subarray(pos, pos + dataLen));
+    try {
+      data = JSON.parse(jsonStr) as Record<string, unknown>;
+    } catch {
+      /* ignore malformed JSON */
+    }
+    pos += dataLen;
+  }
+
+  const position = readPositionPrefix(view, pos);
+  pos += 24;
+
+  const childCount = view.getUint16(pos, true);
+  pos += 2;
+  const childIds: number[] = [];
+  for (let i = 0; i < childCount; i++) {
+    childIds.push(view.getUint32(pos, true));
+    pos += 4;
+  }
+
+  // Dispatch to type-specific tail (pos now sits at the type-specific section)
   if (nodeType === HAST_ELEMENT) {
-    return readElementFromBinary(view, buf, offset, nodeId, resolver);
+    return readElementFromBinary(view, buf, pos, nodeId, resolver, position, childIds, data);
   } else if (
     nodeType === HAST_TEXT ||
     nodeType === HAST_COMMENT ||
@@ -580,13 +592,26 @@ function readMatchedNode(
     nodeType === HAST_MDX_TEXT_EXPRESSION ||
     nodeType === HAST_MDX_ESM
   ) {
-    return readTextFromBinary(view, buf, offset, nodeId, nodeType);
+    return readTextFromBinary(view, buf, pos, nodeId, nodeType, position, data);
   } else if (nodeType === HAST_MDX_JSX_ELEMENT || nodeType === HAST_MDX_JSX_TEXT_ELEMENT) {
-    return readMdxJsxFromBinary(view, buf, offset, nodeId, nodeType, resolver);
+    return readMdxJsxFromBinary(
+      view,
+      buf,
+      pos,
+      nodeId,
+      nodeType,
+      resolver,
+      position,
+      childIds,
+      data,
+    );
   }
-  // Fallback: minimal node
-  const node = { type: `unknown(${nodeType})` } as unknown as HastNode;
-  nodeIdMap.set(node as object, nodeId);
+  // Fallback: minimal node carrying whatever prelude data we found
+  const base: Record<string, unknown> = { type: `unknown(${nodeType})` };
+  if (position !== undefined) base.position = position;
+  if (data !== null) base.data = data;
+  const node = base as unknown as HastNode;
+  nodeIdMap.set(node, nodeId);
   return node;
 }
 
@@ -615,13 +640,13 @@ class LazyChildResolver {
     const reader = this.#ensure();
     return childIds.map((id) => {
       const node = materializeHastNode(reader, id);
-      this.attachLazyData(node as unknown as Record<string, unknown>, id);
+      this.attachLazyData(node, id);
       return node;
     });
   }
 
   /** Attach a lazy `data` getter backed by the Rust arena's node_data. */
-  attachLazyData(node: Record<string, unknown>, nodeId: number): void {
+  attachLazyData(node: object, nodeId: number): void {
     const handle = this.#handle;
     Object.defineProperty(node, "data", {
       get() {
@@ -643,7 +668,7 @@ class LazyChildResolver {
 
 /** Create a lazy `children` property backed by the handle. */
 function makeLazyChildren(
-  node: Record<string, unknown>,
+  node: object,
   childIds: number[],
   resolver: LazyChildResolver,
 ): void {
@@ -680,7 +705,7 @@ function handleVisitResult(
     list.push({ nodeId, promise: result, originalNode });
     return list;
   }
-  returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result as HastNode)));
+  returnBuffer.replaceRawJson(nodeId, JSON.stringify(markHast(result)));
   return deferred;
 }
 

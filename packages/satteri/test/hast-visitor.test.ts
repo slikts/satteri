@@ -11,6 +11,7 @@ import {
 } from "../index.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
 import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
+import type { Position } from "unist";
 
 function setup(source = "# Hello\n\nWorld") {
   const handle = createHastHandle(source);
@@ -59,6 +60,38 @@ describe("visitHastHandle - basic behaviour", () => {
     visitHastHandle(handle, plugin, subs, source, "<test>");
     expect(texts).toContain("Hello");
     expect(texts).toContain("World");
+  });
+
+  test("matched element nodes carry a source position", () => {
+    const { handle, source } = setup();
+    const positions: Record<string, Position | undefined> = {};
+    const plugin = {
+      element: {
+        filter: [] as string[],
+        visit(node: HastNode) {
+          if (node.type === "element") positions[node.tagName] = node.position;
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(positions.h1?.start.line).toBe(1);
+    expect(positions.h1?.start.column).toBe(1);
+    expect(positions.p?.start.line).toBe(3);
+  });
+
+  test("matched text nodes carry a source position", () => {
+    const { handle, source } = setup();
+    const positions: Record<string, Position | undefined> = {};
+    const plugin = {
+      text(node: HastNode) {
+        if (node.type === "text") positions[node.value] = node.position;
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, "<test>");
+    expect(positions.Hello?.start.line).toBe(1);
+    expect(positions.World?.start.line).toBe(3);
   });
 });
 

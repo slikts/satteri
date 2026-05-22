@@ -1,35 +1,40 @@
 import { describe, test, expect } from "vitest";
-import { markdownToHtml, defineHastPlugin } from "../../src/index.js";
-import type { HastNode } from "../../src/types.js";
+import { markdownToHtml, mdxToJs, defineHastPlugin } from "../../src/index.js";
+import type { Element, ElementContent, Text } from "hast";
 
 // Plugin-to-plugin signaling on hast nodes via the free-form `data` field.
 // All cases must round-trip identically whether `data` was set on an existing
 // node via `ctx.setProperty` or carried in on a freshly emitted node.
 
-interface SignalData {
-  origin?: string;
-  level?: number;
-  flags?: string[];
-  meta?: { kind: string; payload: { count: number } };
+// hast declares `ElementData` as an empty interface; module-augmenting it with
+// the test's signal fields lets us write/read them without per-callsite casts.
+declare module "hast" {
+  interface ElementData {
+    origin?: string;
+    level?: number;
+    flags?: string[];
+    extras?: { kind: string; payload: { count: number } };
+  }
 }
+
+type SignalData = Element["data"];
 
 function freshElement(
   tagName: string,
   data: SignalData,
-  children: HastNode["type"] extends "element" ? HastNode[] : never,
-): HastNode;
-function freshElement(tagName: string, data: SignalData, children: HastNode[]): HastNode {
+  children: readonly ElementContent[],
+): Element {
   return {
     type: "element",
     tagName,
     properties: {},
-    children,
+    children: [...children],
     data,
-  } as HastNode;
+  };
 }
 
-function freshText(value: string): HastNode {
-  return { type: "text", value } as HastNode;
+function freshText(value: string): Text {
+  return { type: "text", value };
 }
 
 describe("HAST plugin data round-trip (existing-node path via setProperty)", () => {
@@ -67,7 +72,7 @@ describe("HAST plugin data round-trip (existing-node path via setProperty)", () 
           ctx.setProperty(node, "data", {
             level: 42,
             flags: ["bold", "highlighted"],
-            meta: { kind: "title", payload: { count: 3 } },
+            extras: { kind: "title", payload: { count: 3 } },
           });
         },
       },
@@ -85,7 +90,7 @@ describe("HAST plugin data round-trip (existing-node path via setProperty)", () 
     expect(received).toEqual({
       level: 42,
       flags: ["bold", "highlighted"],
-      meta: { kind: "title", payload: { count: 3 } },
+      extras: { kind: "title", payload: { count: 3 } },
     });
   });
 
@@ -123,7 +128,7 @@ describe("HAST plugin data round-trip (fresh-node path)", () => {
       element: {
         filter: ["h1"],
         visit(node) {
-          return freshElement("section", { origin: "replaced" }, node.children as HastNode[]);
+          return freshElement("section", { origin: "replaced" }, node.children);
         },
       },
     });
@@ -232,9 +237,9 @@ describe("HAST plugin data round-trip (fresh-node path)", () => {
               origin: "complex",
               level: 7,
               flags: ["a", "b", "c"],
-              meta: { kind: "note", payload: { count: 99 } },
+              extras: { kind: "note", payload: { count: 99 } },
             },
-            node.children as HastNode[],
+            node.children,
           );
         },
       },
@@ -253,7 +258,77 @@ describe("HAST plugin data round-trip (fresh-node path)", () => {
       origin: "complex",
       level: 7,
       flags: ["a", "b", "c"],
-      meta: { kind: "note", payload: { count: 99 } },
+      extras: { kind: "note", payload: { count: 99 } },
     });
+  });
+});
+
+// Walk-path data exposure for non-element node types. The inline buffer now
+// always carries `data`, so `text` and `mdxJsx*` visitors should see whatever
+// an upstream plugin attached.
+describe("HAST walk-path data exposure (non-element node types)", () => {
+  test("data set on a text node is visible to a downstream text() visitor", () => {
+    let received: SignalData | undefined;
+    const tag = defineHastPlugin({
+      name: "tag-text",
+      text(node, ctx) {
+        if (node.type === "text" && node.value === "Hello") {
+          ctx.setProperty(node, "data", { origin: "text-tag" });
+        }
+      },
+    });
+    const consume = defineHastPlugin({
+      name: "consume-text",
+      text(node) {
+        if (node.type === "text" && node.value === "Hello") {
+          received = node.data as SignalData | undefined;
+        }
+      },
+    });
+    markdownToHtml("Hello", { hastPlugins: [tag, consume] });
+    expect(received?.origin).toBe("text-tag");
+  });
+
+  test("data set on an mdxJsxFlowElement is visible to a downstream visitor", () => {
+    let received: SignalData | undefined;
+    const tag = defineHastPlugin({
+      name: "tag-jsx",
+      mdxJsxFlowElement: {
+        filter: ["Box"],
+        visit(node, ctx) {
+          ctx.setProperty(node, "data", {
+            origin: "jsx-tag",
+            extras: { kind: "ssr", payload: { count: 1 } },
+          });
+        },
+      },
+    });
+    const consume = defineHastPlugin({
+      name: "consume-jsx",
+      mdxJsxFlowElement: {
+        filter: ["Box"],
+        visit(node) {
+          received = node.data as SignalData | undefined;
+        },
+      },
+    });
+    mdxToJs("<Box>hi</Box>", { hastPlugins: [tag, consume] });
+    expect(received?.origin).toBe("jsx-tag");
+    expect(received?.extras).toEqual({ kind: "ssr", payload: { count: 1 } });
+  });
+
+  test("mdxJsxFlowElement filter matches by component name", () => {
+    const seen: string[] = [];
+    const plugin = defineHastPlugin({
+      name: "match-Box",
+      mdxJsxFlowElement: {
+        filter: ["Box"],
+        visit(node) {
+          if (node.type === "mdxJsxFlowElement" && node.name) seen.push(node.name);
+        },
+      },
+    })
+    mdxToJs("<Other>a</Other>\n\n<Box>b</Box>\n\n<Box>c</Box>", { hastPlugins: [plugin] });
+    expect(seen).toEqual(["Box", "Box"]);
   });
 });
