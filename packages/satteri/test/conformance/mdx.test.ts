@@ -827,3 +827,33 @@ describe("MDX conformance: fuzz regressions", () => {
     await assertMdxConformance(">o{1+2\n\t}}");
   });
 });
+
+// A JSX closing tag can be absorbed into a nested container, e.g. `</Card>`
+// indented onto a lazy-continuation line of a list item. That case once
+// aborted the process with a Rust panic; both parsers must reject it as a
+// catchable parse error, and must still pair tags that do line up.
+describe("MDX conformance: unclosed and mis-nested JSX", () => {
+  test("closing tag absorbed by a list item rejects", async () => {
+    await assertBothReject("<Card>\n  body\n\n1. one\n   </Card>\n");
+  });
+
+  test("closing tag absorbed by a blockquote rejects", async () => {
+    await assertBothReject("<Card>\n  body\n\n> quote\n   </Card>\n");
+  });
+
+  test("plainly unclosed element rejects", async () => {
+    await assertBothReject("<Box>\n  body\n");
+  });
+
+  test("element with body and a matching close pairs", async () => {
+    await assertMdxConformance("<Box>\nbody\n</Box>\n", { Box });
+  });
+
+  test("element wrapping block-level children pairs", async () => {
+    await assertMdxConformance("<Box>\n\n# Heading\n\n</Box>\n", { Box });
+  });
+
+  test("list inside element with the close at column 1 pairs", async () => {
+    await assertMdxConformance("<Box>\n  body\n\n1. one\n</Box>\n", { Box });
+  });
+});
