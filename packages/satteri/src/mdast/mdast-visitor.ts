@@ -697,6 +697,35 @@ function readMdastMatchedNode(
 /** Apply a sync visitor result to the return buffer.
  *  If the result is the same object as the input node, treat it as a no-op
  *  so that context mutations (e.g. setProperty) are not clobbered. */
+/** The arena id of a node if it is an existing (materialized) node, else
+ *  undefined for a freshly-built one. */
+function reusedId(node: unknown): number | undefined {
+  if (node === null || typeof node !== "object") return undefined;
+  const id = nid(node as MdastNode);
+  return typeof id === "number" ? id : undefined;
+}
+
+/**
+ * Rewrite a returned replacement tree so every *reused* node (one that came
+ * from the arena, at any depth) becomes a `{ _ref: id }` placeholder. The
+ * rebuild splices those originals back in place, preserving their ids — so a
+ * patch a nested visitor queued on a passed-through child still lands, in the
+ * same pass. Freshly-built nodes serialize as before. The root is never reffed:
+ * it is the new shape replacing the visited node.
+ */
+function refifyReusedNodes(node: unknown, isRoot: boolean): unknown {
+  if (node === null || typeof node !== "object") return node;
+  if (!isRoot) {
+    const id = reusedId(node);
+    if (id !== undefined) return { _ref: id };
+  }
+  const children = (node as { children?: unknown }).children;
+  if (Array.isArray(children)) {
+    return { ...(node as object), children: children.map((c) => refifyReusedNodes(c, false)) };
+  }
+  return node;
+}
+
 function applyMdastVisitResult(
   result: MdastVisitorResult,
   nodeId: number,
@@ -714,7 +743,7 @@ function applyMdastVisitResult(
       returnBuffer.replace(nodeId, result as unknown as { rawHtml: string });
       break;
     case "structured_node":
-      returnBuffer.replace(nodeId, result as MdastNode);
+      returnBuffer.replace(nodeId, refifyReusedNodes(result, true) as MdastNode);
       break;
   }
 }

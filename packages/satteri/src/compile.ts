@@ -100,46 +100,23 @@ type MdastHandle = any;
 
 type MdastPipelineResult = { handle: MdastHandle };
 
-// Upper bound on how many times one plugin is re-visited within a single
-// `runMdastPluginsOnHandle` call. Each legitimate level of transform nesting
-// needs one extra pass (outer aside, then inner, …); this caps a plugin that
-// keeps stranding patches without converging so it can't loop forever.
-const MAX_MDAST_REVISITS = 16;
-
 function runMdastPluginsOnHandle(
   handle: MdastHandle,
   plugins: MdastPluginInput[],
   filename: URL | undefined,
 ): MdastPipelineResult | Promise<MdastPipelineResult> {
-  // Run one plugin to a fixpoint. After applying a pass, the native layer
-  // reports how many patches were dropped because an ancestor's replacement
-  // discarded the subtree they targeted. A non-zero count means a transform
-  // subsumed a descendant transform (e.g. a `:::tip` nested in a `:::note`,
-  // both turned into asides in one pass); the descendant is now re-parented
-  // into the replacement, so we re-visit to give it its turn — mirroring how
-  // `unist-util-visit` descends into a replaced node.
+  // Each plugin runs once over the tree. A transform that passes a child
+  // through (returning it inside the replacement) keeps that child's identity,
+  // so a patch the same pass queued on it still applies — nesting composes in
+  // one pass. A plugin's own freshly-built nodes are not re-walked; transform
+  // them up front, or hand off to a later plugin that sees the materialized tree.
   const runPlugin = (plugin: MdastPluginInstance): void | Promise<void> => {
     const subs = resolveMdastSubscriptions(plugin);
-    let pass = 0;
-    const onePass = (): void | Promise<void> => {
-      const result = visitMdastHandle(
-        handle,
-        plugin,
-        subs,
-        () => getHandleSource(handle),
-        filename,
-      );
-      const apply = (r: {
-        commandBuffer: Uint8Array;
-        hasMutations: boolean;
-      }): void | Promise<void> => {
-        if (!r.hasMutations) return;
-        const dropped = applyCommandsToMdastHandle(handle, r.commandBuffer);
-        if (dropped > 0 && ++pass < MAX_MDAST_REVISITS) return onePass();
-      };
-      return result instanceof Promise ? result.then(apply) : apply(result);
+    const result = visitMdastHandle(handle, plugin, subs, () => getHandleSource(handle), filename);
+    const apply = (r: { commandBuffer: Uint8Array; hasMutations: boolean }): void => {
+      if (r.hasMutations) applyCommandsToMdastHandle(handle, r.commandBuffer);
     };
-    return onePass();
+    return result instanceof Promise ? result.then(apply) : apply(result);
   };
 
   let i = 0;

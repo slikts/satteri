@@ -88,8 +88,22 @@ export interface HastVisitorContext {
   getDiagnostics(): HastDiagnostic[];
 }
 
-/** Inject `_hast: true` marker on a HastNode and all its children for JSON serialization. */
+/**
+ * Serialize a HastNode for the command buffer. Marks each node `_hast: true`,
+ * and — except at the root, which is the new replacement content — emits a
+ * reused (materialized) node as a `{ _ref: id }` placeholder so the rebuild
+ * splices the original in place (preserving its id, applying any pending patch
+ * on it) instead of rebuilding it fresh.
+ */
 function markHast(node: HastNode): Record<string, unknown> {
+  return markHastNode(node, true);
+}
+
+function markHastNode(node: HastNode, isRoot: boolean): Record<string, unknown> {
+  if (!isRoot) {
+    const id = nodeIdMap.get(node) ?? (node as HastNodeInternal)._nodeId;
+    if (typeof id === "number") return { _ref: id };
+  }
   const obj: Record<string, unknown> = { _hast: true, type: node.type };
   if ("tagName" in node) obj.tagName = node.tagName;
   if ("properties" in node) obj.properties = node.properties;
@@ -98,7 +112,7 @@ function markHast(node: HastNode): Record<string, unknown> {
   if ("attributes" in node) obj.attributes = node.attributes;
   if ("data" in node && node.data != null) obj.data = node.data;
   if ("children" in node) {
-    obj.children = node.children.map(markHast);
+    obj.children = node.children.map((c) => markHastNode(c, false));
   }
   return obj;
 }

@@ -42,7 +42,7 @@ use satteri_ast::commands::{CommandError, JsNode};
 use satteri_ast::hast::HastNodeType;
 use satteri_ast::mdast::codec::*;
 use satteri_ast::mdast::MdastNodeType;
-use satteri_ast::rebuild::Patch;
+use satteri_ast::rebuild::{Patch, REF_NODE_TYPE};
 #[cfg(feature = "mdx")]
 use satteri_ast::shared::encode_js_jsx_attrs;
 use satteri_ast::shared::{
@@ -431,10 +431,24 @@ fn js_node_to_hast_arena(js_node: &JsNode) -> Result<(Arena<Hast>, bool), Comman
     Ok((builder.finish(), js_node.keep_children))
 }
 
+/// Emit a reference placeholder: a `REF_NODE_TYPE` node carrying the target
+/// original id (u32 LE) in its type_data. The rebuild resolves it by splicing
+/// that original subtree and applying any pending patch on it.
+fn emit_ref_node<K: ArenaKind>(ref_id: u32, builder: &mut ArenaBuilder<K>) {
+    builder.open_node_raw(REF_NODE_TYPE);
+    builder.set_data_current(&ref_id.to_le_bytes());
+    builder.close_node();
+}
+
 fn emit_mdast_js_node(
     js_node: &JsNode,
     builder: &mut ArenaBuilder<Mdast>,
 ) -> Result<(), CommandError> {
+    if let Some(ref_id) = js_node.ref_id {
+        emit_ref_node(ref_id, builder);
+        return Ok(());
+    }
+
     if js_node.is_hast {
         return Err(CommandError::UnknownNodeType(format!(
             "expected mdast node, got hast-flagged `{}`",
@@ -777,6 +791,11 @@ fn emit_hast_js_node(
     js_node: &JsNode,
     builder: &mut ArenaBuilder<Hast>,
 ) -> Result<(), CommandError> {
+    if let Some(ref_id) = js_node.ref_id {
+        emit_ref_node(ref_id, builder);
+        return Ok(());
+    }
+
     let raw_type = name_to_hast_type(&js_node.node_type)
         .ok_or_else(|| CommandError::UnknownNodeType(js_node.node_type.clone()))?;
     builder.open_node_raw(raw_type as u8);
@@ -1002,9 +1021,10 @@ pub fn apply_mdast_commands(
 
 /// Like [`apply_mdast_commands`], but rather than erroring when a patch targets
 /// a node inside a removed/replaced subtree, drops it and returns the dropped
-/// anchors. The JS plugin runner uses the count to decide whether to re-visit
-/// the plugin so a transform nested inside a just-applied replacement (e.g. a
-/// `:::tip` inside a `:::note` both turned into asides) gets its turn.
+/// anchors. Such a patch is moot — the plugin discarded that subtree. A
+/// *passed-through* child is not dropped: it rides a `_ref` placeholder that
+/// splices it back with its id intact, so a transform queued on a nested node
+/// (e.g. a `:::tip` inside a `:::note`) still applies, in the same pass.
 pub fn apply_mdast_commands_lenient(
     mut arena: Arena<Mdast>,
     command_buf: &[u8],
@@ -1488,6 +1508,7 @@ mod tests {
                 properties: None,
                 is_hast: false,
                 keep_children: false,
+                ref_id: None,
                 data: None,
             }]),
             depth: Some(2),
@@ -1510,6 +1531,7 @@ mod tests {
             properties: None,
             is_hast: false,
             keep_children: false,
+            ref_id: None,
             data: None,
         };
 
