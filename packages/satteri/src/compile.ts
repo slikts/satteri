@@ -317,7 +317,7 @@ export interface Features {
   /** Frontmatter: YAML (`--- ... ---`) and TOML (`+++ ... +++`). Default: true. */
   frontmatter?: boolean;
   /**
-   * Math blocks and inline math. Default: true.
+   * Math blocks and inline math. Default: false.
    *
    * Pass an options object for granular control:
    * ```ts
@@ -325,7 +325,7 @@ export interface Features {
    * ```
    */
   math?: boolean | MathOptions;
-  /** Heading attributes (`# text { #id .class }`). Default: true. */
+  /** Heading attributes (`# text { #id .class }`). Default: false. */
   headingAttributes?: boolean;
   /** Colon-delimited container directive blocks (`:::`). Default: false. */
   directive?: boolean;

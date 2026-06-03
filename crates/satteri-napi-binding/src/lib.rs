@@ -49,11 +49,11 @@ pub struct JsFeatures {
     pub gfm_options: Option<JsGfmOptions>,
     /// Frontmatter: YAML (`--- ... ---`) and TOML (`+++ ... +++`). Default: true.
     pub frontmatter: Option<bool>,
-    /// Math blocks and inline math (`$$ ... $$`, `$ ... $`). Default: true.
+    /// Math blocks and inline math (`$$ ... $$`, `$ ... $`). Default: false.
     pub math: Option<bool>,
     /// Granular math control (overrides `math`).
     pub math_options: Option<JsMathOptions>,
-    /// Heading attributes (`# text { #id .class }`). Default: true.
+    /// Heading attributes (`# text { #id .class }`). Default: false.
     pub heading_attributes: Option<bool>,
     /// Colon-delimited container directive blocks (`:::`). Default: false.
     pub directive: Option<bool>,
@@ -111,7 +111,7 @@ fn features_to_options(features: Option<JsFeatures>, mdx: bool) -> satteri_pulld
     // (single + multi) and multi-only. When users granularly opt out of
     // single-dollar, we set the multi-dollar sub-flag directly so the parser
     // skips lone `$` entirely.
-    if f.math.unwrap_or(true) {
+    if f.math.unwrap_or(false) {
         match f
             .math_options
             .as_ref()

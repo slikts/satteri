@@ -6,7 +6,7 @@ order: 5
 ---
 
 The `features` option on `markdownToHtml`, `mdxToJs`, `markdownToHast`,
-and `mdxToHast` toggles which Markdown extensions the parser recognizes. By default, Sätteri enables `gfm`, `frontmatter`, `math` and `headingAttributes`.
+and `mdxToHast` toggles which Markdown extensions the parser recognizes. By default, Sätteri enables `gfm` and `frontmatter`.
 
 ```js
 import { markdownToHtml } from "satteri";
@@ -15,8 +15,8 @@ markdownToHtml(source, {
   features: {
     gfm: true,
     frontmatter: true,
-    math: true,
-    headingAttributes: true,
+    math: false,
+    headingAttributes: false,
     directive: false,
     superscript: false,
     subscript: false,
@@ -94,7 +94,7 @@ backref.
 
 ## Math
 
-Default: `true`.
+Default: `false`.
 
 ```ts
 math?: boolean | {
@@ -140,7 +140,7 @@ Sätteri does not currently parse the TOML or YAML.
 
 ## Heading attributes
 
-Default: `true`.
+Default: `false`.
 
 ```ts
 headingAttributes?: boolean

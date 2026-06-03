@@ -54,7 +54,7 @@ describe("frontmatter extraction", () => {
 
 describe("features.math.singleDollarTextMath", () => {
   test("default keeps single-$ as inline math", () => {
-    const result = markdownToHtml("inline $x$ here");
+    const result = markdownToHtml("inline $x$ here", { features: { math: true } });
     if (result instanceof Promise) throw new Error("expected sync");
     expect(result.html).toContain("language-math");
   });
