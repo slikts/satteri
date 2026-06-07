@@ -215,12 +215,11 @@ fn apply_mdast_set_property(
     let node_type = arena.get_node(node_id).node_type;
 
     // The field name doesn't resolve for this node type at all.
-    let field_id = resolve_mdast_field(node_type, prop_name).ok_or_else(|| {
-        CommandError::UnknownField {
+    let field_id =
+        resolve_mdast_field(node_type, prop_name).ok_or_else(|| CommandError::UnknownField {
             node_type: mdast_type_name(node_type),
             name: prop_name.to_string(),
-        }
-    })?;
+        })?;
 
     // The field resolved, so a `None` from the inner writers means the value's
     // type is one the field can't hold — report that rather than "unknown".
