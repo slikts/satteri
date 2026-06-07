@@ -47,6 +47,12 @@ pub enum Patch<K: ArenaKind> {
         node_id: u32,
         child_tree: Arena<K>,
     },
+    /// Replaces the node's child list with `new_children` (a Root-rooted
+    /// sub-arena, spliced in), keeping the node itself — unlike `Replace`.
+    SetChildren {
+        node_id: u32,
+        new_children: Arena<K>,
+    },
 }
 
 /// Node IDs in the new arena are assigned fresh (monotonically increasing)
@@ -106,6 +112,7 @@ pub fn rebuild_lenient<K: ArenaKind>(
             Patch::Wrap { node_id, .. } => *node_id,
             Patch::PrependChild { node_id, .. } => *node_id,
             Patch::AppendChild { node_id, .. } => *node_id,
+            Patch::SetChildren { node_id, .. } => *node_id,
         };
         patch_map.entry(node_id).or_default().push(patch);
     }
@@ -300,9 +307,25 @@ fn copy_node<K: ArenaKind>(
         }
     }
 
-    let child_ids: Vec<u32> = orig.get_children(node_id).to_vec();
-    for child_id in child_ids {
-        copy_node(child_id, orig, builder, patch_map, deleted, visited, active);
+    let set_children = node_patches.iter().rev().find_map(|p| match p {
+        Patch::SetChildren { new_children, .. } => Some(new_children),
+        _ => None,
+    });
+    if let Some(new_children) = set_children {
+        emit_subtree(
+            new_children,
+            builder,
+            orig,
+            patch_map,
+            deleted,
+            visited,
+            active,
+        );
+    } else {
+        let child_ids: Vec<u32> = orig.get_children(node_id).to_vec();
+        for child_id in child_ids {
+            copy_node(child_id, orig, builder, patch_map, deleted, visited, active);
+        }
     }
 
     for patch in node_patches {
@@ -794,9 +817,25 @@ fn copy_node_raw<K: ArenaKind>(
         }
     }
 
-    let child_ids: Vec<u32> = orig.get_children(node_id).to_vec();
-    for child_id in child_ids {
-        copy_node(child_id, orig, builder, patch_map, deleted, visited, active);
+    let set_children = node_patches.iter().rev().find_map(|p| match p {
+        Patch::SetChildren { new_children, .. } => Some(new_children),
+        _ => None,
+    });
+    if let Some(new_children) = set_children {
+        emit_subtree(
+            new_children,
+            builder,
+            orig,
+            patch_map,
+            deleted,
+            visited,
+            active,
+        );
+    } else {
+        let child_ids: Vec<u32> = orig.get_children(node_id).to_vec();
+        for child_id in child_ids {
+            copy_node(child_id, orig, builder, patch_map, deleted, visited, active);
+        }
     }
 
     for patch in node_patches {
@@ -1099,6 +1138,47 @@ mod tests {
         assert_eq!(
             rebuilt.get_node(heading_children[1]).node_type,
             MdastNodeType::Text as u8
+        );
+    }
+
+    #[test]
+    fn set_children_swaps_child_list_and_keeps_the_node() {
+        use crate::mdast::codec::decode_heading_data;
+
+        let mut orig = build_hello_world();
+        let heading_id = orig.get_children(0)[0];
+
+        let data_offset = orig.get_node(heading_id).data_offset as usize;
+        orig.type_data[data_offset] = 3;
+
+        let mut children_builder = ArenaBuilder::<Mdast>::new(String::new());
+        children_builder.open_node(MdastNodeType::Root as u8);
+        children_builder.open_node(MdastNodeType::Break as u8);
+        children_builder.close_node();
+        children_builder.close_node();
+        let new_children = children_builder.finish();
+
+        let patches = vec![Patch::SetChildren {
+            node_id: heading_id,
+            new_children,
+        }];
+        let rebuilt = rebuild(&orig, &patches).expect("rebuild failed");
+
+        let new_heading_id = rebuilt.get_children(0)[0];
+        assert_eq!(
+            rebuilt.get_node(new_heading_id).node_type,
+            MdastNodeType::Heading as u8
+        );
+        assert_eq!(
+            decode_heading_data(rebuilt.get_type_data(new_heading_id)).depth,
+            3
+        );
+
+        let heading_children = rebuilt.get_children(new_heading_id);
+        assert_eq!(heading_children.len(), 1);
+        assert_eq!(
+            rebuilt.get_node(heading_children[0]).node_type,
+            MdastNodeType::Break as u8
         );
     }
 

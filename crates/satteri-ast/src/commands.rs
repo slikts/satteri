@@ -105,7 +105,16 @@ pub enum CommandError {
     InvalidUtf8,
     InvalidJson(String),
     UnknownNodeType(String),
-    UnknownField(u16),
+    UnknownField {
+        node_type: String,
+        name: String,
+    },
+    /// The property exists on the node type, but the supplied value's type is
+    /// not one the field can hold (e.g. a string for `heading.depth`).
+    InvalidPropertyValue {
+        node_type: String,
+        name: String,
+    },
     /// `wrapNode` was issued against a node that is also removed in the same
     /// command buffer. There's no defined way to "wrap then remove" or
     /// "remove then wrap" the same anchor.
@@ -127,7 +136,13 @@ impl std::fmt::Display for CommandError {
             Self::InvalidUtf8 => write!(f, "invalid UTF-8 in command buffer"),
             Self::InvalidJson(e) => write!(f, "invalid JSON in command payload: {e}"),
             Self::UnknownNodeType(t) => write!(f, "unknown node type in JSON: {t}"),
-            Self::UnknownField(f_id) => write!(f, "unknown field ID: 0x{f_id:04x}"),
+            Self::UnknownField { node_type, name } => {
+                write!(f, "cannot set property '{name}' on a '{node_type}' node")
+            }
+            Self::InvalidPropertyValue { node_type, name } => write!(
+                f,
+                "property '{name}' on a '{node_type}' node cannot hold a value of this type"
+            ),
             Self::WrapOnRemovedNode(id) => {
                 write!(f, "wrapNode targets node {id} which is also removed")
             }
