@@ -294,6 +294,117 @@ test("context.replaceNode() replaces a node via context method", () => {
   expect(html).toContain("Replaced");
 });
 
+test("context.setProperty(node, 'children', ...) replaces a node's children", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      ctx.setProperty(node, "children", [{ type: "text", value: "New heading" }]);
+    },
+  });
+  expect(html).toMatch(/<h1>New heading<\/h1>/);
+});
+
+test("context.setProperty 'children' composes with a scalar setProperty on the same node", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      ctx.setProperty(node, "depth", 3);
+      ctx.setProperty(node, "children", [{ type: "text", value: "New heading" }]);
+    },
+  });
+  expect(html).toMatch(/<h3>New heading<\/h3>/);
+});
+
+test("context.setProperty(node, 'children', ...) keeps reused children", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      const original = node.children[0]!;
+      ctx.setProperty(node, "children", [{ type: "text", value: "> " }, original]);
+    },
+  });
+  expect(html).toMatch(/<h1>&gt; Hello<\/h1>/);
+});
+
+test("context.insertChildAt() prepends at index 0", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      ctx.insertChildAt(node, 0, { type: "text", value: ">> " });
+    },
+  });
+  expect(html).toMatch(/<h1>&gt;&gt; Hello<\/h1>/);
+});
+
+test("context.insertChildAt() appends past the end", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      ctx.insertChildAt(node, 99, { type: "text", value: "!" });
+    },
+  });
+  expect(html).toMatch(/<h1>Hello!<\/h1>/);
+});
+
+test("context.insertChildAt() inserts before the index-th child", () => {
+  const html = visitAndRender("a *b*", {
+    paragraph(node, ctx) {
+      ctx.insertChildAt(node, 1, { type: "text", value: "Z" });
+    },
+  });
+  expect(html).toMatch(/<p>a Z<em>b<\/em><\/p>/);
+});
+
+test("context.removeChildAt() removes the index-th child", () => {
+  const html = visitAndRender("a *b*", {
+    paragraph(node, ctx) {
+      ctx.removeChildAt(node, 1);
+    },
+  });
+  expect(html).toContain("<p>a ");
+  expect(html).not.toContain("<em>");
+});
+
+test("context.appendChild() accepts an array of nodes, in order", () => {
+  const html = visitAndRender("# Hello", {
+    heading(node, ctx) {
+      ctx.appendChild(node, [
+        { type: "text", value: " A" },
+        { type: "text", value: " B" },
+      ]);
+    },
+  });
+  expect(html).toMatch(/<h1>Hello A B<\/h1>/);
+});
+
+test("context.insertChildAt() accepts an array, keeping order at the index", () => {
+  const html = visitAndRender("a *b*", {
+    paragraph(node, ctx) {
+      ctx.insertChildAt(node, 1, [
+        { type: "text", value: "X" },
+        { type: "text", value: "Y" },
+      ]);
+    },
+  });
+  expect(html).toMatch(/<p>a XY<em>b<\/em><\/p>/);
+});
+
+test("context.insertBefore() accepts an array of siblings", () => {
+  const html = visitAndRender("# Hello\n\nWorld", {
+    heading(node, ctx) {
+      ctx.insertBefore(node, [{ type: "thematicBreak" }, { type: "thematicBreak" }]);
+    },
+  });
+  expect((html.match(/<hr>/g) ?? []).length).toBe(2);
+  expect(html.lastIndexOf("<hr>")).toBeLessThan(html.indexOf("<h1>"));
+});
+
+test("setProperty on an invalid field throws an error naming the property and node type", () => {
+  const run = () =>
+    visitAndRender("# Hello\n\nWorld", {
+      heading(node, ctx) {
+        // @ts-expect-error "value" is not a field on a heading node
+        ctx.setProperty(node, "value", "x");
+      },
+    });
+  expect(run).toThrow(/cannot set property 'value' on a 'heading' node/);
+});
+
 // Directive visitors
 
 function setupDirective(md: string) {

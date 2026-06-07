@@ -72,16 +72,20 @@ export interface HastVisitorContext {
   readonly fileURL: URL | undefined;
   removeNode(node: Readonly<HastNode>): void;
   replaceNode(node: Readonly<HastNode>, newNode: HastNode): void;
-  insertBefore(node: Readonly<HastNode>, newNode: HastNode): void;
-  insertAfter(node: Readonly<HastNode>, newNode: HastNode): void;
+  insertBefore(node: Readonly<HastNode>, newNode: HastNode | HastNode[]): void;
+  insertAfter(node: Readonly<HastNode>, newNode: HastNode | HastNode[]): void;
   /**
    * Wrap `node` in `parentNode`, making it `parentNode`'s first child. Any
    * children `parentNode` declares are kept after it, so a `div` with an anchor
    * child wraps a heading as `div > [heading, anchor]`.
    */
   wrapNode(node: Readonly<HastNode>, parentNode: HastNode): void;
-  prependChild(node: Readonly<HastNode>, childNode: HastNode): void;
-  appendChild(node: Readonly<HastNode>, childNode: HastNode): void;
+  prependChild(node: Readonly<HastNode>, childNode: HastNode | HastNode[]): void;
+  appendChild(node: Readonly<HastNode>, childNode: HastNode | HastNode[]): void;
+  /** Insert one node or an array at `index`; clamps (`0` prepends, past the end appends). */
+  insertChildAt(node: Readonly<HastNode>, index: number, childNode: HastNode | HastNode[]): void;
+  /** Remove the `index`-th child of `node`; a no-op when there is no such child. */
+  removeChildAt(node: Readonly<HastNode>, index: number): void;
   setProperty(node: Readonly<HastNode>, key: string, value: unknown): void;
   /** Collect the concatenated text of all descendant text nodes (like DOM textContent). */
   textContent(node: Readonly<HastNode>): string;
@@ -126,6 +130,10 @@ function nid(node: HastNode): number {
   return nodeIdMap.get(node) ?? (node as HastNodeInternal)._nodeId;
 }
 
+function asArray<T>(value: T | T[]): T[] {
+  return Array.isArray(value) ? value : [value];
+}
+
 class HastVisitorContextImpl implements HastVisitorContext {
   readonly #commandBuffer: CommandBuffer = new CommandBuffer();
   readonly #diagnostics: HastDiagnostic[] = [];
@@ -157,28 +165,67 @@ class HastVisitorContextImpl implements HastVisitorContext {
     this.#pendingNodes.set(id, newNode);
   }
 
-  insertBefore(node: HastNode, newNode: HastNode): void {
-    this.#commandBuffer.insertBeforeRawJson(nid(node), JSON.stringify(markHast(newNode)));
+  insertBefore(node: HastNode, newNode: HastNode | HastNode[]): void {
+    const id = nid(node);
+    for (const n of asArray(newNode)) {
+      this.#commandBuffer.insertBeforeRawJson(id, JSON.stringify(markHast(n)));
+    }
   }
 
-  insertAfter(node: HastNode, newNode: HastNode): void {
-    this.#commandBuffer.insertAfterRawJson(nid(node), JSON.stringify(markHast(newNode)));
+  insertAfter(node: HastNode, newNode: HastNode | HastNode[]): void {
+    const id = nid(node);
+    for (const n of asArray(newNode)) {
+      this.#commandBuffer.insertAfterRawJson(id, JSON.stringify(markHast(n)));
+    }
   }
 
   wrapNode(node: HastNode, parentNode: HastNode): void {
     this.#commandBuffer.wrapNodeRawJson(nid(node), JSON.stringify(markHast(parentNode)));
   }
 
-  prependChild(node: HastNode, childNode: HastNode): void {
-    this.#commandBuffer.prependChildRawJson(nid(node), JSON.stringify(markHast(childNode)));
+  prependChild(node: HastNode, childNode: HastNode | HastNode[]): void {
+    const id = nid(node);
+    for (const n of asArray(childNode)) {
+      this.#commandBuffer.prependChildRawJson(id, JSON.stringify(markHast(n)));
+    }
   }
 
-  appendChild(node: HastNode, childNode: HastNode): void {
-    this.#commandBuffer.appendChildRawJson(nid(node), JSON.stringify(markHast(childNode)));
+  appendChild(node: HastNode, childNode: HastNode | HastNode[]): void {
+    const id = nid(node);
+    for (const n of asArray(childNode)) {
+      this.#commandBuffer.appendChildRawJson(id, JSON.stringify(markHast(n)));
+    }
+  }
+
+  insertChildAt(node: HastNode, index: number, childNode: HastNode | HastNode[]): void {
+    const children = "children" in node ? node.children : [];
+    if (index <= 0 || children.length === 0) {
+      this.prependChild(node, childNode);
+    } else if (index >= children.length) {
+      this.appendChild(node, childNode);
+    } else {
+      this.insertBefore(children[index]!, childNode);
+    }
+  }
+
+  removeChildAt(node: HastNode, index: number): void {
+    const child = "children" in node ? node.children[index] : undefined;
+    if (child) this.removeNode(child);
   }
 
   setProperty(node: HastNode, key: string, value: unknown): void {
     const id = nid(node);
+    if (key === "children") {
+      // children is structural: set-children keeps the node and swaps only its
+      // child list (reused children keep their id).
+      const wrapper = {
+        _hast: true,
+        type: "root",
+        children: (value as HastNode[]).map((child) => markHastNode(child, false)),
+      };
+      this.#commandBuffer.setChildren(id, JSON.stringify(wrapper));
+      return;
+    }
     if (key === "data") {
       this.#commandBuffer.setProperty(id, key, value != null ? JSON.stringify(value) : null);
       return;

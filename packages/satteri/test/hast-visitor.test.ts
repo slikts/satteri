@@ -10,7 +10,7 @@ import {
   getHandleSource,
 } from "../index.js";
 import type { HastNode } from "../src/hast/hast-materializer.js";
-import type { HastVisitorContext } from "../src/hast/hast-visitor.js";
+import type { HastVisitorContext, HastVisitorInstance } from "../src/hast/hast-visitor.js";
 import type { Position } from "unist";
 
 function setup(source = "# Hello\n\nWorld") {
@@ -395,6 +395,106 @@ describe("visitHastHandle - mutations", () => {
     visitHastHandle(handle, plugin, subs, source, undefined);
     const html = renderHandle(handle);
     expect(html).toContain("<h1>Hello World</h1>");
+  });
+
+  test("context.setProperty(node, 'children', ...) replaces an element's children", () => {
+    const { handle, source } = setup("# Hello");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.setProperty(node, "children", [{ type: "text", value: "New heading" }]);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain("<h1>New heading</h1>");
+  });
+
+  test("context.setProperty 'children' composes with a scalar setProperty on the same node", () => {
+    const { handle, source } = setup("# Hello");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.setProperty(node, "id", "title");
+          ctx.setProperty(node, "children", [{ type: "text", value: "Hi" }]);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain(`<h1 id="title">Hi</h1>`);
+  });
+
+  test("context.setProperty(node, 'children', ...) preserves the element's properties", () => {
+    const { handle, source } = setup("[x](https://example.com)");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["a"],
+        visit(node, ctx) {
+          ctx.setProperty(node, "children", [{ type: "text", value: "Y" }]);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain(`<a href="https://example.com">Y</a>`);
+  });
+
+  test("context.insertChildAt() inserts before the index-th child of an element", () => {
+    const { handle, source } = setup("# Hello");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.insertChildAt(node, 0, { type: "text", value: ">> " });
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain("<h1>&gt;&gt; Hello</h1>");
+  });
+
+  test("context.removeChildAt() removes the index-th child of an element", () => {
+    const { handle, source } = setup("# Hello");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.removeChildAt(node, 0);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain("<h1></h1>");
+  });
+
+  test("context.appendChild() accepts an array of nodes on an element, in order", () => {
+    const { handle, source } = setup("# Hello");
+    const plugin: HastVisitorInstance = {
+      element: {
+        filter: ["h1"],
+        visit(node, ctx) {
+          ctx.appendChild(node, [
+            { type: "text", value: " A" },
+            { type: "text", value: " B" },
+          ]);
+        },
+      },
+    };
+    const subs = resolveSubscriptions(plugin);
+    visitHastHandle(handle, plugin, subs, source, undefined);
+    const html = renderHandle(handle);
+    expect(html).toContain("<h1>Hello A B</h1>");
   });
 });
 
