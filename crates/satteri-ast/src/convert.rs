@@ -2135,8 +2135,8 @@ fn convert_table_row(
     // mdast-util-to-hast truncates source cells past the header column count
     // (HAST padding fills underflow; this drops overflow). The MDAST tree
     // keeps all source cells per `mdast-util-gfm-table`. With no alignment
-    // info (e.g. a table built by a plugin), it falls back to the row's own
-    // cell count rather than dropping every cell.
+    // info, it falls back to the row's own cell count rather than dropping
+    // every cell.
     let column_count = if alignments.is_empty() {
         all_cells.len()
     } else {

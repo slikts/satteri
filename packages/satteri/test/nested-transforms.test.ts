@@ -168,11 +168,6 @@ test("a plugin's own freshly-built node is not re-walked", () => {
 });
 
 test("a table moved out of a directive keeps its cells and alignment (#80)", () => {
-  // A reused node passed to insertAfter is serialized to JSON and rebuilt. The
-  // table's `align` array (the column count, authoritative in mdast→hast) has to
-  // survive that round-trip, or every cell is truncated away and the table
-  // renders blank. The unhandled directive itself drops out, so the moved copy
-  // is the only table rendered.
   const move = defineMdastPlugin({
     name: "move-table",
     containerDirective(node, ctx) {
@@ -190,10 +185,8 @@ test("a table moved out of a directive keeps its cells and alignment (#80)", () 
 });
 
 test("an inlineMath node survives a round-trip", () => {
-  // inlineMath shares Math's `MathData` layout in the arena. The JS-rebuild path
-  // once encoded it as a plain string ref (8 bytes), so reading it back as a
-  // 16-byte MathData read past the buffer — corrupting the value and crashing
-  // the conversion. Duplicating one must keep its value and not panic.
+  // inlineMath shares Math's 16-byte `MathData` layout. The rebuild once encoded
+  // it as an 8-byte string ref, so reading it back overran the buffer and crashed.
   const dup = defineMdastPlugin({
     name: "dup-inline-math",
     inlineMath(node, ctx) {
@@ -214,7 +207,7 @@ test("an imageReference keeps its alt through a round-trip", () => {
       ctx.insertAfter(node, node);
     },
   });
-  const md = "![alt text][logo]\n\n[logo]: /logo.png \"Logo\"";
+  const md = '![alt text][logo]\n\n[logo]: /logo.png "Logo"';
   const { html } = markdownToHtml(md, { mdastPlugins: [dup] });
   expect((html.match(/alt="alt text"/g) ?? []).length).toBe(2);
 });
@@ -229,8 +222,14 @@ test("a fresh table built without `align` still renders its cells", () => {
       return {
         type: "table",
         children: [
-          { type: "tableRow", children: [{ type: "tableCell", children: [{ type: "text", value: "H" }] }] },
-          { type: "tableRow", children: [{ type: "tableCell", children: [{ type: "text", value: "v" }] }] },
+          {
+            type: "tableRow",
+            children: [{ type: "tableCell", children: [{ type: "text", value: "H" }] }],
+          },
+          {
+            type: "tableRow",
+            children: [{ type: "tableCell", children: [{ type: "text", value: "v" }] }],
+          },
         ],
       } as unknown as MdastNode;
     },

@@ -643,7 +643,7 @@ fn js_table_alignments(align: Option<&[Option<String>]>) -> Vec<ColumnAlign> {
 
 fn js_reference_kind(js_node: &JsNode) -> u8 {
     match js_node.reference_type.as_deref() {
-        Some("collapsed") => 1, // shortcut otherwise
+        Some("collapsed") => 1,
         Some("full") => 2,
         _ => 0,
     }
