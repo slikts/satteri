@@ -524,8 +524,7 @@ fn encode_js_node_data(
         | MdastNodeType::InlineCode
         | MdastNodeType::Html
         | MdastNodeType::Yaml
-        | MdastNodeType::Toml
-        | MdastNodeType::InlineMath => {
+        | MdastNodeType::Toml => {
             let value = js_node.value.as_deref().unwrap_or("");
             let sref = builder.alloc_string(value);
             encode_string_ref_data(sref)
@@ -536,7 +535,9 @@ fn encode_js_node_data(
             let value_ref = alloc_opt_str(builder, js_node.value.as_deref());
             encode_code_data(lang_ref, meta_ref, value_ref, b'`')
         }
-        MdastNodeType::Math => {
+        // InlineMath shares Math's `MathData` layout (the parser stores both
+        // that way); it has no `meta`, so that ref stays empty.
+        MdastNodeType::Math | MdastNodeType::InlineMath => {
             let meta_ref = alloc_opt_str(builder, js_node.meta.as_deref());
             let value_ref = alloc_opt_str(builder, js_node.value.as_deref());
             encode_math_data(meta_ref, value_ref)
@@ -559,6 +560,10 @@ fn encode_js_node_data(
             let label_ref = alloc_opt_str(builder, js_node.label.as_deref());
             encode_definition_data(url_ref, title_ref, id_ref, label_ref)
         }
+        MdastNodeType::Table => {
+            let alignments = js_table_alignments(js_node.align.as_deref());
+            encode_table_data(&alignments)
+        }
         MdastNodeType::List => {
             let ordered = js_node.ordered.unwrap_or(false);
             let start = js_node.start.unwrap_or(1);
@@ -574,17 +579,17 @@ fn encode_js_node_data(
             let spread = js_node.spread.unwrap_or(false);
             encode_list_item_data(checked, spread)
         }
-        MdastNodeType::LinkReference
-        | MdastNodeType::ImageReference
-        | MdastNodeType::FootnoteReference => {
+        MdastNodeType::LinkReference | MdastNodeType::FootnoteReference => {
             let id_ref = alloc_opt_str(builder, js_node.identifier.as_deref());
             let label_ref = alloc_opt_str(builder, js_node.label.as_deref());
-            let kind = match js_node.reference_type.as_deref() {
-                Some("collapsed") => 1u8,
-                Some("full") => 2u8,
-                _ => 0u8, // shortcut
-            };
-            encode_reference_data(id_ref, label_ref, kind)
+            encode_reference_data(id_ref, label_ref, js_reference_kind(js_node))
+        }
+        // ImageReference carries an extra `alt` after the reference header.
+        MdastNodeType::ImageReference => {
+            let id_ref = alloc_opt_str(builder, js_node.identifier.as_deref());
+            let label_ref = alloc_opt_str(builder, js_node.label.as_deref());
+            let alt_ref = alloc_opt_str(builder, js_node.alt.as_deref());
+            encode_image_reference_data(id_ref, label_ref, js_reference_kind(js_node), alt_ref)
         }
         MdastNodeType::FootnoteDefinition => {
             let id_ref = alloc_opt_str(builder, js_node.identifier.as_deref());
@@ -618,6 +623,29 @@ fn encode_js_node_data(
         }
         // Nodes with no type-specific data
         _ => Vec::new(),
+    }
+}
+
+fn js_table_alignments(align: Option<&[Option<String>]>) -> Vec<ColumnAlign> {
+    let Some(align) = align else {
+        return Vec::new();
+    };
+    align
+        .iter()
+        .map(|v| match v.as_deref() {
+            Some("left") => ColumnAlign::Left,
+            Some("right") => ColumnAlign::Right,
+            Some("center") => ColumnAlign::Center,
+            _ => ColumnAlign::None,
+        })
+        .collect()
+}
+
+fn js_reference_kind(js_node: &JsNode) -> u8 {
+    match js_node.reference_type.as_deref() {
+        Some("collapsed") => 1, // shortcut otherwise
+        Some("full") => 2,
+        _ => 0,
     }
 }
 
@@ -1601,6 +1629,7 @@ mod tests {
                 start: None,
                 spread: None,
                 checked: None,
+                align: None,
                 identifier: None,
                 label: None,
                 reference_type: None,
@@ -1624,6 +1653,7 @@ mod tests {
             start: None,
             spread: None,
             checked: None,
+            align: None,
             identifier: None,
             label: None,
             reference_type: None,

@@ -582,8 +582,8 @@ fn remap_mdast_string_refs(data: &mut [u8], node_type: u8, base: u32) {
     }
 
     let ref_offsets: &[usize] = match node_type {
-        // Html(7), Text(10), InlineCode(13), Yaml(25), Toml(26), InlineMath(28): single StringRef at 0
-        7 | 10 | 13 | 25 | 26 | 28 => &[0],
+        // Html(7), Text(10), InlineCode(13), Yaml(25), Toml(26): single StringRef at 0
+        7 | 10 | 13 | 25 | 26 => &[0],
         // Code(8): lang(0), meta(8), value(16)
         8 => &[0, 8, 16],
         // Definition(9): url(0), title(8), identifier(16), label(24)
@@ -599,8 +599,8 @@ fn remap_mdast_string_refs(data: &mut [u8], node_type: u8, base: u32) {
         18 => &[0, 8, 20],
         // FootnoteDefinition(19): identifier(0), label(8)
         19 => &[0, 8],
-        // Math(27): meta(0), value(8)
-        27 => &[0, 8],
+        // Math(27), InlineMath(28): meta(0), value(8)
+        27 | 28 => &[0, 8],
         // MdxFlowExpression(102), MdxTextExpression(103), MdxjsEsm(104): value(0)
         102..=104 => &[0],
         // List(5) carries `start: u32` at offset 0 — NOT a StringRef. Heading(2)
