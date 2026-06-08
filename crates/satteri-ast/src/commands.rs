@@ -26,6 +26,9 @@ pub struct JsNode {
     pub start: Option<u32>,
     pub spread: Option<bool>,
     pub checked: Option<bool>,
+    /// Table column alignments, one per column (`null`/`"left"`/`"right"`/`"center"`).
+    #[serde(default)]
+    pub align: Option<Vec<Option<String>>>,
     pub identifier: Option<String>,
     pub label: Option<String>,
     #[serde(rename = "referenceType")]

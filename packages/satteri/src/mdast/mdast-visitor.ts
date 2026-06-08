@@ -620,10 +620,17 @@ function readMdastMatchedNode(
       node.label = rstr(buf, pos, labelLen);
       pos += labelLen;
       const kind = buf[pos]!;
+      pos += 1;
       // Only link/image references carry `referenceType`; the mdast spec
       // defines it for those two, not for `footnoteReference`.
       if (nodeType !== 20) {
         node.referenceType = ["shortcut", "collapsed", "full"][kind] ?? "shortcut";
+      }
+      // imageReference also carries `alt` (the serializer appends it).
+      if (nodeType === 18) {
+        const altLen = ru16(view, pos);
+        pos += 2;
+        node.alt = rstr(buf, pos, altLen);
       }
       break;
     }
