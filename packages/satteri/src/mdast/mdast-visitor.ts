@@ -333,7 +333,6 @@ type CachedMdastSubs = {
 };
 const mdastSubscriptionCache: WeakMap<MdastPluginInstance, CachedMdastSubs> = new WeakMap();
 
-/** Resolve subscriptions from a plugin instance. */
 export function resolveMdastSubscriptions(plugin: MdastPluginInstance): MdastSubscription[] {
   const cached = mdastSubscriptionCache.get(plugin);
   if (cached !== undefined) return cached.subs;

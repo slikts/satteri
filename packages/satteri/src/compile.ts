@@ -159,8 +159,6 @@ function runMdastPluginsOnHandle(
     const apply = (r: { commandBuffer: Uint8Array; hasMutations: boolean }): void => {
       if (!r.hasMutations) return;
       if (collectLast && isLast) {
-        // Defer the final plugin's commands so the caller can fuse the apply
-        // with the downstream convert + render/compile NAPI call.
         out.pendingCommands = r.commandBuffer;
         out.lastPlugin = plugin as { name?: string };
         return;

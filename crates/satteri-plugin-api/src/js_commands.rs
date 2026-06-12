@@ -484,10 +484,9 @@ fn apply_hast_element_property(
         }
     }
 
-    // Phase 3: allocate new strings (now mutates arena.source, but type_data
-    // ranges captured above remain valid — appending to source doesn't move
-    // type_data bytes).
-    let name_ref = arena.alloc_string(prop_name);
+    // Phase 3: allocate the value string (now mutates arena.source, but
+    // type_data ranges captured above remain valid — appending to source
+    // doesn't move type_data bytes).
     let val_ref = if value_str.is_empty() {
         StringRef::empty()
     } else {
@@ -496,18 +495,15 @@ fn apply_hast_element_property(
 
     // Phase 4: write back.
     if let Some(idx) = found_index {
-        // Overwrite the 20-byte entry in place. node.data_offset / data_len
-        // unchanged.
+        // Overwrite the entry's value in place; the name bytes already match
+        // and node.data_offset / data_len are unchanged.
         let base = header + 16 + idx * 20;
-        arena.type_data[base..base + 4].copy_from_slice(&name_ref.offset.to_le_bytes());
-        arena.type_data[base + 4..base + 8].copy_from_slice(&name_ref.len.to_le_bytes());
         arena.type_data[base + 8] = value_type;
         arena.type_data[base + 9..base + 12].copy_from_slice(&[0u8; 3]);
         arena.type_data[base + 12..base + 16].copy_from_slice(&val_ref.offset.to_le_bytes());
         arena.type_data[base + 16..base + 20].copy_from_slice(&val_ref.len.to_le_bytes());
     } else {
-        // Append-new path: copy existing header+props to the end of type_data,
-        // then append the new entry, and update the node's pointer.
+        let name_ref = arena.alloc_string(prop_name);
         let new_offset = arena.type_data.len() as u32;
         let new_prop_count = (old_prop_count + 1) as u32;
 
@@ -515,13 +511,11 @@ fn apply_hast_element_property(
         arena.type_data.extend_from_within(header..header + 8);
         arena.type_data.extend_from_slice(&new_prop_count.to_le_bytes());
         arena.type_data.extend_from_slice(&0u32.to_le_bytes());
-        // Existing props, copied in one shot.
         if old_prop_count > 0 {
             let props_start = header + 16;
             let props_end = props_start + old_prop_count * 20;
             arena.type_data.extend_from_within(props_start..props_end);
         }
-        // New prop entry.
         arena.type_data.extend_from_slice(&name_ref.offset.to_le_bytes());
         arena.type_data.extend_from_slice(&name_ref.len.to_le_bytes());
         arena.type_data.push(value_type);

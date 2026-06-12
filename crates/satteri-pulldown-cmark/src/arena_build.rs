@@ -142,10 +142,13 @@ fn parse_inner(
     let mut inner = ParserInner::new(source, options);
     let mut callbacks = DefaultParserCallbacks;
 
-    // Open root node.
+    // Open root node. In skip-positions mode the cursor returns the zero
+    // sentinel; mirror it in the root's hardcoded 1:1 start so every node
+    // carries a consistent "no position" marker (byte offsets stay filled).
     builder.open_node(MdastNodeType::Root as u8);
     let (end_line, end_col) = cursor.offset_to_line_col(source.len() as u32);
-    builder.set_position_current(0, source.len() as u32, 1, 1, end_line, end_col);
+    let (start_line, start_col) = if track_positions { (1, 1) } else { (0, 0) };
+    builder.set_position_current(0, source.len() as u32, start_line, start_col, end_line, end_col);
 
     // Accumulation buffers for special container→leaf conversions.
     let mut html_block_buf: Option<String> = None;
@@ -476,14 +479,11 @@ fn parse_inner(
                             builder.sort_current_pending_children_by_source_order();
                         }
                         let is_spread = *item_spread || {
-                            // Loose-list detection: at least one blank line
-                            // between consecutive children. Counts source
-                            // newlines between `prev.end_offset` and
-                            // `cur.start_offset` so it works regardless of
-                            // whether line/col positions were tracked — the
-                            // skip-positions parse mode (used by HTML/JS
-                            // output paths) leaves `start_line` zero, but
-                            // byte offsets are always recorded by the parser.
+                            // Loose-list detection: a blank line between
+                            // consecutive children means two newlines in the
+                            // source gap. Counted on byte offsets, not lines —
+                            // skip-positions mode leaves `start_line` zero but
+                            // offsets are always recorded.
                             let source_bytes = source.as_bytes();
                             let mut found = false;
                             let mut prev_end_offset: Option<u32> = None;
@@ -1988,9 +1988,9 @@ fn emit_refdefs_in_container(
         if emitted[i] {
             continue;
         }
-        let (_label, def) = &refdefs[i];
+        let (label, def) = &refdefs[i];
         if def.span.start >= container_start && def.span.start < container_end {
-            emit_pending_refdef(builder, cursor, source, &refdefs[i].0, &refdefs[i].1);
+            emit_pending_refdef(builder, cursor, source, label, def);
             emitted[i] = true;
             any = true;
         }
@@ -2222,7 +2222,6 @@ fn normalize_identifier(s: &str) -> std::borrow::Cow<'_, str> {
             }
         }
         if !needs_work && last_was_space && !bytes.is_empty() {
-            // Trailing whitespace (last char was a space).
             needs_work = true;
         }
         if !needs_work {

@@ -171,6 +171,32 @@ describe("features.gfm.footnotes", () => {
     expect(result.html).toContain('aria-label="#1.1"');
     expect(result.html).toContain('aria-label="#1.2"');
   });
+
+  // The compile pipeline picks a different NAPI shape per plugin mix (no-plugin
+  // fast path, MDAST-only fused tail, HAST collect-last). Footnote options must
+  // reach the MDAST→HAST conversion on every one of them.
+
+  test("footnote options apply on the MDAST-plugins-only path", () => {
+    const noop = defineMdastPlugin({ name: "noop", heading() {} });
+    const result = markdownToHtml(SRC, {
+      mdastPlugins: [noop],
+      features: { gfm: { footnotes: { label: "Notas" } } },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain(">Notas<");
+    expect(result.html).not.toContain(">Footnotes<");
+  });
+
+  test("footnote options apply on the HAST-plugins path", () => {
+    const noop = defineHastPlugin({ name: "noop", text() {} });
+    const result = markdownToHtml(SRC, {
+      hastPlugins: [noop],
+      features: { gfm: { footnotes: { label: "Notas" } } },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain(">Notas<");
+    expect(result.html).not.toContain(">Footnotes<");
+  });
 });
 
 // markdownToHtml - no plugins

@@ -87,9 +87,7 @@ const touchAllTextOnly = defineHastPlugin({
 
 const touchAllTextNoop = defineHastPlugin({
   name: "hast-text-noop",
-  text() {
-    // visit every text node, return nothing
-  },
+  text() {},
 });
 
 const noopMdastPlugin = defineMdastPlugin({

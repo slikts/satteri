@@ -494,7 +494,6 @@ type CachedSubs = {
 };
 const subscriptionCache: WeakMap<HastVisitorInstance, CachedSubs> = new WeakMap();
 
-/** Resolve subscriptions from a plugin instance. */
 export function resolveSubscriptions(plugin: HastVisitorInstance): ResolvedSubscription[] {
   const cached = subscriptionCache.get(plugin);
   if (cached !== undefined) return cached.subs;
