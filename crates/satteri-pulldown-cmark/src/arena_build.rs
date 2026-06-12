@@ -1,6 +1,8 @@
 //! Direct arena builder: walks the pulldown-cmark internal tree and builds
 //! a `satteri_arena::Arena` without going through the Event iterator.
 
+use alloc::borrow::Cow;
+
 use satteri_arena::{Arena, ArenaBuilder, LineIndex, Mdast, StringRef};
 use satteri_ast::mdast::{
     encode_directive_data, encode_image_reference_data, encode_reference_data, encode_table_data,
@@ -184,7 +186,7 @@ fn parse_inner(
     // give source-order traversal without rebuilding string fields. Saves up
     // to 3 heap allocs per refdef on the parse hot path.
     let refdefs_owned: Vec<(LinkLabel<'_>, LinkDef<'_>)> =
-        std::mem::take(&mut inner.allocs.refdefs_all);
+        core::mem::take(&mut inner.allocs.refdefs_all);
     let mut refdef_order: Vec<u32> = (0..refdefs_owned.len() as u32).collect();
     refdef_order.sort_by_key(|&i| refdefs_owned[i as usize].1.span.start);
     let mut refdef_emitted: Vec<bool> = vec![false; refdefs_owned.len()];
@@ -1942,7 +1944,7 @@ fn emit_pending_refdef(
         Some(t) => builder.alloc_string(t.as_ref()),
         None => StringRef::empty(),
     };
-    let label_str: &str = label.as_ref().as_ref();
+    let label_str: &str = label.as_ref();
     let raw_label = extract_definition_label(source, start).unwrap_or(label_str);
     // remark decodes HTML entities AND backslash escapes in the refdef label.
     // `&amp;` → `&`, `&AElig;` → `Æ`, etc. Invalid entities pass through.
@@ -1976,6 +1978,7 @@ fn emit_pending_refdef(
 /// container span `[container_start, container_end)`. Returns true if at
 /// least one was emitted, so the caller knows it should re-sort the
 /// container's pending children to keep source order.
+#[allow(clippy::too_many_arguments)]
 fn emit_refdefs_in_container(
     builder: &mut ArenaBuilder<Mdast>,
     cursor: &mut satteri_arena::LineIndexCursor<'_, '_>,
@@ -2198,7 +2201,7 @@ fn reference_kind(link_type: LinkType) -> Option<u8> {
 /// `mdast-util-from-markdown` then lowercases. The triple-case dance
 /// matters for chars like `ẞ` → `ss`, where a single lowercase would give
 /// `ß` and break cross-references to a `[SS]` definition.
-fn normalize_identifier(s: &str) -> std::borrow::Cow<'_, str> {
+fn normalize_identifier(s: &str) -> Cow<'_, str> {
     if s.is_ascii() {
         // Fast path: most refdef/footnote labels are already lowercase, no
         // tabs/newlines, no leading/trailing/consecutive whitespace. Pre-scan
@@ -2229,7 +2232,7 @@ fn normalize_identifier(s: &str) -> std::borrow::Cow<'_, str> {
             needs_work = true;
         }
         if !needs_work {
-            return std::borrow::Cow::Borrowed(s);
+            return Cow::Borrowed(s);
         }
         // ASCII case folding is round-trip stable, so the
         // lower→upper→lower dance collapses to a single in-place lowercase.
@@ -2249,7 +2252,7 @@ fn normalize_identifier(s: &str) -> std::borrow::Cow<'_, str> {
         if out.ends_with(' ') {
             out.pop();
         }
-        return std::borrow::Cow::Owned(out);
+        return Cow::Owned(out);
     }
     let mut collapsed = String::with_capacity(s.len());
     let mut last_was_ws = false;
@@ -2264,7 +2267,7 @@ fn normalize_identifier(s: &str) -> std::borrow::Cow<'_, str> {
             last_was_ws = false;
         }
     }
-    std::borrow::Cow::Owned(
+    Cow::Owned(
         collapsed
             .trim()
             .to_lowercase()

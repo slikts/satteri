@@ -49,22 +49,6 @@ const mutatingHastPlugin = defineHastPlugin({
   },
 });
 
-const touchAllHastPlugin = () => {
-  let count = 0;
-  return defineHastPlugin({
-    name: "hast-touch-all",
-    element: {
-      filter: [],
-      visit(node, ctx) {
-        ctx.setProperty(node, "data-count", String(++count));
-      },
-    },
-    text(node) {
-      return { type: "text", value: node.value.toUpperCase() };
-    },
-  });
-};
-
 const touchAllElementsOnly = () => {
   let count = 0;
   return defineHastPlugin({
@@ -95,18 +79,12 @@ const noopMdastPlugin = defineMdastPlugin({
   heading() {},
 });
 
-const touchAllMdastPlugin = () => {
-  let count = 0;
-  return defineMdastPlugin({
-    name: "mdast-touch-all",
-    heading(node, ctx) {
-      ctx.setProperty(node, "depth", ((count++ % 6) + 1) as 1 | 2 | 3 | 4 | 5 | 6);
-    },
-    text(node) {
-      return { type: "text", value: node.value.toUpperCase() };
-    },
-  });
-};
+const mutatingMdastPlugin = defineMdastPlugin({
+  name: "mdast-mutating",
+  heading(node, ctx) {
+    ctx.setProperty(node, "depth", 2);
+  },
+});
 
 const touchAllMdastTextOnly = defineMdastPlugin({
   name: "mdast-text-only",
@@ -181,10 +159,6 @@ describe("markdownToHtml", () => {
     markdownToHtml(MARKDOWN, { hastPlugins: [mutatingHastPlugin] });
   });
 
-  bench("hast-touch-all (worst case: setProperty + text replace)", () => {
-    markdownToHtml(MARKDOWN, { hastPlugins: [touchAllHastPlugin] });
-  });
-
   bench("hast-elements-only (setProperty per element)", () => {
     markdownToHtml(MARKDOWN, { hastPlugins: [touchAllElementsOnly] });
   });
@@ -201,8 +175,8 @@ describe("markdownToHtml", () => {
     markdownToHtml(MARKDOWN, { mdastPlugins: [noopMdastPlugin] });
   });
 
-  bench("mdast-touch-all (setProperty + text replace)", () => {
-    markdownToHtml(MARKDOWN, { mdastPlugins: [touchAllMdastPlugin] });
+  bench("mutating MDAST plugin (set depth on headings)", () => {
+    markdownToHtml(MARKDOWN, { mdastPlugins: [mutatingMdastPlugin] });
   });
 
   bench("mdast-text-only (text replace per text node)", () => {
