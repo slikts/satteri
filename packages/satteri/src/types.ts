@@ -1,6 +1,6 @@
 import type { Position } from "unist";
 import type { Literal as MdastLiteral, Nodes as MdastStdNodes } from "mdast";
-import type { Nodes as HastStdNodes } from "hast";
+import type { Literal as HastLiteral, Nodes as HastStdNodes } from "hast";
 
 // Re-export standard position types from unist.
 export type { Position, Point } from "unist";
@@ -70,9 +70,8 @@ declare module "mdast" {
 // mdxJsxTextElement and mdxFlowExpression/mdxTextExpression. We only need
 // to register "raw" here since it has no standard package.
 
-export interface HastRaw {
+export interface HastRaw extends HastLiteral {
   type: "raw";
-  value: string;
 }
 
 declare module "hast" {
