@@ -2381,7 +2381,11 @@ fn parse_jsx_attrs<'a>(
             let lead_ws = raw_value.len() - raw_value.trim_start().len();
             let value = raw_value.trim();
             let val_start = start + lead_ws;
-            attrs.push(JsxAttr::Spread(value.into(), val_start, val_start + value.len()));
+            attrs.push(JsxAttr::Spread(
+                value.into(),
+                val_start,
+                val_start + value.len(),
+            ));
             continue;
         }
 

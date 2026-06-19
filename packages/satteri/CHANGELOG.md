@@ -11,14 +11,15 @@
 - [6bcdf06](https://github.com/bruits/satteri/commit/6bcdf06a0ee267779180a2d89a27a31f2f4b5b81) `features.superscript` and `features.subscript` now render `^text^` as `<sup>text</sup>` and `~text~` as `<sub>text</sub>` as documented, instead of `<em>`. The MDAST now exposes dedicated `superscript` and `subscript` node types, which plugins can visit and construct. Plugins that previously matched these spans as `emphasis` nodes should switch to the new node types. — Thanks @morinokami for your first contribution 🎉!
 - [d6e28f4](https://github.com/bruits/satteri/commit/d6e28f45623a37a74e694cb75e5a6e916c220677) Fixes a parse error when an MDX expression uses top-level `await`, such as `<Card data={await getData()} />`. — Thanks @Princesseuh!
 - [9867bbc](https://github.com/bruits/satteri/commit/9867bbc9dc71f68c7c6aff5307fdd48f723ebdda) Add `ctx.parent(node)` and `ctx.indexOf(node)` to the MDAST and HAST plugin visitor contexts.
-  
+
   `parent()` returns a node's parent (or `undefined` at the root) and is climbable to reach any ancestor;
-  
+
   `indexOf()` returns a node's position within its parent's children. Together they make it possible to do operations depending on ancestry and siblings. — Thanks @Princesseuh!
+
 - [0d36b24](https://github.com/bruits/satteri/commit/0d36b249d435940efaf95b03fa4fecd1a38a1c56) Aligns directive attribute type with `mdast-util-directive` by allowing nullish attribute values. — Thanks @HiDeoo!
 - [efba0de](https://github.com/bruits/satteri/commit/efba0de3b74cba630071400fc769671ca150c183) Add the missing `position` and `data` properties to the `raw` hast node type. — Thanks @Princesseuh!
 - [77b8b1d](https://github.com/bruits/satteri/commit/77b8b1d59dcaf712a607a956f3aadece32fec7e4) Add `ctx.data`, a document-scoped data bag shared across every plugin in the compile.
-  
+
   Writes from one plugin are visible to later plugins, and the bag persists across the mdast→hast boundary, so hast plugins can read what mdast plugins wrote. After compilation the final state is returned on `result.data`. The bag lives entirely on the JS side, so any value is allowed (functions, class instances, `Map`/`Set`) and references are preserved, much like `vfile.data`. Specific keys can be typed by augmenting the `DataMap` interface via `declare module "satteri"`. — Thanks @Princesseuh!
 
 ## 0.8.2 — 2026-06-11

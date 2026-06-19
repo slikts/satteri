@@ -1300,7 +1300,10 @@ fn multiline_jsx_attribute_expression_error_is_exact() {
     let point = |src: &str| -> satteri_arena::mdx_types::Point {
         let err = compile(src, &Options::default(), MDX_OPTS)
             .expect_err("invalid attribute expression should fail to compile");
-        match *err.place.expect("parse error should carry a source position") {
+        match *err
+            .place
+            .expect("parse error should carry a source position")
+        {
             Place::Point(p) => p,
             Place::Position(p) => p.start,
         }
@@ -1331,7 +1334,10 @@ fn multiline_flow_expression_error_is_exact() {
     // verbatim column 5, not the dedented column 3.
     let err = compile("# T\n\n{\n  1 2\n}\n", &Options::default(), MDX_OPTS)
         .expect_err("invalid flow expression should fail to compile");
-    let point = match *err.place.expect("parse error should carry a source position") {
+    let point = match *err
+        .place
+        .expect("parse error should carry a source position")
+    {
         Place::Point(p) => p,
         Place::Position(p) => p.start,
     };
@@ -1349,7 +1355,10 @@ fn multiline_inline_expression_error_is_exact() {
     let point = |src: &str| -> satteri_arena::mdx_types::Point {
         let err = compile(src, &Options::default(), MDX_OPTS)
             .expect_err("invalid inline expression should fail to compile");
-        match *err.place.expect("parse error should carry a source position") {
+        match *err
+            .place
+            .expect("parse error should carry a source position")
+        {
             Place::Point(p) => p,
             Place::Position(p) => p.start,
         }
