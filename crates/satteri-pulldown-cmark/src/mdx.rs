@@ -1223,7 +1223,17 @@ pub(crate) fn scan_mdx_esm(bytes: &[u8]) -> Option<usize> {
             .unwrap_or(bytes.len());
         ix = eol;
 
-        if ix >= bytes.len() || bytes[ix] == b'\n' || bytes[ix] == b'\r' {
+        if ix >= bytes.len() {
+            break;
+        }
+        // A line of only spaces/tabs is blank, exactly like an empty line, and
+        // ends the block. The firstpass retries across it with oxc when the
+        // block is still incomplete (e.g. an export spanning a blank line).
+        let mut next = ix;
+        while next < bytes.len() && matches!(bytes[next], b' ' | b'\t') {
+            next += 1;
+        }
+        if next >= bytes.len() || matches!(bytes[next], b'\n' | b'\r') {
             break;
         }
     }
@@ -1748,7 +1758,7 @@ impl<'a, 'b> FirstPass<'a, 'b> {
                         .into_static();
                 validate_jsx_expressions(
                     &jsx_data.attrs,
-                    stripped_to_orig(pos),
+                    |rel| stripped_to_orig(pos + rel),
                     &mut self.mdx_expr_allocator,
                     &mut self.mdx_errors,
                 );
@@ -2324,8 +2334,10 @@ fn parse_jsx_attrs<'a>(
                 }
                 i += 1;
             }
-            let value = tag[start..i.saturating_sub(1)].trim();
-            attrs.push(JsxAttr::Spread(value.into()));
+            let raw_value = &tag[start..i.saturating_sub(1)];
+            let lead_ws = raw_value.len() - raw_value.trim_start().len();
+            let value = raw_value.trim();
+            attrs.push(JsxAttr::Spread(value.into(), start + lead_ws));
             continue;
         }
 
@@ -2411,6 +2423,7 @@ fn parse_jsx_attrs<'a>(
                 attrs.push(JsxAttr::Expression(
                     name.into(),
                     normalized.into_owned().into(),
+                    val_start,
                 ));
             } else {
                 attrs.push(JsxAttr::Boolean(name.into()));
@@ -2426,22 +2439,29 @@ fn parse_jsx_attrs<'a>(
 /// Validate JSX attribute expression bodies (`x={…}`) and spread bodies
 /// (`{...x}`) via oxc, mirroring what mdx-js does with acorn at parse time.
 /// Without this, only the brace-counting scanner runs on these — garbage
-/// like `<a x={1 +}/>` survives until JS emit. Errors are recorded against
-/// `tag_offset` (the source byte where the opening `<` sits); per-attr
-/// positions aren't tracked through `parse_jsx_attrs`.
+/// like `<a x={1 +}/>` survives until JS emit.
+///
+/// `resolve` maps a byte offset within the opening tag to the original source
+/// offset, so an error points at the offending token rather than the element.
 pub(crate) fn validate_jsx_expressions(
     attrs: &[JsxAttr<'_>],
-    tag_offset: usize,
+    resolve: impl Fn(usize) -> usize,
     allocator: &mut Allocator,
     mdx_errors: &mut Vec<(usize, alloc::string::String)>,
 ) {
     for attr in attrs {
-        let body: alloc::borrow::Cow<'_, str> = match attr {
-            JsxAttr::Expression(_, v) => alloc::borrow::Cow::Borrowed(v.as_ref()),
-            JsxAttr::Spread(v) => {
+        // `body_offset` is the offset of `body` within the opening tag.
+        let (body, body_offset): (alloc::borrow::Cow<'_, str>, usize) = match attr {
+            JsxAttr::Expression(_, v, off) => (alloc::borrow::Cow::Borrowed(v.as_ref()), *off),
+            JsxAttr::Spread(v, off) => {
                 let trimmed = v.as_ref().trim_start();
                 match trimmed.strip_prefix("...") {
-                    Some(operand) => alloc::borrow::Cow::Borrowed(operand),
+                    // `off` points at the (trimmed) spread value; the operand
+                    // starts past the `...`.
+                    Some(operand) => (
+                        alloc::borrow::Cow::Borrowed(operand),
+                        *off + (v.as_ref().len() - operand.len()),
+                    ),
                     None => continue,
                 }
             }
@@ -2453,9 +2473,9 @@ pub(crate) fn validate_jsx_expressions(
         } else {
             body
         };
-        if let Some((_off, detail)) = try_parse_expression_body(&body, allocator) {
+        if let Some((err_offset, detail)) = try_parse_expression_body(&body, allocator) {
             mdx_errors.push((
-                tag_offset,
+                resolve(body_offset) + err_offset,
                 alloc::format!("Could not parse expression with oxc: {detail}"),
             ));
         }

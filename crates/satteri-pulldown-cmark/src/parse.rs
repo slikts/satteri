@@ -620,7 +620,7 @@ impl<'input> ParserInner<'input> {
                             let mut allocator = oxc_allocator::Allocator::default();
                             crate::mdx::validate_jsx_expressions(
                                 &jsx_data.attrs,
-                                start,
+                                |rel| start + rel,
                                 &mut allocator,
                                 &mut self.mdx_errors,
                             );
@@ -2850,8 +2850,12 @@ pub(crate) struct DirectiveIndex(usize);
 pub(crate) enum JsxAttr<'a> {
     Boolean(CowStr<'a>),
     Literal(CowStr<'a>, CowStr<'a>),
-    Expression(CowStr<'a>, CowStr<'a>),
-    Spread(CowStr<'a>),
+    /// `name={value}`. The `usize` is the byte offset of `value` within the
+    /// opening tag, used to point a parse error at the source.
+    Expression(CowStr<'a>, CowStr<'a>, usize),
+    /// `{...value}`. The `usize` is the byte offset of `value` within the
+    /// opening tag.
+    Spread(CowStr<'a>, usize),
 }
 
 #[cfg(feature = "mdx")]
@@ -2860,8 +2864,10 @@ impl<'a> JsxAttr<'a> {
         match self {
             JsxAttr::Boolean(n) => JsxAttr::Boolean(n.into_static()),
             JsxAttr::Literal(n, v) => JsxAttr::Literal(n.into_static(), v.into_static()),
-            JsxAttr::Expression(n, v) => JsxAttr::Expression(n.into_static(), v.into_static()),
-            JsxAttr::Spread(v) => JsxAttr::Spread(v.into_static()),
+            JsxAttr::Expression(n, v, off) => {
+                JsxAttr::Expression(n.into_static(), v.into_static(), off)
+            }
+            JsxAttr::Spread(v, off) => JsxAttr::Spread(v.into_static(), off),
         }
     }
 }

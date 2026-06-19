@@ -1123,7 +1123,7 @@ function compareSingle(input: string, level: FuzzLevel, source: FuzzSource): Fuz
     actual === "PARSE_ERROR" &&
     expected === "PARSE_ERROR" &&
     actualError &&
-    !/^MDX parse error at byte \d+:/.test(actualError)
+    !/^\d+:\d+: /.test(actualError)
   ) {
     return {
       input,

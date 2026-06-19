@@ -1171,3 +1171,87 @@ fn mixed_module_scope_and_dynamic_components() -> Result<(), satteri_arena::mdx_
     );
     Ok(())
 }
+
+#[test]
+fn esm_parse_error_carries_source_position() {
+    use satteri_arena::mdx_types::Place;
+
+    // Invalid ESM (`export const x = ;`) on line 3. The oxc parse error must
+    // resolve to a source point, not be dropped to `place: None`.
+    let err = compile(
+        "# Title\n\nexport const x = ;\n",
+        &Options::default(),
+        MDX_OPTS,
+    )
+    .expect_err("invalid ESM should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    match *place {
+        Place::Point(point) => assert_eq!(
+            point.line, 3,
+            "error should point at the ESM line, got {point:?}"
+        ),
+        Place::Position(position) => assert_eq!(
+            position.start.line, 3,
+            "error should point at the ESM line, got {position:?}"
+        ),
+    }
+}
+
+#[test]
+fn expression_parse_error_carries_source_position() {
+    use satteri_arena::mdx_types::Place;
+
+    // Invalid MDX expression (`{ 1 + }`) on line 3. Parse-time errors must
+    // carry a source point too, not just a bare byte offset.
+    let err = compile("# Title\n\n{ 1 + }\n", &Options::default(), MDX_OPTS)
+        .expect_err("invalid expression should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    match *place {
+        Place::Point(point) => assert_eq!(
+            point.line, 3,
+            "error should point at the expression line, got {point:?}"
+        ),
+        Place::Position(position) => assert_eq!(
+            position.start.line, 3,
+            "error should point at the expression line, got {position:?}"
+        ),
+    }
+}
+
+#[test]
+fn jsx_attribute_expression_error_points_at_attribute() {
+    use satteri_arena::mdx_types::Place;
+
+    // The error is in the *second* attribute (`bad={2 *}`) on line 3. The
+    // position must point inside that attribute, not at the element's `<`.
+    let err = compile(
+        "# T\n\n<Foo a={1} bad={2 *} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )
+    .expect_err("invalid attribute expression should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    let point = match *place {
+        Place::Point(p) => p,
+        Place::Position(p) => p.start,
+    };
+    assert_eq!(
+        point.line, 3,
+        "should be on the element's line, got {point:?}"
+    );
+    // `bad={…}` opens at column 16; column 1 would mean we regressed to
+    // pointing at the element's `<` instead of the offending attribute.
+    assert!(
+        point.column >= 16,
+        "should point inside the second attribute, got {point:?}"
+    );
+}
