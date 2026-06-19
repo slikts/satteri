@@ -510,8 +510,8 @@ test("containerDirective with [label] exposes directiveLabel marker on first chi
   const plugin = defineMdastPlugin({
     name: "read-container-directive-label",
     containerDirective(node) {
-      const first = node.children[0] as { data?: { directiveLabel?: boolean } } | undefined;
-      labelChildHadMarker = first?.data?.directiveLabel === true;
+      const first = node.children[0];
+      labelChildHadMarker = first?.type === "paragraph" && first.data?.directiveLabel === true;
     },
   });
   const subs = resolveMdastSubscriptions(plugin);

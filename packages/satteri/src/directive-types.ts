@@ -27,9 +27,7 @@ export interface ContainerDirective extends MdastParent {
   data?: ContainerDirectiveData | undefined;
 }
 
-export interface ContainerDirectiveData extends MdastData {
-  directiveLabel?: boolean | undefined;
-}
+export interface ContainerDirectiveData extends MdastData {}
 
 export interface LeafDirective extends MdastParent {
   type: "leafDirective";
@@ -55,6 +53,12 @@ declare module "mdast" {
   interface BlockContentMap {
     containerDirective: ContainerDirective;
     leafDirective: LeafDirective;
+  }
+
+  interface ParagraphData {
+    // `true` on a container directive's first child paragraph when that
+    // paragraph is the directive label (`:::note[label]`).
+    directiveLabel?: boolean | null | undefined;
   }
 
   interface PhrasingContentMap {
