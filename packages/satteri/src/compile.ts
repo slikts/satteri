@@ -99,11 +99,11 @@ function featuresToNative(features: Features | undefined): NativeFeaturesPair {
 
 type MdastPipelineResult = { handle: MdastHandle };
 
-/** Drop a handle after bumping its epoch: the arena dies with the handle, so a
- *  child stub retained past the pipeline must hit the designed retention error,
- *  not a cryptic RangeError from snapshotting the freed arena. */
-function disposeHandle(handle: AnyHandle): void {
-  markHandleMutated(handle);
+/** Free a handle's arena. A plugin's visitor can hand child stubs to user code;
+ *  pass `invalidateStubs` so the epoch bump makes any stub retained past this
+ *  point hit the designed retention error instead of snapshotting the freed arena. */
+function releaseHandle(handle: AnyHandle, invalidateStubs: boolean): void {
+  if (invalidateStubs) markHandleMutated(handle);
   dropHandle(handle);
 }
 
@@ -521,6 +521,7 @@ export function markdownToHtml(
   options: CompileOptions = {},
 ): MarkdownToHtmlResult | Promise<MarkdownToHtmlResult> {
   const { mdastPlugins = [], hastPlugins = [], features, fileURL } = options;
+  const hastMayHaveStubs = hastPlugins.length > 0;
   const { features: nativeFeatures, convertOptions: nativeConvertOptions } =
     featuresToNative(features);
   const data: Data = {};
@@ -540,7 +541,7 @@ export function markdownToHtml(
       const html = renderHandle(h);
       return { html, frontmatter, data };
     } finally {
-      disposeHandle(h);
+      releaseHandle(h, hastMayHaveStubs);
     }
   };
 
@@ -551,14 +552,14 @@ export function markdownToHtml(
     try {
       hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, fileURL, data);
     } catch (err) {
-      disposeHandle(r.hastHandle);
+      releaseHandle(r.hastHandle, hastMayHaveStubs);
       throw err;
     }
     if (hastResult instanceof Promise) {
       return hastResult.then(
         () => renderAndDrop(r.hastHandle, r.frontmatter),
         (err) => {
-          disposeHandle(r.hastHandle);
+          releaseHandle(r.hastHandle, hastMayHaveStubs);
           throw err;
         },
       );
@@ -579,6 +580,7 @@ export function mdxToJs(
   options: MdxCompileOptions = {},
 ): MdxToJsResult | Promise<MdxToJsResult> {
   const { mdastPlugins = [], hastPlugins = [], features, fileURL, ...mdxFields } = options;
+  const hastMayHaveStubs = hastPlugins.length > 0;
   const mdxOptions = mdxOptionsToNative(mdxFields);
   const { features: nativeFeatures, convertOptions: nativeConvertOptions } =
     featuresToNative(features);
@@ -599,7 +601,7 @@ export function mdxToJs(
       const code = compileHandle(h, mdxOptions);
       return { code, frontmatter, data };
     } finally {
-      disposeHandle(h);
+      releaseHandle(h, hastMayHaveStubs);
     }
   };
 
@@ -608,14 +610,14 @@ export function mdxToJs(
     try {
       hastResult = runHastPluginsOnHandle(r.hastHandle, hastPlugins, source, fileURL, data);
     } catch (err) {
-      disposeHandle(r.hastHandle);
+      releaseHandle(r.hastHandle, hastMayHaveStubs);
       throw err;
     }
     if (hastResult instanceof Promise) {
       return hastResult.then(
         () => compileAndDrop(r.hastHandle, r.frontmatter),
         (err) => {
-          disposeHandle(r.hastHandle);
+          releaseHandle(r.hastHandle, hastMayHaveStubs);
           throw err;
         },
       );
@@ -694,18 +696,19 @@ function createHastHandleFromMdast(
     ? createMdxMdastHandle(source, nativeFeatures)
     : createMdastHandle(source, nativeFeatures);
 
-  // finally{dispose} is intentional: convertMdastToHastHandle empties the arena
+  const mdastMayHaveStubs = mdastPlugins.length > 0;
+
+  // finally{release} is intentional: convertMdastToHastHandle empties the arena
   // on success, but if any step here throws the handle would otherwise leak.
   const finalize = (r: MdastPipelineResult): HastWithFrontmatter => {
     try {
       const frontmatter = readFrontmatter(r.handle);
-      // The conversion empties the mdast arena; bump the epoch so a stub
-      // retained past the mdast pass fails with the retention error.
-      markHandleMutated(r.handle);
+      // convert empties the mdast arena, so invalidate any stub held past this point.
+      if (mdastMayHaveStubs) markHandleMutated(r.handle);
       const hastHandle = convertMdastToHastHandle(r.handle, nativeConvertOptions);
       return { hastHandle, frontmatter };
     } finally {
-      disposeHandle(r.handle);
+      releaseHandle(r.handle, mdastMayHaveStubs);
     }
   };
 
@@ -718,13 +721,13 @@ function createHastHandleFromMdast(
 
     if (mdastResult instanceof Promise) {
       return mdastResult.then(finalize, (err) => {
-        disposeHandle(mdastHandle);
+        releaseHandle(mdastHandle, mdastMayHaveStubs);
         throw err;
       });
     }
     return finalize(mdastResult);
   } catch (err) {
-    disposeHandle(mdastHandle);
+    releaseHandle(mdastHandle, mdastMayHaveStubs);
     throw err;
   }
 }
@@ -737,7 +740,7 @@ export function markdownToMdast(source: string, options: { features?: Features }
   try {
     return materializeMdastTree(new MdastReader(serializeHandle(handle)));
   } finally {
-    disposeHandle(handle);
+    releaseHandle(handle, true);
   }
 }
 
@@ -747,7 +750,7 @@ export function mdxToMdast(source: string, options: { features?: Features } = {}
   try {
     return materializeMdastTree(new MdastReader(serializeHandle(handle)));
   } finally {
-    disposeHandle(handle);
+    releaseHandle(handle, true);
   }
 }
 
@@ -758,7 +761,7 @@ export function markdownToHast(source: string, options: { features?: Features } 
   try {
     return materializeHastTree(new HastReader(serializeHandle(handle)));
   } finally {
-    disposeHandle(handle);
+    releaseHandle(handle, true);
   }
 }
 
@@ -769,6 +772,6 @@ export function mdxToHast(source: string, options: { features?: Features } = {})
   try {
     return materializeHastTree(new HastReader(serializeHandle(handle)));
   } finally {
-    disposeHandle(handle);
+    releaseHandle(handle, true);
   }
 }
