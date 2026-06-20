@@ -11,8 +11,8 @@ Rust Markdown ecosystem is the reverse. Sätteri sits between them.
 
 ## Features
 
-- A native parser built on `pulldown-cmark`, with opt-in support for GFM,
-  frontmatter, math, and remark-directive containers
+- A native parser built on `pulldown-cmark`, with configurable support for
+  GFM, frontmatter, math, and remark-directive containers
 - MDX as a separate parser entry point, with the same plugin model
 - A typed plugin API exposed to JavaScript through napi-rs
 - Native binaries for macOS, Linux, and Windows; a WASI fallback for
