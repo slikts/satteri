@@ -125,7 +125,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
             span: def.span.clone(),
         })
         .collect();
-    refdefs_pending.sort_by_key(|r| r.span.start);
+    refdefs_pending.sort_unstable_by_key(|r| r.span.start);
     let mut refdef_emitted: Vec<bool> = vec![false; refdefs_pending.len()];
 
     // Walk the tree iteratively.
@@ -223,11 +223,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             }
                             let sr = builder.alloc_string(&content);
                             let id = builder.current_node_id();
-                            let existing_data = builder.arena_ref().get_type_data(id).to_vec();
-                            if existing_data.len() >= 16 {
-                                let mut data = existing_data;
-                                data[16..24].copy_from_slice(&sr.as_bytes());
-                                builder.set_data_current(&data);
+                            if builder.arena_ref().get_type_data(id).len() >= 24 {
+                                builder.arena_mut().patch_type_data(id, 16, &sr.as_bytes());
                             }
                             let mut code_end = end;
                             let mut code_end_line = end_line;
@@ -248,8 +245,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 code_end_col = ec;
                                 if ext.extra_blank_lines > 0 {
                                     let id = builder.current_node_id();
-                                    let mut data = builder.arena_ref().get_type_data(id).to_vec();
-                                    if data.len() >= 24 {
+                                    if builder.arena_ref().get_type_data(id).len() >= 24 {
                                         let mut extended = String::with_capacity(
                                             content.len() + ext.extra_blank_lines,
                                         );
@@ -258,9 +254,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                             extended.push('\n');
                                         }
                                         let sr2 = builder.alloc_string(&extended);
-                                        data = builder.arena_ref().get_type_data(id).to_vec();
-                                        data[16..24].copy_from_slice(&sr2.as_bytes());
-                                        builder.set_data_current(&data);
+                                        builder.arena_mut().patch_type_data(id, 16, &sr2.as_bytes());
                                     }
                                 }
                             }
@@ -356,16 +350,12 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             let alt_ref = builder.alloc_string(&alt_text);
                             let id = builder.current_node_id();
                             let node_type = builder.arena_ref().get_node(id).node_type;
-                            let existing_data = builder.arena_ref().get_type_data(id).to_vec();
+                            let data_len = builder.arena_ref().get_type_data(id).len();
                             let is_image_ref = node_type == MdastNodeType::ImageReference as u8;
-                            if is_image_ref && existing_data.len() >= 28 {
-                                let mut data = existing_data;
-                                data[20..28].copy_from_slice(&alt_ref.as_bytes());
-                                builder.set_data_current(&data);
-                            } else if !is_image_ref && existing_data.len() >= 24 {
-                                let mut data = existing_data;
-                                data[8..16].copy_from_slice(&alt_ref.as_bytes());
-                                builder.set_data_current(&data);
+                            if is_image_ref && data_len >= 28 {
+                                builder.arena_mut().patch_type_data(id, 20, &alt_ref.as_bytes());
+                            } else if !is_image_ref && data_len >= 24 {
+                                builder.arena_mut().patch_type_data(id, 8, &alt_ref.as_bytes());
                             }
                         }
                         let id = builder.current_node_id();
@@ -435,13 +425,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             }
                             found
                         };
-                        if is_spread {
-                            let existing = builder.arena_ref().get_type_data(id).to_vec();
-                            if existing.len() >= 2 {
-                                let mut data = existing;
-                                data[1] = 1; // spread = true
-                                builder.set_data_current(&data);
-                            }
+                        if is_spread && builder.arena_ref().get_type_data(id).len() >= 2 {
+                            builder.arena_mut().patch_type_data(id, 1, &[1]); // spread = true
                         }
                         let node = builder.arena_ref().get_node(id);
                         let orig_start = node.start_offset;
@@ -521,11 +506,11 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             cont_end_col,
                         );
                         builder.close_node();
-                        let children = builder.arena_ref().get_children(id).to_vec();
+                        let children = builder.arena_ref().get_children(id);
                         let has_blank_between_items = {
                             let mut found = false;
                             let mut prev_end_line: Option<u32> = None;
-                            for &child_id in &children {
+                            for &child_id in children {
                                 let child_node = builder.arena_ref().get_node(child_id);
                                 if let Some(pel) = prev_end_line {
                                     if child_node.start_line > pel + 1 {
@@ -538,11 +523,9 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             found
                         };
                         if has_blank_between_items {
-                            let existing = builder.arena_ref().get_type_data(id).to_vec();
-                            if existing.len() >= 8 && existing[5] == 0 {
-                                let mut data = existing;
-                                data[5] = 1;
-                                builder.arena_mut().set_type_data(id, &data);
+                            let data = builder.arena_ref().get_type_data(id);
+                            if data.len() >= 8 && data[5] == 0 {
+                                builder.arena_mut().patch_type_data(id, 5, &[1]);
                             }
                         }
                         // Already closed above; skip the common close_node path.
@@ -1330,9 +1313,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 let prev_data = builder.arena_ref().get_type_data(pid);
                                 if prev_data.len() >= 8 {
                                     let prev_sr = StringRef::from_bytes(prev_data);
-                                    let prev_text = builder.arena_ref().get_str(prev_sr);
-                                    let combined = [prev_text, text_value].concat();
-                                    let new_sr = builder.alloc_string(&combined);
+                                    let new_sr = builder.append_to_string(prev_sr, text_value);
                                     let pn = builder.arena_ref().get_node(pid);
                                     builder.update_leaf_full(
                                         pid,
@@ -1493,9 +1474,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 let prev_data = builder.arena_ref().get_type_data(pid);
                                 if prev_data.len() >= 8 {
                                     let prev_sr = StringRef::from_bytes(prev_data);
-                                    let prev_text = builder.arena_ref().get_str(prev_sr);
-                                    let combined = [prev_text, break_text].concat();
-                                    let new_sr = builder.alloc_string(&combined);
+                                    let new_sr = builder.append_to_string(prev_sr, break_text);
                                     let pn = builder.arena_ref().get_node(pid);
                                     builder.update_leaf_full(
                                         pid,
@@ -1574,8 +1553,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 if builder.arena_ref().get_node(node_id).node_type
                                     == MdastNodeType::ListItem as u8
                                 {
-                                    let prev = builder.arena_ref().get_type_data(node_id).to_vec();
-                                    let prev_spread = prev.get(1).copied().unwrap_or(0) != 0;
+                                    let prev_spread = builder
+                                        .arena_ref()
+                                        .get_type_data(node_id)
+                                        .get(1)
+                                        .copied()
+                                        .unwrap_or(0)
+                                        != 0;
                                     let data = ListItemData {
                                         checked: checked_val,
                                         spread: prev_spread,
@@ -1704,9 +1688,7 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 let prev_data = builder.arena_ref().get_type_data(pid);
                                 if prev_data.len() >= 8 {
                                     let prev_sr = StringRef::from_bytes(prev_data);
-                                    let prev_text = builder.arena_ref().get_str(prev_sr);
-                                    let combined = [prev_text, text_value].concat();
-                                    let new_sr = builder.alloc_string(&combined);
+                                    let new_sr = builder.append_to_string(prev_sr, text_value);
                                     let pn = builder.arena_ref().get_node(pid);
                                     builder.update_leaf_full(
                                         pid,
@@ -2155,11 +2137,13 @@ fn normalize_identifier(s: &str) -> String {
             last_was_ws = false;
         }
     }
-    collapsed
-        .trim()
-        .to_lowercase()
-        .to_uppercase()
-        .to_lowercase()
+    let trimmed = collapsed.trim();
+    // Full Unicode case folding needs lower->upper->lower (handles ß/ẞ, final
+    // sigma, ligatures). Only the rare non-ASCII label reaches here; ASCII is
+    // folded allocation-free above.
+    #[allow(clippy::disallowed_methods)]
+    let folded = trimmed.to_lowercase().to_uppercase().to_lowercase();
+    folded
 }
 
 fn heading_level_to_u8(level: HeadingLevel) -> u8 {

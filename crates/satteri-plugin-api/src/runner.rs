@@ -84,7 +84,7 @@ impl PluginRunner {
 
             if has_cmds {
                 // Convert commands to patches and rebuild the arena
-                let patches = commands_to_patches(commands.iter().collect(), &current_arena);
+                let patches = commands_to_patches(&commands, &current_arena);
                 if !patches.is_empty() {
                     match rebuild(&current_arena, &patches) {
                         Ok(rebuilt) => current_arena = rebuilt,
@@ -120,9 +120,9 @@ impl PluginRunner {
 /// SetData commands are skipped (they are applied directly through the DataMap,
 /// not via arena structural mutation).
 /// NewNode::Raw commands are skipped (need parser, Phase 8).
-fn commands_to_patches(commands: Vec<&Command>, arena: &Arena<Mdast>) -> Vec<Patch<Mdast>> {
+fn commands_to_patches(commands: &[Command], arena: &Arena<Mdast>) -> Vec<Patch<Mdast>> {
     commands
-        .into_iter()
+        .iter()
         .filter_map(|cmd| match cmd {
             Command::Replace { node_id, new_node } => built_node_to_arena(new_node, arena.source())
                 .map(|sub| Patch::Replace {

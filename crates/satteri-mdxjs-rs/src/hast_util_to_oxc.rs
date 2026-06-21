@@ -714,6 +714,8 @@ fn transform_mdx_jsx_element<'a>(
                 // `satteri-pulldown-cmark::mdx::PHANTOM_SPACE`) before parsing
                 // so they don't bleed into template-literal cooked values.
                 let owned_buf;
+                // Guarded by the `contains` check: only allocates when a phantom is present.
+                #[allow(clippy::disallowed_methods)]
                 let expr_value: &str = if raw_value.contains('\u{F002}') {
                     owned_buf = raw_value.replace('\u{F002}', "");
                     &owned_buf
@@ -802,6 +804,8 @@ fn transform_mdx_expression<'a>(
     // Drop phantom-space sentinels (U+F002) before handing the expression
     // body to oxc — see `satteri-pulldown-cmark::mdx::PHANTOM_SPACE`.
     let owned_buf;
+    // Guarded by the `contains` check: only allocates when a phantom is present.
+    #[allow(clippy::disallowed_methods)]
     let value: &str = if raw_value.contains('\u{F002}') {
         owned_buf = raw_value.replace('\u{F002}', "");
         &owned_buf
@@ -1185,6 +1189,9 @@ fn parse_style_declarations(input: &str) -> Vec<(String, String)> {
             // Standard CSS property names are case-insensitive, but custom
             // properties (`--*`) are case-sensitive — `--tmLabel` must not
             // become `--tmlabel`, or `var(--tmLabel)` references break.
+            // An owned lowercased copy is required for the returned Vec; custom
+            // properties (`--*`) keep their case. Cold style-attribute path.
+            #[allow(clippy::disallowed_methods)]
             let property = if name.starts_with("--") {
                 name.to_string()
             } else {

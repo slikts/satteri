@@ -5,6 +5,10 @@
 //! `cargo run -p satteri-layout-codegen`); the output is committed to git and a
 //! CI check reruns this and fails on any diff.
 
+// Build-time code generator: allocation-heavy string ops (e.g. `to_uppercase`
+// when emitting JS constant names) have no bearing on runtime performance.
+#![allow(clippy::disallowed_methods)]
+
 mod emit;
 mod schema;
 

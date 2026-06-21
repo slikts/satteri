@@ -1,0 +1,17 @@
+# Performance guardrails (see the project's Rust performance plan).
+# Warn-level/advisory: justify a legitimate exception inline with
+# #[allow(clippy::disallowed_methods, reason = "...")] rather than removing the ban.
+
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "Use rustc_hash::FxHashMap; faster and already standard across this workspace." },
+  { path = "std::collections::HashSet", reason = "Use rustc_hash::FxHashSet; faster and already standard across this workspace." },
+]
+
+disallowed-methods = [
+  { path = "str::to_lowercase", reason = "Allocates and pulls Unicode case tables; prefer eq_ignore_ascii_case / Cow, or make_ascii_lowercase on an owned buffer." },
+  { path = "str::to_uppercase", reason = "Allocates and pulls Unicode case tables; prefer eq_ignore_ascii_case / Cow, or make_ascii_uppercase on an owned buffer." },
+  { path = "str::to_ascii_lowercase", reason = "Allocates a new String; borrow/Cow when unchanged, or make_ascii_lowercase on an owned buffer." },
+  { path = "str::to_ascii_uppercase", reason = "Allocates a new String; borrow/Cow when unchanged, or make_ascii_uppercase on an owned buffer." },
+  { path = "str::replace", reason = "Allocates unconditionally; guard with contains() and borrow when unchanged, or replace in a single scan pass." },
+  { path = "str::replacen", reason = "Allocates unconditionally; guard with contains() and borrow when unchanged." },
+]

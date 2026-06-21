@@ -401,6 +401,9 @@ pub(crate) fn validate_expression_body(
     if !body.contains(PHANTOM_SPACE) {
         return try_parse_expression_body(body, allocator);
     }
+    // Guarded by the `contains` check above: only reached when a phantom space
+    // is actually present, so this allocation is off the common path.
+    #[allow(clippy::disallowed_methods)]
     let clean = body.replace(PHANTOM_SPACE, "");
     let (clean_offset, detail) = try_parse_expression_body(&clean, allocator)?;
     // Re-walk `body`, skipping phantoms, until the cleaned position reaches the

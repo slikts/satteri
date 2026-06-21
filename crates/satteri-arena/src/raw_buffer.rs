@@ -36,7 +36,7 @@ impl<K: ArenaKind> Arena<K> {
         // Sort node_data entries by node_id for deterministic output.
         let mut node_data_entries: Vec<(u32, &Vec<u8>)> =
             self.node_data.iter().map(|(k, v)| (*k, v)).collect();
-        node_data_entries.sort_by_key(|(id, _)| *id);
+        node_data_entries.sort_unstable_by_key(|(id, _)| *id);
         let node_data_count = node_data_entries.len() as u32;
         let node_data_section_bytes: usize = node_data_entries
             .iter()

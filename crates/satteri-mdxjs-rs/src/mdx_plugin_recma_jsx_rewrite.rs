@@ -160,7 +160,7 @@ pub fn mdx_plugin_recma_jsx_rewrite<'a>(
                 defaults.push((tag.clone(), tag.clone()));
             }
         }
-        defaults.sort_by(|a, b| a.0.cmp(&b.0));
+        defaults.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         for (name, span) in &scope.components {
             if !scope.defined.contains(name.as_str()) && !top_level_bindings.contains(name.as_str())
@@ -214,7 +214,7 @@ pub fn mdx_plugin_recma_jsx_rewrite<'a>(
                     all_names.push(obj_name.clone());
                 }
             }
-            all_names.sort();
+            all_names.sort_unstable();
 
             if !all_names.is_empty() {
                 if has_defaults {
@@ -592,12 +592,13 @@ fn collect_jsx_refs_in_element(
             // Lowercase identifier like `h1`, `p`, `div`, it's a literal tag.
             let name = ident.name.as_str();
             if is_literal_name(name) {
-                let entry = info
-                    .literal_tags
-                    .entry(name.to_string())
-                    .or_insert(is_explicit);
-                if !is_explicit {
-                    *entry = false;
+                if let Some(entry) = info.literal_tags.get_mut(name) {
+                    if !is_explicit {
+                        *entry = false;
+                    }
+                } else {
+                    // Only allocate the owned key on first insertion.
+                    info.literal_tags.insert(name.to_string(), is_explicit);
                 }
             }
         }
@@ -605,12 +606,13 @@ fn collect_jsx_refs_in_element(
             let name = ident.name.as_str();
             if is_literal_name(name) {
                 // Literal tag referenced through IdentifierReference
-                let entry = info
-                    .literal_tags
-                    .entry(name.to_string())
-                    .or_insert(is_explicit);
-                if !is_explicit {
-                    *entry = false;
+                if let Some(entry) = info.literal_tags.get_mut(name) {
+                    if !is_explicit {
+                        *entry = false;
+                    }
+                } else {
+                    // Only allocate the owned key on first insertion.
+                    info.literal_tags.insert(name.to_string(), is_explicit);
                 }
             } else {
                 // Component (uppercase) like `Foo`

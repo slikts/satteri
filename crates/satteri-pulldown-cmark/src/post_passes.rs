@@ -30,10 +30,6 @@ pub(crate) const MDX_EXPLICIT_JSX_DATA: &[u8] = b"{\"_mdxExplicitJsx\":true}";
 /// allowed (skipped) so `https://.foo` (parts=[``, `foo`]) and `https://../`
 /// (parts=[``, ``, ``]) both pass.
 fn is_correct_domain_for_fnr(domain: &[u8]) -> bool {
-    let parts: Vec<&[u8]> = domain.split(|&b| b == b'.').collect();
-    if parts.len() < 2 {
-        return false;
-    }
     let check = |p: &[u8]| -> bool {
         if p.is_empty() {
             return true;
@@ -43,7 +39,13 @@ fn is_correct_domain_for_fnr(domain: &[u8]) -> bool {
         }
         p.iter().any(|&b| b.is_ascii_alphanumeric())
     };
-    check(parts[parts.len() - 1]) && check(parts[parts.len() - 2])
+    // Only the last two dot-separated parts matter; scan from the end so the
+    // full split is never allocated. Fewer than two parts means not a domain.
+    let mut parts = domain.rsplit(|&b| b == b'.');
+    match (parts.next(), parts.next()) {
+        (Some(last), Some(penult)) => check(last) && check(penult),
+        _ => false,
+    }
 }
 
 /// Mirror `mdast-util-gfm-autolink-literal`'s `splitUrl`: trim trailing chars
@@ -1031,9 +1033,7 @@ pub(crate) fn emit_text_merging(
             let prev_data = builder.arena_ref().get_type_data(pid);
             if prev_data.len() >= 8 {
                 let prev_sr = StringRef::from_bytes(prev_data);
-                let prev_text = builder.arena_ref().get_str(prev_sr);
-                let combined = [prev_text, text_value].concat();
-                let new_sr = builder.alloc_string(&combined);
+                let new_sr = builder.append_to_string(prev_sr, text_value);
                 let pn = builder.arena_ref().get_node(pid);
                 builder.update_leaf_full(
                     pid,

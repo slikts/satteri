@@ -60,6 +60,10 @@ pub fn property_to_attribute(name: &str, in_svg: bool) -> Cow<'_, str> {
     }
 
     if is_known_lowercased_html_property(name) {
+        // These are camelCase React property names (e.g. `colSpan`) that always
+        // contain uppercase, so lowercasing necessarily allocates. A static
+        // name->&'static str map could avoid it; warm-not-hot, left as-is.
+        #[allow(clippy::disallowed_methods)]
         return Cow::Owned(name.to_ascii_lowercase());
     }
 

@@ -448,23 +448,28 @@ fn apply_hast_element_property(
     value_type: u8,
     value_str: &str,
 ) -> Result<(), CommandError> {
-    let old_data = arena.get_type_data(node_id).to_vec();
-    if old_data.len() < 16 {
-        return Err(CommandError::TypeDataTooShort);
-    }
-
-    let old_prop_count = u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
-
-    let mut found_index: Option<usize> = None;
-    for i in 0..old_prop_count {
-        let base = 16 + i * 20;
-        let name_off = u32::from_le_bytes(old_data[base..base + 4].try_into().unwrap());
-        let name_len = u32::from_le_bytes(old_data[base + 4..base + 8].try_into().unwrap());
-        let existing_name = arena.get_str(StringRef::new(name_off, name_len));
-        if existing_name == prop_name {
-            found_index = Some(i);
-            break;
+    // Read-only phase: locate the property and capture the count before any
+    // `alloc_string` mutates the arena, so the type-data borrow can be released
+    // without cloning the whole blob.
+    let old_prop_count;
+    let found_index;
+    {
+        let old_data = arena.get_type_data(node_id);
+        if old_data.len() < 16 {
+            return Err(CommandError::TypeDataTooShort);
         }
+        old_prop_count = u32::from_le_bytes(old_data[8..12].try_into().unwrap()) as usize;
+        let mut found = None;
+        for i in 0..old_prop_count {
+            let base = 16 + i * 20;
+            let name_off = u32::from_le_bytes(old_data[base..base + 4].try_into().unwrap());
+            let name_len = u32::from_le_bytes(old_data[base + 4..base + 8].try_into().unwrap());
+            if arena.get_str(StringRef::new(name_off, name_len)) == prop_name {
+                found = Some(i);
+                break;
+            }
+        }
+        found_index = found;
     }
 
     let name_ref = arena.alloc_string(prop_name);
@@ -475,23 +480,27 @@ fn apply_hast_element_property(
     };
 
     if let Some(idx) = found_index {
-        let mut new_data = old_data;
-        let base = 16 + idx * 20;
-        new_data[base..base + 4].copy_from_slice(&name_ref.offset.to_le_bytes());
-        new_data[base + 4..base + 8].copy_from_slice(&name_ref.len.to_le_bytes());
-        new_data[base + 8] = value_type;
-        new_data[base + 9..base + 12].copy_from_slice(&[0u8; 3]);
-        new_data[base + 12..base + 16].copy_from_slice(&val_ref.offset.to_le_bytes());
-        new_data[base + 16..base + 20].copy_from_slice(&val_ref.len.to_le_bytes());
-        arena.set_type_data(node_id, &new_data);
+        // The record length is unchanged, so overwrite the 20 bytes in place
+        // instead of cloning + re-appending the whole blob.
+        let mut record = [0u8; 20];
+        record[0..4].copy_from_slice(&name_ref.offset.to_le_bytes());
+        record[4..8].copy_from_slice(&name_ref.len.to_le_bytes());
+        record[8] = value_type;
+        // record[9..12] stays zero (padding).
+        record[12..16].copy_from_slice(&val_ref.offset.to_le_bytes());
+        record[16..20].copy_from_slice(&val_ref.len.to_le_bytes());
+        arena.patch_type_data(node_id, 16 + idx * 20, &record);
     } else {
         let new_prop_count = (old_prop_count + 1) as u32;
         let mut new_data = Vec::with_capacity(16 + new_prop_count as usize * 20);
-        new_data.extend_from_slice(&old_data[0..8]);
-        new_data.extend_from_slice(&new_prop_count.to_le_bytes());
-        new_data.extend_from_slice(&0u32.to_le_bytes());
-        if old_prop_count > 0 {
-            new_data.extend_from_slice(&old_data[16..16 + old_prop_count * 20]);
+        {
+            let old_data = arena.get_type_data(node_id);
+            new_data.extend_from_slice(&old_data[0..8]);
+            new_data.extend_from_slice(&new_prop_count.to_le_bytes());
+            new_data.extend_from_slice(&0u32.to_le_bytes());
+            if old_prop_count > 0 {
+                new_data.extend_from_slice(&old_data[16..16 + old_prop_count * 20]);
+            }
         }
         new_data.extend_from_slice(&name_ref.offset.to_le_bytes());
         new_data.extend_from_slice(&name_ref.len.to_le_bytes());

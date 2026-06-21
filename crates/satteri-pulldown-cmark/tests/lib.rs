@@ -1,3 +1,7 @@
+// HTML-normalization helpers in this test use `str::replace`; this is test-only
+// fixture massaging, not perf-sensitive runtime code.
+#![allow(clippy::disallowed_methods)]
+
 use satteri_pulldown_cmark::Options;
 
 #[rustfmt::skip]

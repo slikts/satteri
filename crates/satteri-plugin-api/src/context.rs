@@ -46,6 +46,12 @@ impl<'a> PluginContext<'a> {
 
     /// Extract all text content from a subtree (depth-first concatenation)
     pub fn extract_text(&self, node_id: u32) -> String {
+        let mut out = String::new();
+        self.extract_text_into(node_id, &mut out);
+        out
+    }
+
+    fn extract_text_into(&self, node_id: u32, out: &mut String) {
         use satteri_ast::mdast::codec::decode_string_ref_data;
         use satteri_ast::mdast::MdastNodeType;
         let node = self.arena.get_node(node_id);
@@ -55,16 +61,13 @@ impl<'a> PluginContext<'a> {
             let data = self.arena.get_type_data(node_id);
             if !data.is_empty() {
                 let string_ref = decode_string_ref_data(data);
-                return self.arena.get_str(string_ref).to_string();
+                out.push_str(self.arena.get_str(string_ref));
             }
-            return String::new();
+            return;
         }
-        let children = self.arena.get_children(node_id).to_vec();
-        children
-            .iter()
-            .map(|&child_id| self.extract_text(child_id))
-            .collect::<Vec<_>>()
-            .join("")
+        for &child_id in self.arena.get_children(node_id) {
+            self.extract_text_into(child_id, out);
+        }
     }
 
     pub fn set_data(&mut self, node_id: u32, key: &str, value: DataValue) {

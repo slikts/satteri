@@ -382,9 +382,25 @@ fn resolve_backref(backref: &Backref, number: usize, k: usize) -> String {
             } else {
                 number.to_string()
             };
-            tpl.replace("{reference}", &token)
+            // Cold footnote-backref path; substitutes the placeholder once.
+            #[allow(clippy::disallowed_methods)]
+            let result = tpl.replace("{reference}", &token);
+            result
         }
         Backref::Callback(cb) => cb(number, k),
+    }
+}
+
+/// Lowercase an ASCII identifier, borrowing when it has no ASCII uppercase
+/// (the common case) so footnote ids allocate nothing.
+fn ascii_lowercase_cow(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.bytes().any(|b| b.is_ascii_uppercase()) {
+        // Only allocates when an uppercase byte is actually present.
+        #[allow(clippy::disallowed_methods)]
+        let lowered = s.to_ascii_lowercase();
+        std::borrow::Cow::Owned(lowered)
+    } else {
+        std::borrow::Cow::Borrowed(s)
     }
 }
 
@@ -494,7 +510,7 @@ fn collect_refs(view: &Arena<Mdast>) -> CollectedRefs<'_> {
             _ => {}
         }
     }
-    def_nodes.sort_by_key(|&id| view.get_node(id).start_offset);
+    def_nodes.sort_unstable_by_key(|&id| view.get_node(id).start_offset);
     for id in &def_nodes {
         let data = view.get_type_data(*id);
         let dd = decode_definition_data(data);
@@ -1259,6 +1275,9 @@ fn convert_node(
             if matches!(action, ChildrenAction::Recurse) {
                 let value = view.get_str(string_ref);
                 if value.contains('\n') {
+                    // Guarded by the `contains` check: only allocates when the
+                    // code value actually has a newline to normalize.
+                    #[allow(clippy::disallowed_methods)]
                     let normalized = value.replace('\n', " ");
                     let text_id = add_text_node(builder, &normalized);
                     copy_position_to(text_id, node_id, view, builder);
@@ -1509,7 +1528,7 @@ fn convert_node(
                 // remark lowercases the identifier when building URL/id
                 // attributes so fragment targets collide-resist regardless of
                 // how the author cased the source label.
-                let safe_id = identifier.to_ascii_lowercase();
+                let safe_id = ascii_lowercase_cow(identifier);
                 let occurrence = ctx
                     .footnote_ref_occurrence
                     .get(&node_id)
@@ -1944,7 +1963,7 @@ fn emit_gfm_footnotes_section(
             .and_then(|m| m.get(identifier).copied())
             .expect("footnote identifier missing from collected numbers");
 
-        let safe_id = identifier.to_ascii_lowercase();
+        let safe_id = ascii_lowercase_cow(identifier);
         let li_id = format!("user-content-fn-{}", safe_id);
         let li_id_ref = builder.alloc_string(&li_id);
         let li_props = build_props(builder, &[("id", PROP_STRING, li_id_ref)]);

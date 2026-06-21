@@ -27,14 +27,27 @@ pub fn hast_arena_to_html(arena: &Arena<Hast>) -> String {
 /// treat it as an attribute-value delimiter). Unlike body-text escaping,
 /// `<` and `>` are kept as-is since they're valid inside attribute values.
 fn escape_html_attr_value(out: &mut String, value: &str) {
-    for c in value.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            '`' => out.push_str("&#x60;"),
-            _ => out.push(c),
+    // The four escaped characters are all single ASCII bytes, so scan the bytes
+    // and bulk-copy the unescaped runs between them with `push_str` instead of
+    // decoding and pushing every char individually.
+    let bytes = value.as_bytes();
+    let mut run_start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let escaped = match b {
+            b'&' => "&amp;",
+            b'"' => "&quot;",
+            b'\'' => "&#x27;",
+            b'`' => "&#x60;",
+            _ => continue,
+        };
+        if run_start < i {
+            out.push_str(&value[run_start..i]);
         }
+        out.push_str(escaped);
+        run_start = i + 1;
+    }
+    if run_start < bytes.len() {
+        out.push_str(&value[run_start..]);
     }
 }
 

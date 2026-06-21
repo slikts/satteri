@@ -2471,7 +2471,14 @@ fn find_directives(
 /// Turn JSX text into a string.
 fn jsx_text_to_value(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
-    let value = value.replace('\t', " ");
+    // Tabs collapse to spaces, but only allocate when a tab is present; source
+    // is already tab-expanded upstream, so most text reaches here tab-free.
+    let value: std::borrow::Cow<str> = if value.contains('\t') {
+        #[allow(clippy::disallowed_methods)]
+        std::borrow::Cow::Owned(value.replace('\t', " "))
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    };
     let bytes = value.as_bytes();
     let mut index = 0;
     let mut start = 0;

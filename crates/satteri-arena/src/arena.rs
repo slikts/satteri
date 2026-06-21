@@ -231,11 +231,37 @@ impl<K: ArenaKind> Arena<K> {
         StringRef::new(offset, len)
     }
 
+    /// Append `suffix` to a previously-allocated string, returning the ref to
+    /// the combined string. When `prev` is the most recent thing appended to
+    /// `source` (the common case for adjacent text-node merges), the suffix is
+    /// pushed in place and only `suffix.len()` bytes are written. Otherwise it
+    /// falls back to materialising the concatenation once. This keeps a run of
+    /// N consecutive merges at O(total length) instead of O(N²).
+    pub fn append_to_string(&mut self, prev: StringRef, suffix: &str) -> StringRef {
+        let prev_end = prev.offset as usize + prev.len as usize;
+        if prev_end == self.source.len() {
+            self.source.push_str(suffix);
+            StringRef::new(prev.offset, prev.len + suffix.len() as u32)
+        } else {
+            let combined = [self.get_str(prev), suffix].concat();
+            self.alloc_string(&combined)
+        }
+    }
+
     pub fn get_type_data(&self, node_id: u32) -> &[u8] {
         let node = &self.nodes[node_id as usize];
         let start = node.data_offset as usize;
         let end = start + node.data_len as usize;
         &self.type_data[start..end]
+    }
+
+    /// Overwrite `bytes.len()` bytes of a node's existing type-data blob in
+    /// place, starting `byte_offset` into the blob. The blob length is
+    /// unchanged, so nothing is appended (unlike re-running `set_type_data`,
+    /// which copies the whole blob to the tail and orphans the old bytes).
+    pub fn patch_type_data(&mut self, node_id: u32, byte_offset: usize, bytes: &[u8]) {
+        let start = self.nodes[node_id as usize].data_offset as usize + byte_offset;
+        self.type_data[start..start + bytes.len()].copy_from_slice(bytes);
     }
 }
 

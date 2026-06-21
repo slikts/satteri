@@ -216,6 +216,13 @@ impl<K: ArenaKind> ArenaBuilder<K> {
         self.arena.alloc_string(s)
     }
 
+    /// Extend a previously-allocated string with `suffix` (see
+    /// `Arena::append_to_string`). Used to coalesce adjacent text nodes
+    /// without re-copying the accumulated run on every merge.
+    pub fn append_to_string(&mut self, prev: StringRef, suffix: &str) -> StringRef {
+        self.arena.append_to_string(prev, suffix)
+    }
+
     pub fn current_node_id(&self) -> u32 {
         self.stack
             .last()
