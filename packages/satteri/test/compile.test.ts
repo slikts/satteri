@@ -114,6 +114,42 @@ describe("features.superscript / features.subscript", () => {
   });
 });
 
+describe("features.headingAttributes", () => {
+  test("emits id and class", () => {
+    const result = markdownToHtml("## Heading {#explicit .custom}", {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h2 id="explicit" class="custom">Heading</h2>');
+  });
+
+  test("emits custom attributes", () => {
+    const result = markdownToHtml("# Title {#t data-role=heading flag}", {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h1 id="t" data-role="heading" flag="">Title</h1>');
+  });
+
+  test("disabled by default: attribute block stays literal", () => {
+    const result = markdownToHtml("## Heading {#explicit .custom}");
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<h2>Heading {#explicit .custom}</h2>");
+  });
+
+  test("mdast exposes attributes via data.hProperties", () => {
+    const ast = markdownToMdast("## Heading {#explicit .custom}", {
+      features: { headingAttributes: true },
+    });
+    expect(ast.type).toBe("root");
+    if (ast.type !== "root") return;
+    const heading = ast.children[0];
+    expect(heading?.type).toBe("heading");
+    if (heading?.type !== "heading") return;
+    expect(heading.data?.hProperties).toEqual({ id: "explicit", className: ["custom"] });
+  });
+});
+
 describe("features.math.singleDollarTextMath", () => {
   test("default keeps single-$ as inline math", () => {
     const result = markdownToHtml("inline $x$ here", { features: { math: true } });

@@ -3037,6 +3037,10 @@ impl<'a> Allocations<'a> {
         core::mem::take(&mut self.alignments[ix.0])
     }
 
+    pub fn heading_ref(&self, ix: HeadingIndex) -> &HeadingAttributes<'a> {
+        &self.headings[ix.0.get() - 1]
+    }
+
     #[cfg(feature = "mdx")]
     pub fn allocate_jsx_element(&mut self, data: JsxElementData<'a>) -> JsxElementIndex {
         let ix = self.jsx_elements.len();
