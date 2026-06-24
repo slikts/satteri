@@ -1,6 +1,6 @@
-# Sätteri <img align="right" valign="center" width="80" height="80" src="https://raw.githubusercontent.com/bruits/satteri/main/.github/assets/logo.svg" alt="Sätteri logo" />
+# Sätteri <img align="right" valign="center" width="80" height="80" src="https://raw.githubusercontent.com/bruits/satteri/main/.github/assets/logo_light.svg#gh-dark-mode-only" alt="Sätteri logo" /> <img align="right" valign="center" width="80" height="80" src="https://raw.githubusercontent.com/bruits/satteri/main/.github/assets/logo.svg#gh-light-mode-only" alt="Sätteri logo" />
 
-[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/bruits/satteri?utm_source=badge)
+> Here the page is set, the loose locked fast, the words marked down.
 
 High-performance Markdown and MDX processing. Parses and compiles in Rust, runs your plugins in JavaScript.
 
@@ -26,10 +26,6 @@ And the following npm package:
 | ---------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | [`satteri`][npm] | TypeScript layer: plugin API and top-level functions | <a href="https://www.npmjs.com/package/satteri"><img alt="Satteri npm Version" src="https://img.shields.io/npm/v/satteri"></a> | [README](./packages/satteri/README.md) |
 
-## Contributing
-
-Contributions are welcome! See our [Contributor Guide](https://github.com/bruits/satteri/blob/main/CONTRIBUTING.md) for help getting started.
-
 ## Acknowledgements
 
 Sätteri builds on the work and knowledge of several open-source projects:
@@ -51,7 +47,3 @@ Sätteri is an open-source project born from [Bruits](https://bruits.org/), a Ru
 [Lightning CSS]: https://lightningcss.dev
 [mdxjs-rs]: https://github.com/wooorm/mdxjs-rs
 [npm]: https://www.npmjs.com/package/satteri
-
-## License
-
-Sätteri is licensed under the MIT License. See [LICENSE](https://github.com/bruits/satteri/blob/main/LICENSE) for details.
