@@ -1,5 +1,6 @@
 ---
 title: "Prologue"
+section: "getting-started"
 ---
 
 Sätteri is a Markdown processing pipeline. The parser and the AST live in Rust; the plugin layer lives in JavaScript. You write your transforms in TypeScript and pay close to nothing for the language boundary.

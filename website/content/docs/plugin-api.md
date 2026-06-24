@@ -122,8 +122,18 @@ To register multiple filtered visitors for the same node type, pass an array:
 const plugin = defineHastPlugin({
   name: "headings-and-links",
   element: [
-    { filter: ["h1", "h2", "h3"], visit(node, ctx) { /* headings */ } },
-    { filter: ["a"], visit(node, ctx) { /* links */ } },
+    {
+      filter: ["h1", "h2", "h3"],
+      visit(node, ctx) {
+        /* headings */
+      },
+    },
+    {
+      filter: ["a"],
+      visit(node, ctx) {
+        /* links */
+      },
+    },
   ],
 });
 ```

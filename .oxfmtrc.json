@@ -4,6 +4,8 @@
     "target",
     "dist",
     "crates/**/*",
+    "!crates/*/README.md",
+    "!crates/*/readme.md",
     "node_modules",
     "satteri_napi.*",
     "packages/satteri/index.d.ts",

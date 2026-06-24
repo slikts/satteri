@@ -66,13 +66,13 @@ const { html } = await markdownToHtml(source, { mdastPlugins: [asyncPlugin] });
 
 `CompileOptions` is shared by `markdownToHtml` and `mdxToJs` (which also takes the [MDX options](#mdx-options) below).
 
-| Option         | Type                | Notes                                                          |
-| -------------- | ------------------- | -------------------------------------------------------------- |
+| Option         | Type                 | Notes                                                                       |
+| -------------- | -------------------- | --------------------------------------------------------------------------- |
 | `mdastPlugins` | `MdastPluginInput[]` | MDAST plugins, or factories that return one. See [Plugins](/docs/plugins/). |
-| `hastPlugins`  | `HastPluginInput[]`  | HAST plugins, or factories.                                    |
-| `features`     | `Features`          | Parser extensions. See [Features](/docs/features/).            |
-| `fileURL`      | `URL`               | The document's URL, surfaced to plugins as `ctx.fileURL`.      |
-| `data`         | `Data`              | Initial [data bag](#data).                                     |
+| `hastPlugins`  | `HastPluginInput[]`  | HAST plugins, or factories.                                                 |
+| `features`     | `Features`           | Parser extensions. See [Features](/docs/features/).                         |
+| `fileURL`      | `URL`                | The document's URL, surfaced to plugins as `ctx.fileURL`.                   |
+| `data`         | `Data`               | Initial [data bag](#data).                                                  |
 
 ### fileURL
 
@@ -119,12 +119,12 @@ mdxToJs(source, {
 });
 ```
 
-| Field           | Type       | Notes                                                              |
-| --------------- | ---------- | ------------------------------------------------------------------ |
-| `component`     | `string`   | Element/component the static HTML is wrapped in.                   |
-| `prop`          | `string`   | Prop the HTML string is passed on.                                 |
-| `wrapPropValue` | `boolean`  | When `true`, wrap the value as `{{ __html: "…" }}`. Default: `false`. |
-| `ignoreElements` | `string[]` | Tag names to keep as JSX calls instead of collapsing.             |
+| Field            | Type       | Notes                                                                 |
+| ---------------- | ---------- | --------------------------------------------------------------------- |
+| `component`      | `string`   | Element/component the static HTML is wrapped in.                      |
+| `prop`           | `string`   | Prop the HTML string is passed on.                                    |
+| `wrapPropValue`  | `boolean`  | When `true`, wrap the value as `{{ __html: "…" }}`. Default: `false`. |
+| `ignoreElements` | `string[]` | Tag names to keep as JSX calls instead of collapsing.                 |
 
 Elements that can be overridden at runtime via `export const components` are kept as JSX automatically, so component overrides still apply.
 
@@ -134,19 +134,19 @@ This optimization was originally developed by [Bjorn Lu](https://bjornlu.com) fo
 
 The remaining MDX options control the generated JavaScript and are named after the standard `@mdx-js/mdx` compiler options (Sätteri's MDX compiler is a separate implementation — see [Divergences](/docs/divergences/)):
 
-| Option                     | Type                          | Default                 | Notes                                                            |
-| -------------------------- | ----------------------------- | ----------------------- | ---------------------------------------------------------------- |
-| `jsx`                      | `boolean`                     | `false`                 | Keep JSX instead of compiling it to function calls.              |
-| `jsxRuntime`               | `"automatic" \| "classic"`    | `"automatic"`           | JSX runtime.                                                     |
-| `jsxImportSource`          | `string`                      | `"react"`               | Where the automatic runtime is imported from (e.g. `"preact"`).  |
-| `providerImportSource`     | `string`                      | —                       | Where the component provider is imported from.                   |
-| `development`              | `boolean`                     | `false`                 | Development mode (adds debugging info).                          |
-| `pragma`                   | `string`                      | `"React.createElement"` | Classic-runtime JSX pragma.                                      |
-| `pragmaFrag`               | `string`                      | `"React.Fragment"`      | Classic-runtime fragment pragma.                                 |
-| `pragmaImportSource`       | `string`                      | `"react"`               | Where the classic pragma is imported from.                      |
-| `outputFormat`             | `"program" \| "function-body"` | `"program"`            | `program` emits an ES module; `function-body` emits a body for `new Function()` / `evaluate`. |
-| `elementAttributeNameCase` | `"react" \| "html"`           | `"react"`               | Casing for attributes on rehype-produced elements.              |
-| `stylePropertyNameCase`    | `"dom" \| "css"`              | `"dom"`                 | Casing for keys in parsed `style` objects.                      |
+| Option                     | Type                           | Default                 | Notes                                                                                         |
+| -------------------------- | ------------------------------ | ----------------------- | --------------------------------------------------------------------------------------------- |
+| `jsx`                      | `boolean`                      | `false`                 | Keep JSX instead of compiling it to function calls.                                           |
+| `jsxRuntime`               | `"automatic" \| "classic"`     | `"automatic"`           | JSX runtime.                                                                                  |
+| `jsxImportSource`          | `string`                       | `"react"`               | Where the automatic runtime is imported from (e.g. `"preact"`).                               |
+| `providerImportSource`     | `string`                       | —                       | Where the component provider is imported from.                                                |
+| `development`              | `boolean`                      | `false`                 | Development mode (adds debugging info).                                                       |
+| `pragma`                   | `string`                       | `"React.createElement"` | Classic-runtime JSX pragma.                                                                   |
+| `pragmaFrag`               | `string`                       | `"React.Fragment"`      | Classic-runtime fragment pragma.                                                              |
+| `pragmaImportSource`       | `string`                       | `"react"`               | Where the classic pragma is imported from.                                                    |
+| `outputFormat`             | `"program" \| "function-body"` | `"program"`             | `program` emits an ES module; `function-body` emits a body for `new Function()` / `evaluate`. |
+| `elementAttributeNameCase` | `"react" \| "html"`            | `"react"`               | Casing for attributes on rehype-produced elements.                                            |
+| `stylePropertyNameCase`    | `"dom" \| "css"`               | `"dom"`                 | Casing for keys in parsed `style` objects.                                                    |
 
 ## Trees without compiling
 
@@ -181,3 +181,7 @@ const { default: Content } = evaluate("# Hello\n\n<Sparkle />", { ...runtime });
 ```
 
 Like the others, it returns a `Promise` when async plugins are used.
+
+## Security
+
+MDX is a programming language — `mdxToJs` turns it into JavaScript, and `evaluate` runs that JavaScript. Treat MDX like any code you execute: don't compile or evaluate MDX from authors you don't trust.
