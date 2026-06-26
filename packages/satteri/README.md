@@ -57,7 +57,7 @@ This README covers the basics. The full documentation covers the complete API, t
 
 - **[Documentation home](https://satteri.bruits.org/docs/)** — start here
 - [Quick start](https://satteri.bruits.org/docs/quick-start/)
-- [Compiling](https://satteri.bruits.org/docs/compile/) — functions, options, and MDX settings
+- [Entry points](https://satteri.bruits.org/docs/entry-points/) — the compile, MDX, and tree functions
 - [Plugins](https://satteri.bruits.org/docs/plugins/) and [Plugin API](https://satteri.bruits.org/docs/plugin-api/)
 - [Features](https://satteri.bruits.org/docs/features/) — GFM, math, directives, and more
 
