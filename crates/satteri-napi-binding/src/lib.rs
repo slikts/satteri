@@ -446,10 +446,22 @@ pub struct JsSubscription {
 }
 
 /// Parse markdown source into an MDAST arena handle.
+///
+/// `track_positions` (default `true`) controls whether `position` is recorded
+/// on nodes. The plugin pipeline passes `false` when no plugin reads positions,
+/// skipping the `LineIndex` build + per-node line/column lookups (~15% of parse).
 #[napi]
-pub fn create_mdast_handle(source: String, features: Option<JsFeatures>) -> Result<MdastHandle> {
+pub fn create_mdast_handle(
+    source: String,
+    features: Option<JsFeatures>,
+    track_positions: Option<bool>,
+) -> Result<MdastHandle> {
     let opts = features_to_options(features, false);
-    let (mut arena, _) = satteri_pulldown_cmark::parse(&source, opts);
+    let (mut arena, _) = if track_positions.unwrap_or(true) {
+        satteri_pulldown_cmark::parse(&source, opts)
+    } else {
+        satteri_pulldown_cmark::parse_no_positions(&source, opts)
+    };
     arena.mdx = false;
     arena.parse_options = opts.bits();
     Ok(External::new(Mutex::new(arena)))
@@ -461,9 +473,14 @@ pub fn create_mdast_handle(source: String, features: Option<JsFeatures>) -> Resu
 pub fn create_mdx_mdast_handle(
     source: String,
     features: Option<JsFeatures>,
+    track_positions: Option<bool>,
 ) -> Result<MdastHandle> {
     let opts = features_to_options(features, true);
-    let (mut arena, mdx_errors) = satteri_pulldown_cmark::parse(&source, opts);
+    let (mut arena, mdx_errors) = if track_positions.unwrap_or(true) {
+        satteri_pulldown_cmark::parse(&source, opts)
+    } else {
+        satteri_pulldown_cmark::parse_no_positions(&source, opts)
+    };
     if let Some((offset, msg)) = mdx_errors.first() {
         return Err(napi::Error::from_reason(
             satteri_mdxjs::parse_error_to_message(&source, *offset, msg).to_string(),

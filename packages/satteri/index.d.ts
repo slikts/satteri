@@ -77,14 +77,20 @@ export declare function convertMdastToHastHandle(handle: MdastHandle, convertOpt
  */
 export declare function createHastHandle(source: string, features?: JsFeatures | undefined | null, convertOptions?: JsConvertOptions | undefined | null): HastHandle
 
-/** Parse markdown source into an MDAST arena handle. */
-export declare function createMdastHandle(source: string, features?: JsFeatures | undefined | null): MdastHandle
+/**
+ * Parse markdown source into an MDAST arena handle.
+ *
+ * `track_positions` (default `true`) controls whether `position` is recorded
+ * on nodes. The plugin pipeline passes `false` when no plugin reads positions,
+ * skipping the `LineIndex` build + per-node line/column lookups (~15% of parse).
+ */
+export declare function createMdastHandle(source: string, features?: JsFeatures | undefined | null, trackPositions?: boolean | undefined | null): MdastHandle
 
 /** Parse MDX source and convert to HAST. Returns an opaque handle. */
 export declare function createMdxHastHandle(source: string, features?: JsFeatures | undefined | null, convertOptions?: JsConvertOptions | undefined | null): HastHandle
 
 /** Parse MDX source into an MDAST arena handle. */
-export declare function createMdxMdastHandle(source: string, features?: JsFeatures | undefined | null): MdastHandle
+export declare function createMdxMdastHandle(source: string, features?: JsFeatures | undefined | null, trackPositions?: boolean | undefined | null): MdastHandle
 
 /**
  * Release a handle's arena memory. The handle becomes empty but remains

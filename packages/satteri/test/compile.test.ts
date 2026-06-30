@@ -1707,3 +1707,69 @@ describe("smartPunctuation options", () => {
     expect(js).toContain("\u201d");
   });
 });
+
+describe("per-plugin position opt-in", () => {
+  const SOURCE = "# Hello\n\nWorld";
+
+  test("node.position is undefined when no plugin opts in", () => {
+    let seen: unknown = "unset";
+    markdownToHtml(SOURCE, {
+      mdastPlugins: [
+        defineMdastPlugin({
+          name: "reader",
+          heading(node) {
+            seen = node.position;
+          },
+        }),
+      ],
+    });
+    expect(seen).toBeUndefined();
+  });
+
+  test("node.position is populated when a plugin sets options.position", () => {
+    let seen: { start: { line: number } } | undefined;
+    markdownToHtml(SOURCE, {
+      mdastPlugins: [
+        defineMdastPlugin({
+          name: "reader",
+          options: { position: true },
+          heading(node) {
+            seen = node.position;
+          },
+        }),
+      ],
+    });
+    expect(seen?.start.line).toBe(1);
+  });
+
+  test("one opted-in plugin enables positions for the whole pipeline", () => {
+    let mdastSeen: unknown = "unset";
+    let hastSeen: { start: { line: number } } | undefined;
+    markdownToHtml(SOURCE, {
+      mdastPlugins: [
+        defineMdastPlugin({
+          name: "no-opt",
+          heading(node) {
+            mdastSeen = node.position;
+          },
+        }),
+      ],
+      hastPlugins: [
+        defineHastPlugin({
+          name: "opt-in",
+          options: { position: true },
+          element: {
+            filter: ["h1"],
+            visit(node) {
+              hastSeen = node.position;
+            },
+          },
+        }),
+      ],
+    });
+    // A hast plugin opting in flips mdast tracking on too, so the earlier
+    // mdast plugin observes positions even though it didn't ask.
+    expect(mdastSeen).toBeDefined();
+    expect(hastSeen?.start.line).toBe(1);
+  });
+});

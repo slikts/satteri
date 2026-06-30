@@ -50,6 +50,7 @@ import {
   asArray,
   makeRequireNid,
   mergeAndReset,
+  type PluginOptions,
   unencodableContentError,
 } from "../visitor-shared.js";
 import { LazyChildResolver } from "../lazy-child-resolver.js";
@@ -337,6 +338,8 @@ type MdastVisitorFn<N extends MdastNode = MdastNode> = (
 ) => MdastVisitorResult | Promise<MdastVisitorResult>;
 
 export interface MdastPluginInstance {
+  /** Plugin-level configuration (e.g. `{ position: true }` to read positions). */
+  options?: PluginOptions;
   paragraph?: MdastVisitorFn<Paragraph>;
   heading?: MdastVisitorFn<Heading>;
   thematicBreak?: MdastVisitorFn<ThematicBreak>;

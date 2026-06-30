@@ -581,7 +581,9 @@ export function markdownToHtml(
   source: string,
   options: CompileOptions = {},
 ): MarkdownToHtmlResult | Promise<MarkdownToHtmlResult> {
-  const { mdastPlugins = [], hastPlugins = [], features, fileURL, data = {} } = options;
+  const { features, fileURL, data = {} } = options;
+  let mdastPlugins: MdastPluginInput[] = options.mdastPlugins ?? [];
+  let hastPlugins: HastPluginInput[] = options.hastPlugins ?? [];
   const hastMayHaveStubs = hastPlugins.length > 0;
   const { features: nativeFeatures, convertOptions: nativeConvertOptions } =
     featuresToNative(features);
@@ -594,12 +596,22 @@ export function markdownToHtml(
     return { html, frontmatter: (frontmatter as Frontmatter | null | undefined) ?? null, data };
   }
 
+  // Resolve plugin factories once — an instance is itself a valid plugin input,
+  // so the run helpers below consume the resolved arrays unchanged. Track source
+  // positions only when some plugin opts in with `position: true`; otherwise the
+  // parse skips the LineIndex build and per-node line/column lookups.
+  mdastPlugins = mdastPlugins.map((p) => (typeof p === "function" ? p() : p));
+  hastPlugins = hastPlugins.map((p) => (typeof p === "function" ? p() : p));
+  const trackPositions =
+    mdastPlugins.some((p) => (p as MdastPluginDefinition).options?.position) ||
+    hastPlugins.some((p) => (p as HastPluginDefinition).options?.position);
+
   // Fused tail for MDAST-plugins-only (no HAST plugins): after the MDAST
   // plugin pass returns its pending commands, apply + convert + render all
   // happen inside a single NAPI roundtrip. Saves the convert-to-hast handle
   // create + render + drop crossings the generic path makes separately.
   if (hastPlugins.length === 0) {
-    const mdastHandle = createMdastHandle(source, nativeFeatures);
+    const mdastHandle = createMdastHandle(source, nativeFeatures, trackPositions);
     try {
       const mdastResult = runMdastPluginsOnHandle(mdastHandle, mdastPlugins, fileURL, data, true);
       const finishMdast = (r: MdastPipelineResult): MarkdownToHtmlResult => {
@@ -641,6 +653,7 @@ export function markdownToHtml(
     nativeFeatures,
     nativeConvertOptions,
     data,
+    trackPositions,
   );
 
   const runHastThenRender = (
@@ -702,13 +715,15 @@ export function mdxToJs(
   options: MdxCompileOptions = {},
 ): MdxToJsResult | Promise<MdxToJsResult> {
   const {
-    mdastPlugins = [],
-    hastPlugins = [],
+    mdastPlugins: mdastInput = [],
+    hastPlugins: hastInput = [],
     features,
     fileURL,
     data = {},
     ...mdxFields
   } = options;
+  let mdastPlugins: MdastPluginInput[] = mdastInput;
+  let hastPlugins: HastPluginInput[] = hastInput;
   const hastMayHaveStubs = hastPlugins.length > 0;
   const mdxOptions = mdxOptionsToNative(mdxFields);
   const { features: nativeFeatures, convertOptions: nativeConvertOptions } =
@@ -727,10 +742,18 @@ export function mdxToJs(
     return { code, frontmatter: (frontmatter as Frontmatter | null | undefined) ?? null, data };
   }
 
+  // Resolve plugin factories once and track positions only when a plugin opts
+  // in (see `markdownToHtml` for the rationale).
+  mdastPlugins = mdastPlugins.map((p) => (typeof p === "function" ? p() : p));
+  hastPlugins = hastPlugins.map((p) => (typeof p === "function" ? p() : p));
+  const trackPositions =
+    mdastPlugins.some((p) => (p as MdastPluginDefinition).options?.position) ||
+    hastPlugins.some((p) => (p as HastPluginDefinition).options?.position);
+
   // MDAST-plugins-only fused tail (no HAST plugins): apply + extract
   // frontmatter + convert + simplify + compile happen in one NAPI call.
   if (hastPlugins.length === 0) {
-    const mdastHandle = createMdxMdastHandle(source, nativeFeatures);
+    const mdastHandle = createMdxMdastHandle(source, nativeFeatures, trackPositions);
     try {
       const mdastResult = runMdastPluginsOnHandle(mdastHandle, mdastPlugins, fileURL, data, true);
       const finishMdast = (r: MdastPipelineResult): MdxToJsResult => {
@@ -770,6 +793,7 @@ export function mdxToJs(
     nativeFeatures,
     nativeConvertOptions,
     data,
+    trackPositions,
   );
 
   const runHastThenCompile = (r: HastWithFrontmatter): MdxToJsResult | Promise<MdxToJsResult> => {
@@ -879,10 +903,11 @@ function createHastHandleFromMdast(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   nativeConvertOptions: any,
   data: Data,
+  trackPositions: boolean,
 ): HastWithFrontmatter | Promise<HastWithFrontmatter> {
   const mdastHandle = mdx
-    ? createMdxMdastHandle(source, nativeFeatures)
-    : createMdastHandle(source, nativeFeatures);
+    ? createMdxMdastHandle(source, nativeFeatures, trackPositions)
+    : createMdastHandle(source, nativeFeatures, trackPositions);
 
   const mdastMayHaveStubs = mdastPlugins.length > 0;
 

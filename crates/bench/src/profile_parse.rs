@@ -35,9 +35,18 @@ fn main() {
             .unwrap();
             std::hint::black_box(out);
         }),
+        "mdx-static" => (mdx_src, |src, _opts| {
+            let opts = satteri_mdxjs::Options {
+                optimize_static: Some(satteri_mdxjs::OptimizeStaticConfig::default()),
+                ..Default::default()
+            };
+            let out =
+                satteri_mdxjs::compile(src, &opts, satteri_pulldown_cmark::MDX_OPTIONS).unwrap();
+            std::hint::black_box(out);
+        }),
         other => panic!("unknown workload: {other}"),
     };
-    let opts = if workload == "mdx" {
+    let opts = if workload.starts_with("mdx") {
         satteri_pulldown_cmark::MDX_OPTIONS
     } else {
         satteri_pulldown_cmark::DEFAULT_OPTIONS

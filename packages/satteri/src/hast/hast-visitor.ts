@@ -65,6 +65,7 @@ import {
   asArray,
   makeRequireNid,
   mergeAndReset,
+  type PluginOptions,
   unencodableContentError,
 } from "../visitor-shared.js";
 import { LazyChildResolver, markHandleMutated } from "../lazy-child-resolver.js";
@@ -512,6 +513,8 @@ type HastVisitorFn<N extends HastNode = HastNode> = (
 ) => HastNode | void | Promise<HastNode | void>;
 
 export interface HastVisitorInstance {
+  /** Plugin-level configuration (e.g. `{ position: true }` to read positions). */
+  options?: PluginOptions;
   // Element-like nodes: filtered by tag/component name (single or array)
   element?: HastFilteredVisitor<Element> | HastFilteredVisitor<Element>[];
   mdxJsxFlowElement?:
