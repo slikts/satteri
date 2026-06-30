@@ -7,7 +7,9 @@
 fn main() {
     let md_src = include_str!("../fixtures/markdown.md");
     let mdx_src = include_str!("../fixtures/document.mdx");
-    let workload = std::env::args().nth(1).unwrap_or_else(|| "parse".to_string());
+    let workload = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "parse".to_string());
     let iters: usize = std::env::args()
         .nth(2)
         .and_then(|s| s.parse().ok())

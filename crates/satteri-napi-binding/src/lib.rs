@@ -755,9 +755,16 @@ pub fn apply_mdast_commands_and_convert_and_render(
         &mut *arena,
         satteri_arena::Arena::<Mdast>::new(String::new()),
     );
-    let (mutated, dropped) =
-        satteri_plugin_api::apply_mdast_commands_lenient(owned, &command_buf, &parse_markdown)
-            .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
+    let cmd_options = satteri_plugin_api::MdastCommandOptions {
+        escape_raw_html_braces: mdx,
+    };
+    let (mutated, dropped) = satteri_plugin_api::apply_mdast_commands_lenient_with_options(
+        owned,
+        &command_buf,
+        &parse_markdown,
+        cmd_options,
+    )
+    .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     let frontmatter = extract_mdast_frontmatter(&mutated);
     let hast_arena =
         satteri_ast::hast::mdast_arena_to_hast_arena_with_options(&mutated, &convert_opts);
@@ -792,9 +799,16 @@ pub fn apply_mdast_commands_and_convert_and_compile(
         &mut *arena,
         satteri_arena::Arena::<Mdast>::new(String::new()),
     );
-    let (mutated, dropped) =
-        satteri_plugin_api::apply_mdast_commands_lenient(owned, &command_buf, &parse_markdown)
-            .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
+    let cmd_options = satteri_plugin_api::MdastCommandOptions {
+        escape_raw_html_braces: mdx,
+    };
+    let (mutated, dropped) = satteri_plugin_api::apply_mdast_commands_lenient_with_options(
+        owned,
+        &command_buf,
+        &parse_markdown,
+        cmd_options,
+    )
+    .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     let frontmatter = extract_mdast_frontmatter(&mutated);
     let mut hast_arena =
         satteri_ast::hast::mdast_arena_to_hast_arena_with_options(&mutated, &convert_opts);
