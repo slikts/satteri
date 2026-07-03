@@ -417,9 +417,9 @@ pub fn create_mdx_mdast_handle(
     let opts = features_to_options(features, true);
     let (mut arena, mdx_errors) = satteri_pulldown_cmark::parse(&source, opts);
     if let Some((offset, msg)) = mdx_errors.first() {
-        return Err(napi::Error::from_reason(format!(
-            "MDX parse error at byte {offset}: {msg}"
-        )));
+        return Err(napi::Error::from_reason(
+            satteri_mdxjs::parse_error_to_message(&source, *offset, msg).to_string(),
+        ));
     }
     arena.mdx = true;
     arena.parse_options = opts.bits();
@@ -560,7 +560,8 @@ pub fn apply_commands_to_mdast_handle(
     let mut arena = handle
         .lock()
         .map_err(|e| napi::Error::from_reason(format!("lock: {e}")))?;
-    let parse_markdown = make_parse_fn(arena.mdx, arena.parse_options);
+    let mdx = arena.mdx;
+    let parse_markdown = make_parse_fn(mdx, arena.parse_options);
     let owned = std::mem::replace(
         &mut *arena,
         satteri_arena::Arena::<Mdast>::new(String::new()),
@@ -569,9 +570,16 @@ pub fn apply_commands_to_mdast_handle(
     // removed is dropped rather than fatal — the plugin discarded that subtree,
     // so a transform queued on a node within it is moot. A passed-through child
     // keeps its identity (via `_ref`) and so is never stranded this way.
-    let (new_arena, dropped) =
-        satteri_plugin_api::apply_mdast_commands_lenient(owned, &command_buf, &parse_markdown)
-            .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
+    let options = satteri_plugin_api::MdastCommandOptions {
+        escape_raw_html_braces: mdx,
+    };
+    let (new_arena, dropped) = satteri_plugin_api::apply_mdast_commands_lenient_with_options(
+        owned,
+        &command_buf,
+        &parse_markdown,
+        options,
+    )
+    .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     *arena = new_arena;
     Ok(dropped.len() as u32)
 }
@@ -619,8 +627,16 @@ pub fn apply_commands_and_convert_to_hast_handle(
         &mut *arena,
         satteri_arena::Arena::<Mdast>::new(String::new()),
     );
-    let mutated = satteri_plugin_api::apply_mdast_commands(owned, &command_buf, &parse_markdown)
-        .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
+    let options = satteri_plugin_api::MdastCommandOptions {
+        escape_raw_html_braces: mdx,
+    };
+    let mutated = satteri_plugin_api::apply_mdast_commands_with_options(
+        owned,
+        &command_buf,
+        &parse_markdown,
+        options,
+    )
+    .map_err(|e| napi::Error::from_reason(format!("command error: {e}")))?;
     let mut hast_arena =
         satteri_ast::hast::mdast_arena_to_hast_arena_with_options(&mutated, &convert_opts);
     hast_arena.mdx = mdx;
@@ -660,9 +676,9 @@ pub fn create_mdx_hast_handle(
     let convert_opts = js_convert_options_to_rust(env, convert_options);
     let (mut mdast, mdx_errors) = satteri_pulldown_cmark::parse(&source, opts);
     if let Some((offset, msg)) = mdx_errors.first() {
-        return Err(napi::Error::from_reason(format!(
-            "MDX parse error at byte {offset}: {msg}"
-        )));
+        return Err(napi::Error::from_reason(
+            satteri_mdxjs::parse_error_to_message(&source, *offset, msg).to_string(),
+        ));
     }
     mdast.parse_options = opts.bits();
     let mut hast = satteri_ast::hast::mdast_arena_to_hast_arena_with_options(&mdast, &convert_opts);

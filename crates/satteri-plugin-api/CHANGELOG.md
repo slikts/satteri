@@ -1,5 +1,27 @@
 # satteri-plugin-api
 
+## 0.4.1 — 2026-06-29
+
+### Patch changes
+
+- Updated dependencies: satteri-arena (Cargo)@0.2.2, satteri-ast (Cargo)@0.4.1
+
+## 0.4.0 — 2026-06-25
+
+### Minor changes
+
+- [66e4f07](https://github.com/bruits/satteri/commit/66e4f0755eefabef2f8b9407d7a843a81b45ab49) Fixes Markdown plugins returning `rawHtml` with literal `{` or `}` rendering those braces as MDX escape fragments in `markdownToHtml`. — Thanks @snvtac for your first contribution 🎉!
+
+## 0.3.0 — 2026-06-18
+
+### Minor changes
+
+- [b2ae465](https://github.com/bruits/satteri/commit/b2ae465e41d87174455af65b2613c307233b8ac5) Improves performance when using plugins by using a new method of communication between Rust and JS. — Thanks @Princesseuh!
+
+### Patch changes
+
+- Updated dependencies: satteri-ast (Cargo)@0.4.0
+
 ## 0.2.2 — 2026-06-08
 
 ### Patch changes

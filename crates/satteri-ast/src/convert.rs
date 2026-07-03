@@ -398,8 +398,11 @@ pub fn mdast_arena_to_hast_arena_with_options(
     source: &Arena<Mdast>,
     options: &ConvertOptions,
 ) -> Arena<Hast> {
-    let src = source.source();
+    let src = source.string_pool();
     let mut builder: ArenaBuilder<Hast> = ArenaBuilder::new(src.to_string());
+    // Reuses the MDAST pool (heap included) so StringRefs stay valid; the
+    // original-input prefix is identical, so carry the boundary over.
+    builder.arena_mut().source_len = source.source_len;
     let n = source.len();
     builder.arena_mut().nodes.reserve(n);
     builder.arena_mut().children.reserve(n);
@@ -1325,6 +1328,24 @@ fn convert_node(
             builder.close_node();
         }
 
+        Some(MdastNodeType::Superscript) => {
+            let action = open_h_element(builder, view, node_id, "sup", &[]);
+            copy_position(node_id, view, builder);
+            if matches!(action, ChildrenAction::Recurse) {
+                convert_children(node_id, view, builder, ctx);
+            }
+            builder.close_node();
+        }
+
+        Some(MdastNodeType::Subscript) => {
+            let action = open_h_element(builder, view, node_id, "sub", &[]);
+            copy_position(node_id, view, builder);
+            if matches!(action, ChildrenAction::Recurse) {
+                convert_children(node_id, view, builder, ctx);
+            }
+            builder.close_node();
+        }
+
         Some(MdastNodeType::Table) => {
             let alignments = decode_table_alignments(view.get_type_data(node_id));
             let action = open_h_element(builder, view, node_id, "table", &[]);
@@ -1719,7 +1740,7 @@ fn trim_leading_ws_after_break(builder: &mut ArenaBuilder<Hast>, node_id: u32) {
     let sref = StringRef::from_bytes(&arena.type_data[data_off..data_off + 8]);
     let s_off = sref.offset as usize;
     let s_len = sref.len as usize;
-    let source_bytes = arena.source.as_bytes();
+    let source_bytes = arena.string_pool.as_bytes();
     if s_off + s_len > source_bytes.len() {
         return;
     }

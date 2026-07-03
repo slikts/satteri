@@ -52,6 +52,120 @@ describe("frontmatter extraction", () => {
   });
 });
 
+describe("features.superscript / features.subscript", () => {
+  test("superscript renders <sup>", () => {
+    const result = markdownToHtml("2^10^", { features: { superscript: true } });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<p>2<sup>10</sup></p>");
+  });
+
+  test("subscript renders <sub>", () => {
+    const result = markdownToHtml("H~2~O", { features: { subscript: true } });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<p>H<sub>2</sub>O</p>");
+  });
+
+  test("both features together", () => {
+    const result = markdownToHtml("H~2~O and 2^10^.", {
+      features: { superscript: true, subscript: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<p>H<sub>2</sub>O and 2<sup>10</sup>.</p>");
+  });
+
+  test("disabled by default: delimiters stay literal", () => {
+    const result = markdownToHtml("H~2~O and 2^10^.");
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).not.toContain("<sub>");
+    expect(result.html).not.toContain("<sup>");
+  });
+
+  test("mdast exposes superscript / subscript node types", () => {
+    const ast = markdownToMdast("H~2~O and 2^10^.", {
+      features: { superscript: true, subscript: true },
+    });
+    expect(ast.type).toBe("root");
+    if (ast.type !== "root") return;
+    const para = ast.children[0];
+    expect(para?.type).toBe("paragraph");
+    if (para?.type !== "paragraph") return;
+    expect(para.children.map((c) => c.type)).toEqual([
+      "text",
+      "subscript",
+      "text",
+      "superscript",
+      "text",
+    ]);
+  });
+
+  test("mdast plugin visits superscript and replacement survives rebuild", () => {
+    const plugin = defineMdastPlugin({
+      name: "swap-sup-to-sub",
+      superscript() {
+        return { type: "subscript", children: [{ type: "text", value: "swapped" }] };
+      },
+    });
+    const result = markdownToHtml("a^x^b", {
+      features: { superscript: true, subscript: true },
+      mdastPlugins: [plugin],
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<p>a<sub>swapped</sub>b</p>");
+  });
+});
+
+describe("features.headingAttributes", () => {
+  test("emits id and class", () => {
+    const result = markdownToHtml("## Heading {#explicit .custom}", {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h2 id="explicit" class="custom">Heading</h2>');
+  });
+
+  test("emits custom attributes", () => {
+    const result = markdownToHtml("# Title {#t data-role=heading flag}", {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h1 id="t" data-role="heading" flag="">Title</h1>');
+  });
+
+  test("merges shorthand and explicit id/class", () => {
+    const result = markdownToHtml("## Heading {.c1 #x class=c2 id=y}", {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h2 id="y" class="c1 c2">Heading</h2>');
+  });
+
+  test("quoted values keep their spaces", () => {
+    const result = markdownToHtml('# Title {data-label="hello world"}', {
+      features: { headingAttributes: true },
+    });
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain('<h1 data-label="hello world">Title</h1>');
+  });
+
+  test("disabled by default: attribute block stays literal", () => {
+    const result = markdownToHtml("## Heading {#explicit .custom}");
+    if (result instanceof Promise) throw new Error("expected sync");
+    expect(result.html).toContain("<h2>Heading {#explicit .custom}</h2>");
+  });
+
+  test("mdast exposes attributes via data.hProperties", () => {
+    const ast = markdownToMdast("## Heading {#explicit .custom}", {
+      features: { headingAttributes: true },
+    });
+    expect(ast.type).toBe("root");
+    if (ast.type !== "root") return;
+    const heading = ast.children[0];
+    expect(heading?.type).toBe("heading");
+    if (heading?.type !== "heading") return;
+    expect(heading.data?.hProperties).toEqual({ id: "explicit", className: ["custom"] });
+  });
+});
+
 describe("features.math.singleDollarTextMath", () => {
   test("default keeps single-$ as inline math", () => {
     const result = markdownToHtml("inline $x$ here", { features: { math: true } });
@@ -207,6 +321,48 @@ describe("markdownToHtml", () => {
   });
 
   // with MDAST plugins only
+
+  test("rawHtml preserves Mermaid curly braces in rendered HTML", () => {
+    const plugin = defineMdastPlugin({
+      name: "raw-html-mermaid-braces",
+      code(node) {
+        if (node.type === "code" && node.lang === "mermaid") {
+          return {
+            rawHtml: `<pre class="mermaid">${node.value}</pre>`,
+          };
+        }
+      },
+    });
+
+    const { html } = markdownToHtml("```mermaid\nflowchart TD\n    C{JWT valid?}\n```", {
+      features: { gfm: true },
+      mdastPlugins: [plugin],
+    });
+
+    expect(html).toContain("C{JWT valid?}");
+    expect(html).not.toContain("{'{'}");
+    expect(html).not.toContain("{'}'}");
+  });
+
+  test("rawHtml preserves Shiki-like curly braces in rendered HTML", () => {
+    const plugin = defineMdastPlugin({
+      name: "raw-html-shiki-braces",
+      code() {
+        return {
+          rawHtml: '<pre class="shiki"><code><span style="color:red">{foo: 1}</span></code></pre>',
+        };
+      },
+    });
+
+    const { html } = markdownToHtml("```js\nconst x = {foo: 1}\n```", {
+      mdastPlugins: [plugin],
+    });
+
+    expect(html).toContain("{foo: 1}");
+    expect(html).not.toContain("{'{'}");
+    expect(html).not.toContain("{'}'}");
+    expect(html).toContain("shiki");
+  });
 
   test("MDAST plugin removes headings", () => {
     const removeHeadings = defineMdastPlugin({
@@ -588,6 +744,30 @@ describe("mdxToJs", () => {
     });
     expect(js).not.toContain("Gone");
     expect(js).toContain("Kept");
+  });
+
+  test("rawHtml braces survive MDX reparse as escaped literals", () => {
+    const plugin = defineMdastPlugin({
+      name: "raw-html-mermaid-braces",
+      code(node) {
+        if (node.type === "code" && node.lang === "mermaid") {
+          return {
+            rawHtml: `<pre class="mermaid">${node.value}</pre>`,
+          };
+        }
+      },
+    });
+
+    // Unlike markdownToHtml, the MDX pipeline must escape braces so the reparse
+    // does not read `{JWT valid?}` as a (broken) expression. The escape compiles
+    // to literal `{` / `}` string children, preserving the Mermaid source.
+    const { code: js } = mdxToJs("```mermaid\nflowchart TD\n    C{JWT valid?}\n```", {
+      mdastPlugins: [plugin],
+    });
+
+    expect(js).toContain('"{"');
+    expect(js).toContain('"}"');
+    expect(js).toContain("JWT valid?");
   });
 
   test("MDAST plugin can read JSX attributes", () => {

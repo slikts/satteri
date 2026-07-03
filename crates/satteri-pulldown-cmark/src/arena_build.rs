@@ -16,7 +16,7 @@ use satteri_ast::shared::{
 
 #[cfg(feature = "mdx")]
 use crate::parse::JsxAttr;
-use crate::parse::{DefaultParserCallbacks, ItemBody, ParserInner};
+use crate::parse::{DefaultParserCallbacks, HeadingAttributes, ItemBody, ParserInner};
 use crate::{Alignment, HeadingLevel, LinkType, Options};
 
 #[cfg(feature = "mdx")]
@@ -843,13 +843,23 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         paragraph_open_depth.push(builder.stack_depth());
                         inner.tree.push();
                     }
-                    ItemBody::Heading(level, _) => {
+                    ItemBody::Heading(level, heading_ix) => {
                         let depth = heading_level_to_u8(level);
                         builder.open_node(MdastNodeType::Heading as u8);
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
                         builder.set_data_current(&[depth]);
+                        // Conveyed as `data.hProperties`, which the mdast->hast
+                        // pass emits as `id`/`class`/custom attributes.
+                        if let Some(heading_ix) = heading_ix {
+                            if let Some(json) =
+                                encode_heading_h_properties(&inner.allocs[heading_ix])
+                            {
+                                let heading_id = builder.current_node_id();
+                                builder.arena_mut().set_node_data(heading_id, json);
+                            }
+                        }
                         inner.tree.push();
                     }
                     ItemBody::BlockQuote(_) => {
@@ -1249,9 +1259,15 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         );
                         inner.tree.push();
                     }
-                    // Superscript/Subscript → Emphasis for now.
-                    ItemBody::Superscript | ItemBody::Subscript => {
-                        builder.open_node(MdastNodeType::Emphasis as u8);
+                    ItemBody::Superscript => {
+                        builder.open_node(MdastNodeType::Superscript as u8);
+                        builder.set_position_current(
+                            start, end, start_line, start_col, end_line, end_col,
+                        );
+                        inner.tree.push();
+                    }
+                    ItemBody::Subscript => {
+                        builder.open_node(MdastNodeType::Subscript as u8);
                         builder.set_position_current(
                             start, end, start_line, start_col, end_line, end_col,
                         );
@@ -2167,6 +2183,75 @@ fn heading_level_to_u8(level: HeadingLevel) -> u8 {
     }
 }
 
+/// JSON is hand-built to keep serde_json out of this crate's runtime deps
+/// (mirroring satteri-ast's code node_data encoder); values are source-derived,
+/// so quotes, backslashes and control chars are escaped.
+fn encode_heading_h_properties(attrs: &HeadingAttributes<'_>) -> Option<Vec<u8>> {
+    if attrs.id.is_none() && attrs.classes.is_empty() && attrs.attrs.is_empty() {
+        return None;
+    }
+
+    fn json_string(s: &str, out: &mut Vec<u8>) {
+        out.push(b'"');
+        for ch in s.bytes() {
+            match ch {
+                b'"' => out.extend_from_slice(b"\\\""),
+                b'\\' => out.extend_from_slice(b"\\\\"),
+                b'\n' => out.extend_from_slice(b"\\n"),
+                b'\r' => out.extend_from_slice(b"\\r"),
+                b'\t' => out.extend_from_slice(b"\\t"),
+                c if c < 0x20 => {
+                    out.extend_from_slice(b"\\u00");
+                    out.push(b"0123456789abcdef"[(c >> 4) as usize]);
+                    out.push(b"0123456789abcdef"[(c & 0xf) as usize]);
+                }
+                c => out.push(c),
+            }
+        }
+        out.push(b'"');
+    }
+
+    fn separator(out: &mut Vec<u8>, first: &mut bool) {
+        if *first {
+            *first = false;
+        } else {
+            out.push(b',');
+        }
+    }
+
+    let mut buf = Vec::with_capacity(64);
+    buf.extend_from_slice(b"{\"hProperties\":{");
+    let mut first = true;
+
+    if let Some(id) = &attrs.id {
+        separator(&mut buf, &mut first);
+        buf.extend_from_slice(b"\"id\":");
+        json_string(id, &mut buf);
+    }
+    if !attrs.classes.is_empty() {
+        separator(&mut buf, &mut first);
+        buf.extend_from_slice(b"\"className\":[");
+        for (i, class) in attrs.classes.iter().enumerate() {
+            if i > 0 {
+                buf.push(b',');
+            }
+            json_string(class, &mut buf);
+        }
+        buf.push(b']');
+    }
+    for (key, value) in &attrs.attrs {
+        separator(&mut buf, &mut first);
+        json_string(key, &mut buf);
+        buf.push(b':');
+        // Value-less (`{myattr}`) renders as `myattr=""`; a JSON `true` would
+        // surface as `myattr="true"` through a real rehype pipeline.
+        json_string(value.as_deref().unwrap_or(""), &mut buf);
+    }
+
+    buf.extend_from_slice(b"}}");
+    Some(buf)
+}
+
 fn byte_offset_to_line_col(source: &str, offset: usize) -> String {
     let mut line = 1usize;
     let mut col = 1usize;
@@ -2208,12 +2293,12 @@ fn encode_jsx_element_data(jsx: &JsxElementData<'_>, builder: &mut ArenaBuilder<
                 let v = builder.alloc_string(v);
                 (MDX_ATTR_LITERAL_PROP, n, v)
             }
-            JsxAttr::Expression(n, v) => {
+            JsxAttr::Expression(n, v, _, _) => {
                 let n = builder.alloc_string(n);
                 let v = builder.alloc_string(v);
                 (MDX_ATTR_EXPRESSION_PROP, n, v)
             }
-            JsxAttr::Spread(v) => {
+            JsxAttr::Spread(v, _, _) => {
                 let v = builder.alloc_string(v);
                 (MDX_ATTR_SPREAD, StringRef::empty(), v)
             }

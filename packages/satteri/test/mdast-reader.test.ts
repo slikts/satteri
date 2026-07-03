@@ -42,8 +42,8 @@ test("MdastReader reads root node", () => {
   expect(root.type).toBe(NodeType.Root);
   expect(root.typeName).toBe("Root");
   expect(root.childrenCount).toBe(2);
-  expect(root.position.start.line).toBe(1);
-  expect(root.position.start.column).toBe(1);
+  expect(root.position!.start.line).toBe(1);
+  expect(root.position!.start.column).toBe(1);
 });
 
 test("MdastReader reads heading node", () => {
@@ -52,7 +52,8 @@ test("MdastReader reads heading node", () => {
   const heading = reader.getNode(1);
   expect(heading.type).toBe(NodeType.Heading);
   expect(heading.childrenCount).toBe(1);
-  expect(reader.getHeadingDepth(1)).toBe(1);
+  // depth is the first byte of HeadingData (the generated decoder reads it the same way)
+  expect(reader.getTypeData(1)[0]).toBe(1);
 });
 
 test("MdastReader reads text values", () => {
@@ -106,10 +107,10 @@ test("MdastReader.walk skip children", () => {
   expect(visited).toContain(4);
 });
 
-test("MdastReader getSource", () => {
+test("MdastReader getStringPool", () => {
   const buf = buildHelloWorldBuffer();
   const reader = new MdastReader(buf);
-  expect(reader.getSource()).toBe("# Hello\n\nWorld");
+  expect(reader.getStringPool()).toBe("# Hello\n\nWorld");
 });
 
 test("MdastReader accepts Uint8Array", () => {

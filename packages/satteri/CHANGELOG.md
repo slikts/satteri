@@ -1,5 +1,67 @@
 # satteri
 
+## 0.9.4 — 2026-06-29
+
+### Patch changes
+
+- [c6a9088](https://github.com/bruits/satteri/commit/c6a908875ae5161c86c592388a55f9caca9ed35b) Fixes plugin `ctx.source` being polluted with duplicated, concatenated content appended after the original document. — Thanks @Princesseuh!
+- [65e0758](https://github.com/bruits/satteri/commit/65e0758e293b2c3bcfe3767770fad3daaf5fdb69) Exposes the `MdastVisitorContext` type from the `satteri` package. — Thanks @HiDeoo!
+- [07ee532](https://github.com/bruits/satteri/commit/07ee53293af76d0dcddbac961ad35337c5500e74) Fixes JSX nested in an MDX attribute expression (e.g. `prop={<p>hi</p>}` or `title={<>x</>}`) being emitted as raw, un-lowered JSX, which produced invalid JavaScript. Also fixes quotes and apostrophes in such JSX text (e.g. `prop={<p>Acme Corp.'s "best" tool</p>}`) being mis-scanned as JS string literals and causing a parse error — the expression scanner now consumes a JSX element's children as text. — Thanks @vaneenige for your first contribution 🎉!
+- [2be5f6b](https://github.com/bruits/satteri/commit/2be5f6bdd43ee2d66381b12920cf3ee2c45a3905) Updated `binding.browser.ts` to export functions from `browser.js` — Thanks @noClaps for your first contribution 🎉!
+
+## 0.9.3 — 2026-06-25
+
+### Patch changes
+
+- [fab4a2d](https://github.com/bruits/satteri/commit/fab4a2dbfe534d45fb7b3602d709418dcc2caf86) Fixes a blank line inside a template literal or block comment in an MDX `import`/`export` causing an `Unterminated string` error. The blank line no longer ends the statement early. — Thanks @Princesseuh!
+- [fab4a2d](https://github.com/bruits/satteri/commit/fab4a2dbfe534d45fb7b3602d709418dcc2caf86) Fixes inline math like `$\frac{-b}{2a}$` failing to compile in MDX. Braces inside `$...$` are now treated as math text, not a JSX expression. — Thanks @Princesseuh!
+- [66e4f07](https://github.com/bruits/satteri/commit/66e4f0755eefabef2f8b9407d7a843a81b45ab49) Fixes Markdown plugins returning `rawHtml` with literal `{` or `}` rendering those braces as MDX escape fragments in `markdownToHtml`. — Thanks @snvtac for your first contribution 🎉!
+- [fab4a2d](https://github.com/bruits/satteri/commit/fab4a2dbfe534d45fb7b3602d709418dcc2caf86) Fixes quotes inside a regex in an MDX JSX attribute (e.g. `ins={[/icon="[^"]+"/g]}`) causing a parse error. — Thanks @Princesseuh!
+- [27c9023](https://github.com/bruits/satteri/commit/27c90239935f218103995a4d82a6473dc1d728f8) Fixes `headingAttributes` silently dropping parsed attributes. — Thanks @Princesseuh!
+
+## 0.9.2 — 2026-06-23
+
+### Patch changes
+
+- [6128184](https://github.com/bruits/satteri/commit/61281847992173dcf37a588c5b1a49200ec28ace) Add prebuilt native bindings for more platforms: `linux-arm64-gnu`, `linux-x64-musl`, `linux-arm64-musl`, and `win32-arm64-msvc`. — Thanks @Princesseuh!
+
+## 0.9.1 — 2026-06-19
+
+### Patch changes
+
+- [64877f0](https://github.com/bruits/satteri/commit/64877f0dfa46fb0f752c8b3a9affc8c8552ade67) Adds a `data` option to `markdownToHtml`, `mdxToJs`, and `CompileOptions` that seeds the document data bag before plugins run. The same object is surfaced to plugins as `ctx.data` and returned as `result.data`, so values can be passed both into and out of a compile. — Thanks @Princesseuh!
+- [855379c](https://github.com/bruits/satteri/commit/855379c7eb018e9c5acc69daa7a63f27dbb79e7f) Fix MDX `import`/`export` blocks being broken by a following whitespace-only line. A line containing only spaces or tabs now ends the ESM block exactly like an empty line, instead of being consumed as a statement continuation (which produced a `Could not parse esm with oxc` error). — Thanks @Princesseuh!
+- [855379c](https://github.com/bruits/satteri/commit/855379c7eb018e9c5acc69daa7a63f27dbb79e7f) MDX parse errors now carry a source line and column. Previously, errors in `import`/`export` blocks dropped the position entirely, and errors in `{…}` expressions and JSX attributes were reported as a bare byte offset, so downstream tooling reported an unknown location. JSX attribute and spread expression errors now point at the offending attribute rather than the element's opening `<`. — Thanks @Princesseuh!
+- [7c78426](https://github.com/bruits/satteri/commit/7c78426b0a21c8a3e41e6fed6605ceba60650826) Fixes a performance regression when not using any plugins. — Thanks @Princesseuh!
+
+## 0.9.0 — 2026-06-18
+
+### Minor changes
+
+- [b2ae465](https://github.com/bruits/satteri/commit/b2ae465e41d87174455af65b2613c307233b8ac5) Improves performance when using plugins by using a new method of communication between Rust and JS. — Thanks @Princesseuh!
+
+### Patch changes
+
+- [6bcdf06](https://github.com/bruits/satteri/commit/6bcdf06a0ee267779180a2d89a27a31f2f4b5b81) `features.superscript` and `features.subscript` now render `^text^` as `<sup>text</sup>` and `~text~` as `<sub>text</sub>` as documented, instead of `<em>`. The MDAST now exposes dedicated `superscript` and `subscript` node types, which plugins can visit and construct. Plugins that previously matched these spans as `emphasis` nodes should switch to the new node types. — Thanks @morinokami for your first contribution 🎉!
+- [d6e28f4](https://github.com/bruits/satteri/commit/d6e28f45623a37a74e694cb75e5a6e916c220677) Fixes a parse error when an MDX expression uses top-level `await`, such as `<Card data={await getData()} />`. — Thanks @Princesseuh!
+- [9867bbc](https://github.com/bruits/satteri/commit/9867bbc9dc71f68c7c6aff5307fdd48f723ebdda) Add `ctx.parent(node)` and `ctx.indexOf(node)` to the MDAST and HAST plugin visitor contexts.
+
+  `parent()` returns a node's parent (or `undefined` at the root) and is climbable to reach any ancestor;
+
+  `indexOf()` returns a node's position within its parent's children. Together they make it possible to do operations depending on ancestry and siblings. — Thanks @Princesseuh!
+
+- [0d36b24](https://github.com/bruits/satteri/commit/0d36b249d435940efaf95b03fa4fecd1a38a1c56) Aligns directive attribute type with `mdast-util-directive` by allowing nullish attribute values. — Thanks @HiDeoo!
+- [efba0de](https://github.com/bruits/satteri/commit/efba0de3b74cba630071400fc769671ca150c183) Add the missing `position` and `data` properties to the `raw` hast node type. — Thanks @Princesseuh!
+- [77b8b1d](https://github.com/bruits/satteri/commit/77b8b1d59dcaf712a607a956f3aadece32fec7e4) Add `ctx.data`, a document-scoped data bag shared across every plugin in the compile.
+
+  Writes from one plugin are visible to later plugins, and the bag persists across the mdast→hast boundary, so hast plugins can read what mdast plugins wrote. After compilation the final state is returned on `result.data`. The bag lives entirely on the JS side, so any value is allowed (functions, class instances, `Map`/`Set`) and references are preserved, much like `vfile.data`. Specific keys can be typed by augmenting the `DataMap` interface via `declare module "satteri"`. — Thanks @Princesseuh!
+
+## 0.8.2 — 2026-06-11
+
+### Patch changes
+
+- [42835bc](https://github.com/bruits/satteri/commit/42835bcad387064678421d5623067500c4cefa1c) Fixes a smart punctuation issue where double quotes could be rendered with the wrong direction when quoted text appeared next to text without whitespace. — Thanks @HiDeoo for your first contribution 🎉!
+
 ## 0.8.1 — 2026-06-08
 
 ### Patch changes
@@ -10,7 +72,7 @@
 - [67ac7b0](https://github.com/bruits/satteri/commit/67ac7b06aa270c22664cfa3c7a11d6bf37495529) Fixes several kinds of nodes getting mangled when a plugin would move or duplicate them. — Thanks @Princesseuh!
 - [7979f1e](https://github.com/bruits/satteri/commit/7979f1ec93695a8b700272f75be967bdba29452b) Fixes a crash when a plugin replaces a node with a tree containing an empty text node in a document that has non-ASCII characters (e.g. `é`). — Thanks @HiDeoo for your first contribution 🎉!
 - [f41d32f](https://github.com/bruits/satteri/commit/f41d32f590e7763f7ba8199aead1e563503c8a9a) Adds `ctx.insertChildAt(node, index, child)` and `ctx.removeChildAt(node, index)` for editing a node's children by position.
-  
+
   `insertBefore`, `insertAfter`, `prependChild`, `appendChild`, and `insertChildAt` now also accept an array of nodes, so you can insert several at once. — Thanks @Princesseuh!
 
 ## 0.8.0 — 2026-06-03

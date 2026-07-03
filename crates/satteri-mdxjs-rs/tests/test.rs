@@ -838,6 +838,22 @@ fn children_arrow_returning_jsx() -> Result<(), satteri_arena::mdx_types::Messag
 }
 
 #[test]
+fn jsx_in_expression_preserves_significant_whitespace()
+-> Result<(), satteri_arena::mdx_types::Message> {
+    // JSX keeps a no-newline whitespace run as a significant `" "`, even via the expression path.
+    let result = compile(
+        "<C d={<><x>a</x> <y>b</y><em> </em></>} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.matches("\" \"").count() >= 2,
+        "significant inter-element and spacer whitespace must be preserved: {result}"
+    );
+    Ok(())
+}
+
+#[test]
 fn jsx_inside_map_callback() -> Result<(), satteri_arena::mdx_types::Message> {
     // `items.map(x => <li>{x}</li>)` must produce _jsx calls in the callback,
     // not leave raw JSX in the compiled output.
@@ -1169,5 +1185,300 @@ fn mixed_module_scope_and_dynamic_components() -> Result<(), satteri_arena::mdx_
         result.contains("_missingMdxReference(\"NotInScope\""),
         "still emit guard for unbound `NotInScope`: {result}"
     );
+    Ok(())
+}
+
+#[test]
+fn esm_parse_error_carries_source_position() {
+    use satteri_arena::mdx_types::Place;
+
+    // Invalid ESM (`export const x = ;`) on line 3. The oxc parse error must
+    // resolve to a source point, not be dropped to `place: None`.
+    let err = compile(
+        "# Title\n\nexport const x = ;\n",
+        &Options::default(),
+        MDX_OPTS,
+    )
+    .expect_err("invalid ESM should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    match *place {
+        Place::Point(point) => assert_eq!(
+            point.line, 3,
+            "error should point at the ESM line, got {point:?}"
+        ),
+        Place::Position(position) => assert_eq!(
+            position.start.line, 3,
+            "error should point at the ESM line, got {position:?}"
+        ),
+    }
+}
+
+#[test]
+fn expression_parse_error_carries_source_position() {
+    use satteri_arena::mdx_types::Place;
+
+    // Invalid MDX expression (`{ 1 + }`) on line 3. Parse-time errors must
+    // carry a source point too, not just a bare byte offset.
+    let err = compile("# Title\n\n{ 1 + }\n", &Options::default(), MDX_OPTS)
+        .expect_err("invalid expression should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    match *place {
+        Place::Point(point) => assert_eq!(
+            point.line, 3,
+            "error should point at the expression line, got {point:?}"
+        ),
+        Place::Position(position) => assert_eq!(
+            position.start.line, 3,
+            "error should point at the expression line, got {position:?}"
+        ),
+    }
+}
+
+#[test]
+fn jsx_attribute_expression_error_points_at_attribute() {
+    use satteri_arena::mdx_types::Place;
+
+    // The error is in the *second* attribute (`bad={2 *}`) on line 3. The
+    // position must point inside that attribute, not at the element's `<`.
+    let err = compile(
+        "# T\n\n<Foo a={1} bad={2 *} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )
+    .expect_err("invalid attribute expression should fail to compile");
+
+    let place = err
+        .place
+        .expect("parse error should carry a source position");
+    let point = match *place {
+        Place::Point(p) => p,
+        Place::Position(p) => p.start,
+    };
+    assert_eq!(
+        point.line, 3,
+        "should be on the element's line, got {point:?}"
+    );
+    // `bad={…}` opens at column 16; column 1 would mean we regressed to
+    // pointing at the element's `<` instead of the offending attribute.
+    assert!(
+        point.column >= 16,
+        "should point inside the second attribute, got {point:?}"
+    );
+}
+
+#[test]
+fn top_level_await_makes_content_async() -> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "<ShowcaseCard site={await getEntry('showcase', 'a.dev')} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("async function _createMdxContent(props)"),
+        "top-level `await` in content should make `_createMdxContent` async: {result}"
+    );
+    assert!(
+        !result.contains("async function MDXContent"),
+        "`MDXContent` should stay sync: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn await_inside_nested_function_stays_sync() -> Result<(), satteri_arena::mdx_types::Message> {
+    let result = compile(
+        "<A fn={async () => await getEntry()} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        result.contains("function _createMdxContent(props)")
+            && !result.contains("async function _createMdxContent"),
+        "`await` inside a nested async function should not make `_createMdxContent` async: {result}"
+    );
+    Ok(())
+}
+
+#[test]
+fn multiline_jsx_attribute_expression_error_is_exact() {
+    use satteri_arena::mdx_types::Place;
+
+    // The offending token (`2` — a second operand with no operator) sits on a
+    // continuation line that the expression dedent indents by two columns. The
+    // position must point at the verbatim source column (5, in `  1 2`), not at
+    // column 3 as it would if the dedented copy were validated instead.
+    let point = |src: &str| -> satteri_arena::mdx_types::Point {
+        let err = compile(src, &Options::default(), MDX_OPTS)
+            .expect_err("invalid attribute expression should fail to compile");
+        match *err
+            .place
+            .expect("parse error should carry a source position")
+        {
+            Place::Point(p) => p,
+            Place::Position(p) => p.start,
+        }
+    };
+
+    let p = point("# T\n\n<Foo bar={\n  1 2\n} />\n");
+    assert_eq!(
+        (p.line, p.column),
+        (4, 5),
+        "two-space indent: error must point at the verbatim column, got {p:?}"
+    );
+
+    // Same, with a deeper six-column indent: column 9, not column 7.
+    let p = point("# T\n\n<Foo bar={\n      1 2\n} />\n");
+    assert_eq!(
+        (p.line, p.column),
+        (4, 9),
+        "six-space indent: error must point at the verbatim column, got {p:?}"
+    );
+}
+
+#[test]
+fn multiline_flow_expression_error_is_exact() {
+    use satteri_arena::mdx_types::Place;
+
+    // Block `{…}` expression spanning lines: the bad token `2` is on a
+    // continuation line indented two columns. The position must be the
+    // verbatim column 5, not the dedented column 3.
+    let err = compile("# T\n\n{\n  1 2\n}\n", &Options::default(), MDX_OPTS)
+        .expect_err("invalid flow expression should fail to compile");
+    let point = match *err
+        .place
+        .expect("parse error should carry a source position")
+    {
+        Place::Point(p) => p,
+        Place::Position(p) => p.start,
+    };
+    assert_eq!(
+        (point.line, point.column),
+        (4, 5),
+        "flow expression error must point at the verbatim column, got {point:?}"
+    );
+}
+
+#[test]
+fn multiline_inline_expression_error_is_exact() {
+    use satteri_arena::mdx_types::Place;
+
+    let point = |src: &str| -> satteri_arena::mdx_types::Point {
+        let err = compile(src, &Options::default(), MDX_OPTS)
+            .expect_err("invalid inline expression should fail to compile");
+        match *err
+            .place
+            .expect("parse error should carry a source position")
+        {
+            Place::Point(p) => p,
+            Place::Position(p) => p.start,
+        }
+    };
+
+    // Inline `{…}` spanning lines: the bad `2` sits on a continuation line
+    // dedented two columns. The position must be the verbatim column 5.
+    let p = point("para {\n  1 2\n} end\n");
+    assert_eq!(
+        (p.line, p.column),
+        (2, 5),
+        "inline expression error must point at the verbatim column, got {p:?}"
+    );
+
+    // Inside a blockquote: the continuation line is `>   1 2`, so the `2` is at
+    // column 7. Getting this right requires mapping through both the stripped
+    // `> ` container prefix and the dedent.
+    let p = point("> para {\n>   1 2\n> } end\n");
+    assert_eq!(
+        (p.line, p.column),
+        (2, 7),
+        "inline expression error in a blockquote must account for the container \
+         prefix, got {p:?}"
+    );
+}
+
+#[test]
+fn jsx_in_attribute_expression_is_lowered() -> Result<(), satteri_arena::mdx_types::Message> {
+    // JSX nested in an attribute expression must be transformed to `_jsx(...)`
+    // calls, exactly like JSX in children. It used to leak through un-lowered
+    // as a raw JSX element in the output (`d: <_components.p>...`), producing
+    // invalid JavaScript.
+    let element = compile(
+        "<Foo d={<p>hi there</p>} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        element.contains(r#"d: _jsx(_components.p, { children: "hi there" })"#),
+        "element attr should be lowered, got:\n{element}"
+    );
+
+    let fragment = compile("<Foo d={<>hi</>} />\n", &Options::default(), MDX_OPTS)?;
+    assert!(
+        fragment.contains(r#"d: _jsx(_Fragment, { children: "hi" })"#),
+        "fragment attr should be lowered, got:\n{fragment}"
+    );
+
+    let conditional = compile(
+        "<Foo d={cond ? <a>x</a> : <b>y</b>} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        conditional.contains("_jsx(_components.a,") && conditional.contains("_jsx(_components.b,"),
+        "JSX in a conditional attr value should be lowered, got:\n{conditional}"
+    );
+
+    // No raw JSX (`<_components.` / `<_Fragment`) may survive into the output.
+    for out in [&element, &fragment, &conditional] {
+        assert!(
+            !out.contains("<_components.") && !out.contains("<_Fragment"),
+            "raw JSX leaked into output:\n{out}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn apostrophe_in_jsx_text_after_close_tag() -> Result<(), satteri_arena::mdx_types::Message> {
+    // End-to-end guard combining both halves of the fix: the scanner must run
+    // past an apostrophe that follows a child close tag inside an attribute
+    // expression (`</b>'s`), and the resulting JSX must then be lowered.
+    let out = compile(
+        "<Foo d={<p>a<b>x</b>'s</p>} />\n",
+        &Options::default(),
+        MDX_OPTS,
+    )?;
+    assert!(
+        out.contains("_jsxs(_components.p,")
+            && out.contains(r#"_jsx(_components.b, { children: "x" })"#)
+            && out.contains(r#""'s""#),
+        "apostrophe-after-close-tag attr expr should parse and lower, got:\n{out}"
+    );
+    assert!(
+        !out.contains("<_components."),
+        "raw JSX leaked into output:\n{out}"
+    );
+
+    // Quotes elsewhere in JSX text — after a `.` (`Corp.'s`) and a paired
+    // double-quote (`"!?"`) — must likewise stay literal text, not open a JS
+    // string. (These defeat a preceding-token heuristic; the scanner consumes
+    // element children as text instead.)
+    for src in [
+        "<Foo d={<p>Acme Corp.'s view</p>} />\n",
+        "<Foo d={<p>a \"!?\" badge here</p>} />\n",
+    ] {
+        let out = compile(src, &Options::default(), MDX_OPTS)?;
+        assert!(
+            out.contains("_jsx(_components.p,") && !out.contains("<_components."),
+            "quote in JSX text should parse and lower: {src:?} ->\n{out}"
+        );
+    }
+
     Ok(())
 }

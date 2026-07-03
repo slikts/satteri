@@ -13,8 +13,11 @@ import {
   HAST_MDX_ESM,
   type HastProperty,
 } from "./hast-reader.js";
+import type { Root } from "hast";
 import type { HastNode } from "../types.js";
+import { TYPE_NAMES } from "./generated/node-types.js";
 import { lazyProp, lazyGroup } from "../lazy-props.js";
+import { restorePhantomSpaces } from "../phantom.js";
 
 export type { HastNode };
 
@@ -33,49 +36,18 @@ function propsToRecord(
  */
 export function materializeHastNode(reader: HastReader, nodeId: number): HastNode {
   const nodeType = reader.getNodeType(nodeId);
+  const typeName = TYPE_NAMES[nodeType] ?? `unknown(${nodeType})`;
 
-  let typeName: string;
-  switch (nodeType) {
-    case HAST_ROOT:
-      typeName = "root";
-      break;
-    case HAST_ELEMENT:
-      typeName = "element";
-      break;
-    case HAST_TEXT:
-      typeName = "text";
-      break;
-    case HAST_COMMENT:
-      typeName = "comment";
-      break;
-    case HAST_DOCTYPE:
-      typeName = "doctype";
-      break;
-    case HAST_RAW:
-      typeName = "raw";
-      break;
-    case HAST_MDX_JSX_ELEMENT:
-      typeName = "mdxJsxFlowElement";
-      break;
-    case HAST_MDX_JSX_TEXT_ELEMENT:
-      typeName = "mdxJsxTextElement";
-      break;
-    case HAST_MDX_FLOW_EXPRESSION:
-      typeName = "mdxFlowExpression";
-      break;
-    case HAST_MDX_TEXT_EXPRESSION:
-      typeName = "mdxTextExpression";
-      break;
-    case HAST_MDX_ESM:
-      typeName = "mdxjsEsm";
-      break;
-    default:
-      typeName = `unknown(${nodeType})`;
-      break;
+  const node = { type: typeName } as HastNode;
+  // Position decodes to three objects; defer it — passthrough children (e.g.
+  // replaceNode keeping `node.children`) never read it.
+  if (reader.hasPosition(nodeId)) {
+    Object.defineProperty(
+      node,
+      "position",
+      lazyProp("position", () => reader.getPosition(nodeId)),
+    );
   }
-
-  const position = reader.getPosition(nodeId);
-  const node = (position ? { type: typeName, position } : { type: typeName }) as HastNode;
 
   // _nodeId: non-enumerable internal reference
   Object.defineProperty(node, "_nodeId", {
@@ -165,11 +137,7 @@ export function materializeHastNode(reader: HastReader, nodeId: number): HastNod
     case HAST_MDX_FLOW_EXPRESSION:
     case HAST_MDX_TEXT_EXPRESSION:
       Object.defineProperties(node, {
-        // Substitute U+F002 phantom-space sentinels (see PHANTOM_SPACE in
-        // satteri-pulldown-cmark/src/mdx.rs) back to regular spaces — mdast
-        // and hast keep phantoms in the value field; only the compile path
-        // drops them.
-        value: lazyProp("value", () => reader.getTextValue(nodeId).replaceAll("", " ")),
+        value: lazyProp("value", () => restorePhantomSpaces(reader.getTextValue(nodeId))),
       });
       break;
 
@@ -207,6 +175,6 @@ export function materializeHastNode(reader: HastReader, nodeId: number): HastNod
 /**
  * Materialize the full HAST tree from root (nodeId=0).
  */
-export function materializeHastTree(reader: HastReader): HastNode {
-  return materializeHastNode(reader, 0);
+export function materializeHastTree(reader: HastReader): Root {
+  return materializeHastNode(reader, 0) as Root;
 }

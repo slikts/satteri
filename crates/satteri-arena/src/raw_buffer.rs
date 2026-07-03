@@ -1,6 +1,6 @@
 //! Raw buffer export for zero-copy transfer.
 //!
-//! Wire format: `[Header][nodes...][children u32s][type_data bytes][source UTF-8][node_data entries]`
+//! Wire format: `[Header][nodes...][children u32s][type_data bytes][string_pool UTF-8][node_data entries]`
 //!
 //! The header carries a `kind` u32 right after `magic` so JS readers can
 //! assert the buffer matches the kind they expect (`MdastReader` vs
@@ -14,19 +14,15 @@
 //! Each entry is `[node_id: u32 LE][data_len: u32 LE][bytes...]` and
 //! entries are written in ascending node_id order.
 
+use std::mem::offset_of;
+
 use crate::arena::Arena;
+use crate::generated::layout::header;
 use crate::kind::ArenaKind;
 use crate::line_index::LineIndex;
-use crate::node::NODE_STRUCT_SIZE;
+use crate::node::{ArenaNode, NODE_STRUCT_SIZE};
 
-const BUFFER_MAGIC: [u8; 4] = *b"MDAR";
-
-// Header field sizes (all u32 LE):
-//   magic(4) + kind(4) + node_struct_size(4) + node_count(4) + nodes_offset(4)
-//   + children_count(4) + children_offset(4) + type_data_len(4) + type_data_offset(4)
-//   + source_len(4) + source_offset(4) + node_data_count(4) + node_data_offset(4)
-//   = 52 bytes
-const HEADER_SIZE: usize = 52;
+pub(crate) const BUFFER_MAGIC: [u8; 4] = *b"MDAR";
 
 impl<K: ArenaKind> Arena<K> {
     /// Serialize to a flat byte buffer:
@@ -35,7 +31,7 @@ impl<K: ArenaKind> Arena<K> {
         let nodes_bytes = self.nodes.len() * NODE_STRUCT_SIZE;
         let children_bytes = self.children.len() * 4;
         let type_data_bytes = self.type_data.len();
-        let source_bytes = self.source.len();
+        let string_pool_bytes = self.string_pool.len();
 
         // Sort node_data entries by node_id for deterministic output.
         let mut node_data_entries: Vec<(u32, &Vec<u8>)> =
@@ -47,29 +43,33 @@ impl<K: ArenaKind> Arena<K> {
             .map(|(_, v)| 4 /* id */ + 4 /* len */ + v.len())
             .sum();
 
-        let nodes_offset = HEADER_SIZE as u32;
+        let nodes_offset = header::SIZE as u32;
         let children_offset = nodes_offset + nodes_bytes as u32;
         let type_data_offset = children_offset + children_bytes as u32;
-        let source_offset = type_data_offset + type_data_bytes as u32;
-        let node_data_offset = source_offset + source_bytes as u32;
+        let string_pool_offset = type_data_offset + type_data_bytes as u32;
+        let node_data_offset = string_pool_offset + string_pool_bytes as u32;
 
         let total = node_data_offset as usize + node_data_section_bytes;
         let mut buf = Vec::with_capacity(total);
 
-        // Write header fields as little-endian u32s.
-        buf.extend_from_slice(&BUFFER_MAGIC);
-        buf.extend_from_slice(&(K::KIND_TAG as u32).to_le_bytes());
-        buf.extend_from_slice(&(NODE_STRUCT_SIZE as u32).to_le_bytes());
-        buf.extend_from_slice(&(self.nodes.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&nodes_offset.to_le_bytes());
-        buf.extend_from_slice(&(self.children.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&children_offset.to_le_bytes());
-        buf.extend_from_slice(&(self.type_data.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&type_data_offset.to_le_bytes());
-        buf.extend_from_slice(&(self.source.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&source_offset.to_le_bytes());
-        buf.extend_from_slice(&node_data_count.to_le_bytes());
-        buf.extend_from_slice(&node_data_offset.to_le_bytes());
+        // Header fields (little-endian u32s) at the generated layout offsets,
+        // so the JS readers' generated `HEADER` table reads the same bytes.
+        let mut hdr = [0u8; header::SIZE];
+        let mut put = |off: usize, v: u32| hdr[off..off + 4].copy_from_slice(&v.to_le_bytes());
+        put(header::MAGIC, u32::from_le_bytes(BUFFER_MAGIC));
+        put(header::KIND, K::KIND_TAG as u32);
+        put(header::NODE_STRUCT_SIZE, NODE_STRUCT_SIZE as u32);
+        put(header::NODE_COUNT, self.nodes.len() as u32);
+        put(header::NODES_OFFSET, nodes_offset);
+        put(header::CHILDREN_COUNT, self.children.len() as u32);
+        put(header::CHILDREN_OFFSET, children_offset);
+        put(header::TYPE_DATA_LEN, self.type_data.len() as u32);
+        put(header::TYPE_DATA_OFFSET, type_data_offset);
+        put(header::STRING_POOL_LEN, self.string_pool.len() as u32);
+        put(header::STRING_POOL_OFFSET, string_pool_offset);
+        put(header::NODE_DATA_COUNT, node_data_count);
+        put(header::NODE_DATA_OFFSET, node_data_offset);
+        buf.extend_from_slice(&hdr);
 
         // The arena tracks `start_offset`/`end_offset` as **byte** offsets
         // (the parser works in bytes). remark/micromark report code-point
@@ -81,16 +81,17 @@ impl<K: ArenaKind> Arena<K> {
             unsafe { std::slice::from_raw_parts(self.nodes.as_ptr() as *const u8, nodes_bytes) };
         let nodes_buf_start = buf.len();
         buf.extend_from_slice(nodes_slice);
-        if !self.source.is_ascii() {
-            // ArenaNode field offsets are fixed by `#[repr(C)]`:
-            // start_offset @ 12, end_offset @ 16.
-            const START_OFF_FIELD: usize = 12;
-            const END_OFF_FIELD: usize = 16;
+        if !self.string_pool.is_ascii() {
+            const START_OFF_FIELD: usize = offset_of!(ArenaNode, start_offset);
+            const END_OFF_FIELD: usize = offset_of!(ArenaNode, end_offset);
             let cached = self.cp_offsets.len() == self.nodes.len();
             if cached {
                 for (i, &(cp_start, cp_end)) in self.cp_offsets.iter().enumerate() {
                     let node = &self.nodes[i];
-                    if node.start_line == 0 && node.start_offset == 0 {
+                    // A zero start line marks a synthesized node with no source
+                    // range (lines are 1-based), even when the rebuild left it a
+                    // non-zero spliced offset — nothing to convert.
+                    if node.start_line == 0 {
                         continue;
                     }
                     let off = nodes_buf_start + i * NODE_STRUCT_SIZE;
@@ -103,10 +104,13 @@ impl<K: ArenaKind> Arena<K> {
                 // Fallback: no precomputed cache (e.g. arena assembled
                 // outside `arena_build`, or after plugin mutation). Build
                 // a one-shot LineIndex and convert per node.
-                let line_index = LineIndex::from_source(&self.source);
+                let line_index = LineIndex::from_source(&self.string_pool);
                 let mut cursor = line_index.cursor();
                 for (i, node) in self.nodes.iter().enumerate() {
-                    if node.start_line == 0 && node.start_offset == 0 {
+                    // A zero start line marks a synthesized node with no source
+                    // range (lines are 1-based), even when the rebuild left it a
+                    // non-zero spliced offset — nothing to convert.
+                    if node.start_line == 0 {
                         continue;
                     }
                     let cp_start = cursor.byte_to_cp_offset(node.start_offset);
@@ -131,7 +135,7 @@ impl<K: ArenaKind> Arena<K> {
         buf.extend_from_slice(children_slice);
 
         buf.extend_from_slice(&self.type_data);
-        buf.extend_from_slice(self.source.as_bytes());
+        buf.extend_from_slice(self.string_pool.as_bytes());
 
         // node_data entries: [id:u32][len:u32][bytes...]
         for (id, data) in node_data_entries {
