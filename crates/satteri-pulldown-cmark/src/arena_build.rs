@@ -13,6 +13,7 @@ use satteri_ast::mdast::{encode_mdx_jsx_element_data, ExpressionData};
 use satteri_ast::shared::{
     MDX_ATTR_BOOLEAN_PROP, MDX_ATTR_EXPRESSION_PROP, MDX_ATTR_LITERAL_PROP, MDX_ATTR_SPREAD,
 };
+use std::collections::HashMap;
 
 #[cfg(feature = "mdx")]
 use crate::parse::JsxAttr;
@@ -88,13 +89,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     builder.open_node(MdastNodeType::Root as u8);
     let (end_line, end_col) = cursor.offset_to_line_col(source.len() as u32);
     builder.set_position_current(0, source.len() as u32, 1, 1, end_line, end_col);
-    if options.contains(Options::ENABLE_LOGSEQ) {
+    let logseq_root_id = if options.contains(Options::ENABLE_LOGSEQ) {
         let root_id = builder.current_node_id();
-        builder.arena_mut().set_node_data(
-            root_id,
-            b"{\"logseq\":{\"kind\":\"block\",\"role\":\"page\"}}".to_vec(),
-        );
-    }
+        set_logseq_block_data(&mut builder, root_id, Some("page"), None);
+        Some(root_id)
+    } else {
+        None
+    };
 
     // Accumulation buffers for special container→leaf conversions.
     let mut html_block_buf: Option<String> = None;
@@ -110,6 +111,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     let mut jsx_stack: Vec<(String, u32, bool)> = Vec::new();
     let mut mdx_errors: Vec<(usize, String)> = Vec::new();
     let mut paragraph_open_depth: Vec<usize> = Vec::new();
+    let mut logseq_list_item_stack: Vec<u32> = Vec::new();
+    let mut logseq_owner_properties: HashMap<u32, Vec<LogseqPropertyEntry>> = HashMap::new();
     // jsx_stack length snapshot taken when a structural container
     // (blockquote, list item, container directive) opens. When the
     // container closes, any JSX entry pushed inside it that's still on
@@ -491,6 +494,9 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             cont_end_line,
                             cont_end_col,
                         );
+                        if options.contains(Options::ENABLE_LOGSEQ) {
+                            logseq_list_item_stack.pop();
+                        }
                         builder.close_node();
                     }
                     ItemBody::List(_is_tight, _, _) => {
@@ -697,6 +703,44 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             cont_end_line,
                             cont_end_col,
                         );
+                        if options.contains(Options::ENABLE_LOGSEQ)
+                            && matches!(item.body, ItemBody::Paragraph | ItemBody::TightParagraph)
+                        {
+                            let paragraph_id = builder.current_node_id();
+                            if let Some(properties) =
+                                parse_logseq_property_group(source, orig_start, cont_end)
+                            {
+                                set_logseq_property_group_data(
+                                    &mut builder,
+                                    paragraph_id,
+                                    &properties,
+                                );
+                                let owner_id =
+                                    logseq_list_item_stack.last().copied().or_else(|| {
+                                        if source[..orig_start as usize].trim().is_empty() {
+                                            logseq_root_id
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                if let Some(owner_id) = owner_id {
+                                    let entries =
+                                        logseq_owner_properties.entry(owner_id).or_default();
+                                    entries.extend(properties);
+                                    let role = if Some(owner_id) == logseq_root_id {
+                                        Some("page")
+                                    } else {
+                                        None
+                                    };
+                                    set_logseq_block_data(
+                                        &mut builder,
+                                        owner_id,
+                                        role,
+                                        Some(entries),
+                                    );
+                                }
+                            }
+                        }
                         builder.close_node();
                     }
                 }
@@ -958,10 +1002,8 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                         builder.set_data_current(&ListItemData { checked: 2, spread }.to_bytes());
                         if options.contains(Options::ENABLE_LOGSEQ) {
                             let item_id = builder.current_node_id();
-                            builder.arena_mut().set_node_data(
-                                item_id,
-                                b"{\"logseq\":{\"kind\":\"block\"}}".to_vec(),
-                            );
+                            set_logseq_block_data(&mut builder, item_id, None, None);
+                            logseq_list_item_stack.push(item_id);
                         }
                         container_jsx_snapshot.push((MdastNodeType::ListItem, jsx_stack.len()));
                         inner.tree.push();
@@ -2143,6 +2185,202 @@ fn reference_kind(link_type: LinkType) -> Option<u8> {
         LinkType::Shortcut | LinkType::ShortcutUnknown => Some(0),
         _ => None,
     }
+}
+
+#[derive(Clone)]
+struct LogseqPropertyEntry {
+    key: String,
+    value: String,
+    start: u32,
+    end: u32,
+    key_start: u32,
+    key_end: u32,
+    value_start: u32,
+    value_end: u32,
+}
+
+fn parse_logseq_property_group(
+    source: &str,
+    start: u32,
+    end: u32,
+) -> Option<Vec<LogseqPropertyEntry>> {
+    let bytes = source.as_bytes();
+    let mut offset = start as usize;
+    let end = end as usize;
+    let mut entries = Vec::new();
+
+    while offset < end {
+        let line_start = offset;
+        let mut line_end = offset;
+        while line_end < end && !matches!(bytes[line_end], b'\n' | b'\r') {
+            line_end += 1;
+        }
+
+        let mut next_offset = line_end;
+        if next_offset < end {
+            if bytes[next_offset] == b'\r'
+                && next_offset + 1 < end
+                && bytes[next_offset + 1] == b'\n'
+            {
+                next_offset += 2;
+            } else {
+                next_offset += 1;
+            }
+        }
+
+        let mut property_start = line_start;
+        while property_start < line_end && matches!(bytes[property_start], b' ' | b'\t') {
+            property_start += 1;
+        }
+        if property_start == line_end {
+            offset = next_offset;
+            continue;
+        }
+
+        entries.push(parse_logseq_property_line(
+            source,
+            property_start,
+            line_end,
+        )?);
+        offset = next_offset;
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+fn parse_logseq_property_line(
+    source: &str,
+    start: usize,
+    end: usize,
+) -> Option<LogseqPropertyEntry> {
+    let bytes = source.as_bytes();
+    let delimiter = bytes[start..end]
+        .windows(2)
+        .position(|window| window == b"::")
+        .map(|pos| start + pos)?;
+
+    let mut key_start = start;
+    while key_start < delimiter && matches!(bytes[key_start], b' ' | b'\t') {
+        key_start += 1;
+    }
+    let mut key_end = delimiter;
+    while key_end > key_start && matches!(bytes[key_end - 1], b' ' | b'\t') {
+        key_end -= 1;
+    }
+    if key_start == key_end {
+        return None;
+    }
+    if !bytes[key_start..key_end]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'/'))
+    {
+        return None;
+    }
+
+    let mut value_start = delimiter + 2;
+    if value_start < end && bytes[value_start] == b' ' {
+        value_start += 1;
+    }
+
+    Some(LogseqPropertyEntry {
+        key: source[key_start..key_end].to_string(),
+        value: source[value_start..end].to_string(),
+        start: start as u32,
+        end: end as u32,
+        key_start: key_start as u32,
+        key_end: key_end as u32,
+        value_start: value_start as u32,
+        value_end: end as u32,
+    })
+}
+
+fn set_logseq_block_data(
+    builder: &mut ArenaBuilder<Mdast>,
+    node_id: u32,
+    role: Option<&str>,
+    properties: Option<&[LogseqPropertyEntry]>,
+) {
+    let mut buf = Vec::with_capacity(96);
+    buf.extend_from_slice(b"{\"logseq\":{\"kind\":\"block\"");
+    if let Some(role) = role {
+        buf.extend_from_slice(b",\"role\":");
+        push_json_string(role, &mut buf);
+    }
+    if let Some(properties) = properties {
+        buf.extend_from_slice(b",\"propertiesDerived\":true,\"properties\":");
+        push_logseq_properties(properties, &mut buf);
+    }
+    buf.extend_from_slice(b"}}");
+    builder.arena_mut().set_node_data(node_id, buf);
+}
+
+fn set_logseq_property_group_data(
+    builder: &mut ArenaBuilder<Mdast>,
+    node_id: u32,
+    properties: &[LogseqPropertyEntry],
+) {
+    let mut buf = Vec::with_capacity(128);
+    buf.extend_from_slice(
+        b"{\"logseq\":{\"kind\":\"propertyGroup\",\"authority\":\"source\",\"properties\":",
+    );
+    push_logseq_properties(properties, &mut buf);
+    buf.extend_from_slice(b"}}");
+    builder.arena_mut().set_node_data(node_id, buf);
+}
+
+fn push_logseq_properties(properties: &[LogseqPropertyEntry], out: &mut Vec<u8>) {
+    out.push(b'[');
+    for (index, property) in properties.iter().enumerate() {
+        if index > 0 {
+            out.push(b',');
+        }
+        out.extend_from_slice(b"{\"role\":\"property\",\"key\":");
+        push_json_string(&property.key, out);
+        out.extend_from_slice(b",\"value\":");
+        push_json_string(&property.value, out);
+        out.extend_from_slice(b",\"start\":");
+        push_u32(property.start, out);
+        out.extend_from_slice(b",\"end\":");
+        push_u32(property.end, out);
+        out.extend_from_slice(b",\"keyStart\":");
+        push_u32(property.key_start, out);
+        out.extend_from_slice(b",\"keyEnd\":");
+        push_u32(property.key_end, out);
+        out.extend_from_slice(b",\"valueStart\":");
+        push_u32(property.value_start, out);
+        out.extend_from_slice(b",\"valueEnd\":");
+        push_u32(property.value_end, out);
+        out.push(b'}');
+    }
+    out.push(b']');
+}
+
+fn push_u32(value: u32, out: &mut Vec<u8>) {
+    out.extend_from_slice(value.to_string().as_bytes());
+}
+
+fn push_json_string(value: &str, out: &mut Vec<u8>) {
+    out.push(b'"');
+    for byte in value.bytes() {
+        match byte {
+            b'"' => out.extend_from_slice(b"\\\""),
+            b'\\' => out.extend_from_slice(b"\\\\"),
+            b'\n' => out.extend_from_slice(b"\\n"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            byte if byte < 0x20 => {
+                out.extend_from_slice(b"\\u00");
+                out.push(b"0123456789abcdef"[(byte >> 4) as usize]);
+                out.push(b"0123456789abcdef"[(byte & 0xf) as usize]);
+            }
+            byte => out.push(byte),
+        }
+    }
+    out.push(b'"');
 }
 
 /// mdast identifier normalization. Matches remark's pipeline exactly:

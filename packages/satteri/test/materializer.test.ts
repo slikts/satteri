@@ -149,7 +149,10 @@ test("wikilinks are gated by the wikilinks feature", () => {
   if (plain.type !== "root") throw new Error("expected root");
   const plainParagraph = plain.children[0]!;
   if (plainParagraph.type !== "paragraph") throw new Error("expected paragraph");
-  expect(plainParagraph.children[0]).toMatchObject({ type: "text", value: "[[" });
+  expect(plainParagraph.children[0]).toMatchObject({
+    type: "text",
+    value: "[[bracketed prose]]",
+  });
 
   const linked = materializeMdastTree(
     new MdastReader(serializeHandle(createMdastHandle("[[page]]", { wikilinks: true }))),
@@ -158,6 +161,178 @@ test("wikilinks are gated by the wikilinks feature", () => {
   const linkedParagraph = linked.children[0]!;
   if (linkedParagraph.type !== "paragraph") throw new Error("expected paragraph");
   expect(linkedParagraph.children[0]).toMatchObject({ type: "link", url: "page" });
+});
+
+test("logseq page properties annotate the property group and root summary", () => {
+  const source = "description:: hello\n";
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle(source, { logseq: true }))),
+  );
+  const properties = [
+    {
+      role: "property",
+      key: "description",
+      value: "hello",
+      start: 0,
+      end: 19,
+      keyStart: 0,
+      keyEnd: 11,
+      valueStart: 14,
+      valueEnd: 19,
+    },
+  ];
+
+  expect(root.data).toEqual({
+    logseq: { kind: "block", role: "page", propertiesDerived: true, properties },
+  });
+  if (root.type !== "root") throw new Error("expected root");
+  expect(root.children[0]!.data).toEqual({
+    logseq: { kind: "propertyGroup", authority: "source", properties },
+  });
+});
+
+test("logseq property annotations are gated by the logseq feature", () => {
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("description:: hello\n"))),
+  );
+  expect(root.data).toBeUndefined();
+  if (root.type !== "root") throw new Error("expected root");
+  expect(root.children[0]!.data).toBeUndefined();
+});
+
+test("logseq property values stay syntactic while inline refs still parse", () => {
+  const source = "is-a:: [[layer]]\n";
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle(source, { logseq: true, wikilinks: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[0]!;
+  if (paragraph.type !== "paragraph") throw new Error("expected paragraph");
+
+  expect(paragraph.data).toEqual({
+    logseq: {
+      kind: "propertyGroup",
+      authority: "source",
+      properties: [
+        {
+          role: "property",
+          key: "is-a",
+          value: "[[layer]]",
+          start: 0,
+          end: 16,
+          keyStart: 0,
+          keyEnd: 4,
+          valueStart: 7,
+          valueEnd: 16,
+        },
+      ],
+    },
+  });
+  expect(paragraph.children[1]).toMatchObject({ type: "link", url: "layer" });
+});
+
+test("logseq duplicate property keys are preserved in source order", () => {
+  const source = "foo:: one\nfoo:: two\n";
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle(source, { logseq: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[0]!;
+  expect(paragraph.data?.logseq.properties).toMatchObject([
+    { key: "foo", value: "one", start: 0, end: 9 },
+    { key: "foo", value: "two", start: 10, end: 19 },
+  ]);
+  expect(root.data?.logseq.properties).toMatchObject([
+    { key: "foo", value: "one" },
+    { key: "foo", value: "two" },
+  ]);
+});
+
+test("logseq empty property values are recorded", () => {
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("key::\n", { logseq: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[0]!;
+  expect(paragraph.data?.logseq.properties[0]).toMatchObject({
+    key: "key",
+    value: "",
+    start: 0,
+    end: 5,
+    keyStart: 0,
+    keyEnd: 3,
+    valueStart: 5,
+    valueEnd: 5,
+  });
+});
+
+test("logseq list item properties attach to the owning list item", () => {
+  const source = "- child:: value\n- other\n";
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle(source, { logseq: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  const list = root.children[0]!;
+  if (list.type !== "list") throw new Error("expected list");
+  const child = list.children[0]!;
+  const other = list.children[1]!;
+
+  expect(child.data?.logseq).toMatchObject({
+    kind: "block",
+    propertiesDerived: true,
+    properties: [{ key: "child", value: "value", start: 2, end: 15 }],
+  });
+  expect(other.data).toEqual({ logseq: { kind: "block" } });
+  expect(root.data).toEqual({ logseq: { kind: "block", role: "page" } });
+});
+
+test("logseq orphan property paragraphs keep local metadata only", () => {
+  const source = "- block\n\norphan:: value\n";
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle(source, { logseq: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[1]!;
+
+  expect(root.data).toEqual({ logseq: { kind: "block", role: "page" } });
+  expect(paragraph.data?.logseq).toMatchObject({
+    kind: "propertyGroup",
+    authority: "source",
+    properties: [{ key: "orphan", value: "value" }],
+  });
+});
+
+test("logseq property detection ignores inline code", () => {
+  const root = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("`key:: value`\n", { logseq: true }))),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  expect(root.children[0]!.data).toBeUndefined();
+});
+
+test("logseq property detection ignores fenced code", () => {
+  const root = materializeMdastTree(
+    new MdastReader(
+      serializeHandle(createMdastHandle("```\nkey:: value\n```\n", { logseq: true })),
+    ),
+  );
+  if (root.type !== "root") throw new Error("expected root");
+  expect(root.children[0]!.type).toBe("code");
+  expect(root.children[0]!.data).toBeUndefined();
+});
+
+test("logseq property detection rejects non-property keys", () => {
+  const prose = materializeMdastTree(
+    new MdastReader(
+      serializeHandle(createMdastHandle("not a property :: value\n", { logseq: true })),
+    ),
+  );
+  const tagKey = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("#tag:: value\n", { logseq: true }))),
+  );
+  if (prose.type !== "root" || tagKey.type !== "root") throw new Error("expected roots");
+  expect(prose.children[0]!.data).toBeUndefined();
+  expect(tagKey.children[0]!.data).toBeUndefined();
 });
 
 test("children are lazily evaluated (getter replaced by plain array after access)", () => {
