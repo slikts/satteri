@@ -105,6 +105,61 @@ test("logseq feature annotates root and list items as blocks", () => {
   expect(nested.children[0]!.data).toEqual({ logseq: { kind: "block" } });
 });
 
+test("logseq tags materialize as annotated links", () => {
+  const source = "#tag #[[page tag]] text\n";
+  const buf = serializeHandle(createMdastHandle(source, { logseq: true })) as Uint8Array;
+  const root = materializeMdastTree(new MdastReader(buf));
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[0]!;
+  if (paragraph.type !== "paragraph") throw new Error("expected paragraph");
+
+  const tag = paragraph.children[0]!;
+  const pageTag = paragraph.children[2]!;
+  expect(tag).toMatchObject({
+    type: "link",
+    url: "tag",
+    title: null,
+    data: { logseq: { kind: "tag" } },
+  });
+  expect(pageTag).toMatchObject({
+    type: "link",
+    url: "page tag",
+    title: null,
+    data: { logseq: { kind: "tag" } },
+  });
+  if (tag.type !== "link" || pageTag.type !== "link") throw new Error("expected links");
+  expect(tag.children[0]).toMatchObject({ type: "text", value: "#tag" });
+  expect(pageTag.children[0]).toMatchObject({ type: "text", value: "#[[page tag]]" });
+});
+
+test("logseq tags are gated by the logseq feature", () => {
+  const buf = serializeHandle(createMdastHandle("#tag #5 bolt")) as Uint8Array;
+  const root = materializeMdastTree(new MdastReader(buf));
+  if (root.type !== "root") throw new Error("expected root");
+  const paragraph = root.children[0]!;
+  if (paragraph.type !== "paragraph") throw new Error("expected paragraph");
+  expect(paragraph.children).toHaveLength(1);
+  expect(paragraph.children[0]).toMatchObject({ type: "text", value: "#tag #5 bolt" });
+});
+
+test("wikilinks are gated by the wikilinks feature", () => {
+  const plain = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("[[bracketed prose]]"))),
+  );
+  if (plain.type !== "root") throw new Error("expected root");
+  const plainParagraph = plain.children[0]!;
+  if (plainParagraph.type !== "paragraph") throw new Error("expected paragraph");
+  expect(plainParagraph.children[0]).toMatchObject({ type: "text", value: "[[" });
+
+  const linked = materializeMdastTree(
+    new MdastReader(serializeHandle(createMdastHandle("[[page]]", { wikilinks: true }))),
+  );
+  if (linked.type !== "root") throw new Error("expected root");
+  const linkedParagraph = linked.children[0]!;
+  if (linkedParagraph.type !== "paragraph") throw new Error("expected paragraph");
+  expect(linkedParagraph.children[0]).toMatchObject({ type: "link", url: "page" });
+});
+
 test("children are lazily evaluated (getter replaced by plain array after access)", () => {
   const { reader } = setup();
   const root = materializeMdastTree(reader);

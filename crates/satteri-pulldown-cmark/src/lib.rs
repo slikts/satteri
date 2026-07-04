@@ -575,6 +575,8 @@ pub enum LinkType {
         /// * `false` - `[[foo]]`
         has_pothole: bool,
     },
+    /// Logseq tag link like `#foo` or `#[[foo bar]]`.
+    Tag,
 }
 
 impl LinkType {
@@ -832,8 +834,10 @@ bitflags::bitflags! {
         const ENABLE_DEFINITION_LIST = 1 << 12;
         const ENABLE_SUPERSCRIPT = 1 << 13;
         const ENABLE_SUBSCRIPT = 1 << 14;
-        /// Obsidian-style Wikilinks.
+        /// Wikilinks.
         const ENABLE_WIKILINKS = 1 << 15;
+        /// Logseq block annotations.
+        const ENABLE_LOGSEQ = 1 << 24;
         /// Directives: container (:::), leaf (::), and text (:) directives.
         const ENABLE_DIRECTIVE = 1 << 16;
         /// MDX: enables JSX elements, expressions, and ESM import/export.

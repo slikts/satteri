@@ -1074,6 +1074,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                                 }
                                 .to_bytes(),
                             );
+                            if matches!(link_type, LinkType::Tag) {
+                                let link_id = builder.current_node_id();
+                                builder.arena_mut().set_node_data(
+                                    link_id,
+                                    b"{\"logseq\":{\"kind\":\"tag\"}}".to_vec(),
+                                );
+                            }
                         }
                         inner.tree.push();
                     }
@@ -2128,7 +2135,7 @@ fn extract_reference_label(source: &str, start: u32, end: u32, kind: u8, is_imag
 
 /// Map a pulldown-cmark `LinkType` to an MDAST reference kind
 /// (0 = shortcut, 1 = collapsed, 2 = full). Returns `None` for link types
-/// that resolve to an inline `link`/`image` (Inline, Autolink, Email, WikiLink).
+/// that resolve to an inline `link`/`image` (Inline, Autolink, Email, WikiLink, Tag).
 fn reference_kind(link_type: LinkType) -> Option<u8> {
     match link_type {
         LinkType::Reference | LinkType::ReferenceUnknown => Some(2),

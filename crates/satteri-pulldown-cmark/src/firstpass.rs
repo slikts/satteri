@@ -2334,6 +2334,24 @@ impl<'a, 'b> FirstPass<'a, 'b> {
 
                     LoopInstruction::ContinueAndSkip(0)
                 }
+                b'#' if self.options.contains(Options::ENABLE_LOGSEQ) => {
+                    let result = try_emit_logseq_tag(
+                        bytes,
+                        ix,
+                        begin_text,
+                        backslash_escaped,
+                        &mut self.tree,
+                        &mut self.allocs,
+                    );
+                    if let Some((new_begin_text, skip)) = result {
+                        begin_text = new_begin_text;
+                        last_inline_emission_end = new_begin_text;
+                        backslash_escaped = false;
+                        LoopInstruction::ContinueAndSkip(skip)
+                    } else {
+                        LoopInstruction::ContinueAndSkip(0)
+                    }
+                }
                 b'h' | b'H' | b'w' | b'W' | b'@' if self.options.contains(Options::ENABLE_GFM) => {
                     // GFM literal autolink: protocol/www/email. Runs during
                     // inline tokenization so URL bytes are consumed before
@@ -4851,6 +4869,73 @@ fn try_emit_gfm_autolink<'a>(
     }
 }
 
+fn try_emit_logseq_tag<'a>(
+    bytes: &'a [u8],
+    ix: usize,
+    begin_text: usize,
+    backslash_escaped: bool,
+    tree: &mut Tree<Item>,
+    allocs: &mut Allocations<'a>,
+) -> Option<(usize, usize)> {
+    if backslash_escaped && begin_text == ix {
+        return None;
+    }
+    if ix > 0 && is_logseq_tag_body_byte(bytes[ix - 1]) {
+        return None;
+    }
+
+    let (end, dest_start, dest_end) = if bytes.get(ix + 1..ix + 3) == Some(b"[[") {
+        let body_start = ix + 3;
+        let mut cursor = body_start;
+        let mut close = None;
+        while cursor + 1 < bytes.len() {
+            if bytes[cursor] == b']' && bytes[cursor + 1] == b']' {
+                close = Some(cursor);
+                break;
+            }
+            cursor += 1;
+        }
+        let close = close?;
+        if close == body_start {
+            return None;
+        }
+        (close + 2, body_start, close)
+    } else {
+        let body_start = ix + 1;
+        let mut end = body_start;
+        while end < bytes.len() && is_logseq_tag_body_byte(bytes[end]) {
+            end += 1;
+        }
+        if end == body_start {
+            return None;
+        }
+        (end, body_start, end)
+    };
+
+    let dest = core::str::from_utf8(&bytes[dest_start..dest_end]).ok()?;
+    let link_ix = allocs.allocate_link(LinkType::Tag, CowStr::from(dest), "".into(), "".into());
+    tree.append_text(begin_text, ix, backslash_escaped);
+    let link_node_ix = tree.append(Item {
+        start: ix,
+        end,
+        body: ItemBody::Link(link_ix),
+    });
+    let text_child = tree.create_node(Item {
+        start: ix,
+        end,
+        body: ItemBody::Text {
+            backslash_escaped: false,
+        },
+    });
+    tree[link_node_ix].child = Some(text_child);
+    let skip = end.saturating_sub(ix + 1);
+    Some((end, skip))
+}
+
+fn is_logseq_tag_body_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'/')
+}
+
 /// True when `pos` sits inside an inline link destination `[label](DEST`
 /// whose closing `)` actually exists — i.e. the link parse will succeed.
 /// In that case micromark's labelEnd resolver consumes the destination
@@ -5837,6 +5922,9 @@ fn special_bytes(options: &Options) -> [bool; 256] {
     if options.contains(Options::ENABLE_DIRECTIVE) {
         bytes[b':' as usize] = true;
     }
+    if options.contains(Options::ENABLE_LOGSEQ) {
+        bytes[b'#' as usize] = true;
+    }
     if options.contains(Options::ENABLE_GFM) {
         // GFM literal autolinks: protocol (h/H), www (w/W), email (@).
         // Fires during inline tokenization so URL bytes are consumed
@@ -6577,6 +6665,9 @@ mod simd {
         if options.has_smart_quotes() {
             add_lookup_byte(&mut lookup, b'"');
             add_lookup_byte(&mut lookup, b'\'');
+        }
+        if options.contains(Options::ENABLE_LOGSEQ) {
+            add_lookup_byte(&mut lookup, b'#');
         }
 
         lookup
