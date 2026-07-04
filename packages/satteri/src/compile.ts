@@ -87,6 +87,7 @@ function featuresToNative(features: Features | undefined): NativeFeaturesPair {
   if (features.superscript !== undefined) result.superscript = features.superscript;
   if (features.subscript !== undefined) result.subscript = features.subscript;
   if (features.wikilinks !== undefined) result.wikilinks = features.wikilinks;
+  if (features.logseq !== undefined) result.logseq = features.logseq;
   if (features.smartPunctuation !== undefined) {
     if (typeof features.smartPunctuation === "object") {
       result.smartPunctuationOptions = features.smartPunctuation;
@@ -366,6 +367,8 @@ export interface Features {
   subscript?: boolean;
   /** Obsidian-style wikilinks (`[[link]]`). Default: false. */
   wikilinks?: boolean;
+  /** Logseq block annotations. Default: false. */
+  logseq?: boolean;
   /**
    * Smart punctuation à la SmartyPants. Default: false.
    *

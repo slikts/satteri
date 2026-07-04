@@ -3,7 +3,7 @@ import { MdastReader } from "../src/mdast/mdast-reader.js";
 import { materializeMdastTree } from "../src/mdast/mdast-materializer.js";
 import type { MdastNode, MdastNodeInternal } from "../src/types.js";
 import { buildHelloWorldBuffer } from "./fixtures.js";
-import { createMdxMdastHandle, serializeHandle } from "../index.js";
+import { createMdastHandle, createMdxMdastHandle, serializeHandle } from "../index.js";
 
 function setup() {
   const buf = buildHelloWorldBuffer();
@@ -83,6 +83,26 @@ test("data is undefined when no data is set", () => {
   const { reader } = setup();
   const root = materializeMdastTree(reader);
   expect(root.data).toBeUndefined();
+});
+
+test("logseq feature annotates root and list items as blocks", () => {
+  const source = "- parent\n  - child\n- sibling\n";
+  const buf = serializeHandle(createMdastHandle(source, { logseq: true })) as Uint8Array;
+  const root = materializeMdastTree(new MdastReader(buf));
+
+  expect(root.data).toEqual({ logseq: { kind: "block", role: "page" } });
+  if (root.type !== "root") throw new Error("expected root");
+
+  const list = root.children[0]!;
+  if (list.type !== "list") throw new Error("expected list");
+  const parent = list.children[0]!;
+  const sibling = list.children[1]!;
+  expect(parent.data).toEqual({ logseq: { kind: "block" } });
+  expect(sibling.data).toEqual({ logseq: { kind: "block" } });
+
+  const nested = parent.children.find((child) => child.type === "list");
+  if (!nested || nested.type !== "list") throw new Error("expected nested list");
+  expect(nested.children[0]!.data).toEqual({ logseq: { kind: "block" } });
 });
 
 test("children are lazily evaluated (getter replaced by plain array after access)", () => {

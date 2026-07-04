@@ -88,6 +88,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
     builder.open_node(MdastNodeType::Root as u8);
     let (end_line, end_col) = cursor.offset_to_line_col(source.len() as u32);
     builder.set_position_current(0, source.len() as u32, 1, 1, end_line, end_col);
+    if options.contains(Options::ENABLE_LOGSEQ) {
+        let root_id = builder.current_node_id();
+        builder.arena_mut().set_node_data(
+            root_id,
+            b"{\"logseq\":{\"kind\":\"block\",\"role\":\"page\"}}".to_vec(),
+        );
+    }
 
     // Accumulation buffers for special container→leaf conversions.
     let mut html_block_buf: Option<String> = None;
@@ -949,6 +956,13 @@ pub fn parse(source: &str, options: Options) -> (Arena<Mdast>, Vec<(usize, Strin
                             start, end, start_line, start_col, end_line, end_col,
                         );
                         builder.set_data_current(&ListItemData { checked: 2, spread }.to_bytes());
+                        if options.contains(Options::ENABLE_LOGSEQ) {
+                            let item_id = builder.current_node_id();
+                            builder.arena_mut().set_node_data(
+                                item_id,
+                                b"{\"logseq\":{\"kind\":\"block\"}}".to_vec(),
+                            );
+                        }
                         container_jsx_snapshot.push((MdastNodeType::ListItem, jsx_stack.len()));
                         inner.tree.push();
                     }
