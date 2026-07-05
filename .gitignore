@@ -6,6 +6,13 @@ perf.data
 perf.data.old
 flamegraph.svg
 dist
+/browser.js
+/index.js
+/index.d.ts
+/webcontainer-fallback.cjs
+/satteri_napi*.node
+/satteri_napi.wasi*.cjs
+/satteri_napi.wasi*.js
 
 # napi-rs generated platform packages
 packages/satteri/npm/
